@@ -17,4 +17,4 @@ python main.py
 ## Status
 Temelji gotovi i testirani: tema, threading sloj, lifecycle stranica,
 glavni prozor sa sidebar navigacijom i animiranim prijelazima.
-Dashboard je zasad placeholder — puna verzija je sljedeći korak.
+Dashboard je zasad placeholder
