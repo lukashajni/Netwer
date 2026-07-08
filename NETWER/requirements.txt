@@ -1,0 +1,5 @@
+PyQt6==6.11.0
+pyqtgraph==0.14.0
+qtawesome
+psutil
+reportlab==4.4.10
