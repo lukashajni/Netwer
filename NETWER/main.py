@@ -86,6 +86,23 @@ def main() -> int:
     app.setOrganizationName("Lukas Hajneman")
     app.setStyleSheet(GLOBAL_QSS)
 
+    # Provjeri kljucnu ovisnost: psutil pokrece resurse, download/upload
+    # i live monitor. Bez njega te funkcije ne rade — javi jasno.
+    try:
+        import psutil  # noqa: F401
+    except ImportError:
+        from PyQt6.QtWidgets import QMessageBox
+        box = QMessageBox()
+        box.setIcon(QMessageBox.Icon.Warning)
+        box.setWindowTitle("NETWER — Missing dependency")
+        box.setText("The 'psutil' library is not installed.")
+        box.setInformativeText(
+            "System Resources, Download/Upload speed and the Live Network "
+            "Monitor need it.\n\nInstall it with:\n    pip install psutil\n\n"
+            "The app will still open, but those features will be empty."
+        )
+        box.exec()
+
     # Font stack: Segoe UI Variable (Win11) -> Segoe UI -> fallback
     font = QFont(Theme.FONT_FAMILY, 10)
     font.setStyleStrategy(QFont.StyleStrategy.PreferAntialias)

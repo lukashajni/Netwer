@@ -59,7 +59,7 @@ def kv_row(key: str, value: str, value_color: str = None, mono: bool = False):
         f"background: transparent;"
     )
     v = QLabel(value)
-    font = Theme.FONT_MONO if mono else Theme.FONT_FAMILY
+    font = Theme.FONT_MONO if mono else Theme.FONT_DATA
     v.setStyleSheet(
         f"color: {value_color or Theme.TEXT_BODY}; font-family: '{font}';"
         f"font-size: {Theme.FONT_SIZE_SMALL}px; background: transparent;"

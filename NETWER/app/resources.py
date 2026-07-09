@@ -15,10 +15,32 @@ imena u _MAP. Tako ako poželimo promijeniti izgled ikone, mijenjamo na
 jednom mjestu.
 """
 
+import os
+
 import qtawesome as qta
 from PyQt6.QtGui import QIcon, QPixmap
+from PyQt6.QtCore import Qt
 
 from app.theme import Theme
+
+
+# Korijen projekta (dvije razine iznad app/resources.py)
+_PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+ASSETS_DIR = os.path.join(_PROJECT_ROOT, "assets")
+LOGO_PATH = os.path.join(ASSETS_DIR, "logo", "netwer_logo.png")
+
+
+def logo_pixmap(size: int = 44) -> QPixmap:
+    """Ucitaj NETWER logo skaliran na zadanu velicinu (glatko)."""
+    pm = QPixmap(LOGO_PATH)
+    if pm.isNull():
+        # Fallback na globus ikonu ako logo nije nadjen
+        return Icons.get("globe", Theme.ACCENT_GLOW).pixmap(size, size)
+    return pm.scaled(
+        size, size,
+        Qt.AspectRatioMode.KeepAspectRatio,
+        Qt.TransformationMode.SmoothTransformation,
+    )
 
 
 class Icons:

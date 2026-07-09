@@ -159,17 +159,29 @@ def get_network_config():
     """Returns the active adapter's IP config as a dict, or {"error": ...}."""
     try:
         if platform.system() == "Windows":
-            ps_cmd = """
+            ps_cmd = r"""
 $c = Get-NetIPConfiguration | Where-Object { $_.IPv4Address -ne $null -and $_.NetAdapter.Status -eq 'Up' } | Select-Object -First 1
 if (-not $c) { Write-Output '{}'; exit }
 $ip      = $c.IPv4Address.IPAddress
 $prefix  = [int]$c.IPv4Address.PrefixLength
 $gw      = if ($c.IPv4DefaultGateway) { $c.IPv4DefaultGateway.NextHop } else { 'N/A' }
-$dns     = if ($c.DNSServer.ServerAddresses) { $c.DNSServer.ServerAddresses[0] } else { 'N/A' }
+$dnsList = @()
+foreach ($d in $c.DNSServer) {
+    if ($d.AddressFamily -eq 2 -and $d.ServerAddresses) {
+        $dnsList += $d.ServerAddresses
+    }
+}
+if ($dnsList.Count -eq 0) {
+    foreach ($d in $c.DNSServer) {
+        if ($d.ServerAddresses) { $dnsList += $d.ServerAddresses }
+    }
+}
+$dnsList = $dnsList | Where-Object { $_ -match '^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$' }
+$dns     = if ($dnsList.Count -gt 0) { ($dnsList -join ', ') } else { 'N/A' }
 $mac     = $c.NetAdapter.MacAddress
 $adapter = $c.InterfaceAlias
 [pscustomobject]@{ ip=$ip; prefix=$prefix; gateway=$gw; dns=$dns; mac=$mac; adapter=$adapter } | ConvertTo-Json
-"""
+"""  # noqa: W605 (regex backslashes are for PowerShell, not Python)
             raw = run_powershell(ps_cmd, timeout=12)
             data = json.loads(raw or "{}")
             if not data:

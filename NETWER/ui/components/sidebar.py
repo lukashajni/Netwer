@@ -11,7 +11,7 @@ from PyQt6.QtWidgets import (
 )
 
 from app.theme import Theme
-from app.resources import Icons
+from app.resources import Icons, logo_pixmap
 
 
 class NavItem(QFrame):
@@ -105,11 +105,10 @@ class Sidebar(QWidget):
         lay.addSpacing(10)
 
     def _build_logo(self, lay: QVBoxLayout) -> None:
-        # Logo: koristi globe ikonu kao placeholder dok korisnik ne posalje
-        # pravi logo (tada samo zamijenimo ovaj QLabel s QPixmap logotipa).
+        # Pravi NETWER logo (gradijent globus, prozirna pozadina).
         logo = QLabel()
         logo.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        logo.setPixmap(Icons.pixmap("globe", 44, Theme.ACCENT_GLOW))
+        logo.setPixmap(logo_pixmap(48))
         logo.setStyleSheet("background: transparent;")
         lay.addWidget(logo)
 

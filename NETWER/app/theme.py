@@ -54,6 +54,9 @@ class Theme:
     # ── Tipografija ────────────────────────────────────────────
     FONT_FAMILY = "Segoe UI Variable Display"  # Windows 11 sistemski font
     FONT_MONO = "Cascadia Code"       # moderni monospace (Win11); fallback Consolas
+    # Za vrijednosti podataka: cistiji, deblji sans (ne monospace).
+    # "Segoe UI Semibold" je siroko dostupan na Win10/11 i djeluje dotjeranije.
+    FONT_DATA = "Segoe UI Semibold"
     FONT_SIZE_TITLE = 22
     FONT_SIZE_HEADING = 15
     FONT_SIZE_BODY = 13

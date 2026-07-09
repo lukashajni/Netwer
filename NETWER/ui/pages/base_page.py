@@ -42,6 +42,7 @@ class BasePage(QWidget):
         super().__init__(parent)
         self.core = core
         self._workers = []  # aktivni workeri ove stranice
+        self._window = None  # referenca na MainWindow (za loading koordinaciju)
 
         self.setStyleSheet(f"background: {Theme.BG_APP};")
 
@@ -75,6 +76,11 @@ class BasePage(QWidget):
             self._root.addWidget(sub)
 
     # ── Upravljanje workerima ──────────────────────────────────
+    def set_window(self, window) -> None:
+        """MainWindow se registrira ovdje da stranica moze javljati
+        napredak ucitavanja (za fullscreen loading screen)."""
+        self._window = window
+
     def register_worker(self, worker) -> None:
         """Registriraj worker da ga on_leave() može automatski zaustaviti.
         Također ga čisti iz liste kad prirodno završi."""
