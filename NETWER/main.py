@@ -20,6 +20,8 @@ from app.theme import Theme
 from core import netwer_core
 from ui.main_window import MainWindow
 from ui.pages.dashboard_page import DashboardPage
+from ui.pages.network_info_page import NetworkInfoPage
+from ui.pages.report_page import ReportPage
 
 
 # Globalni stylesheet — rjesava "crni selektirani" izgled tako sto
@@ -73,7 +75,13 @@ def _register_pages(window: MainWindow) -> None:
     window.register_page(
         "dashboard", "dashboard", DashboardPage(netwer_core), subtitle="Dashboard"
     )
-    # Sljedece: network, wifi, system, ping, ping_stability, ping_sweep,
+    window.register_page(
+        "network", "network", NetworkInfoPage(netwer_core), subtitle="IP, MAC, Adapter"
+    )
+    window.register_page(
+        "report", "report", ReportPage(netwer_core), subtitle="Export PDF"
+    )
+    # Sljedece: wifi, system, ping, ping_stability, ping_sweep,
     # port_scanner, dns, reverse_dns, traceroute, monitor, speedtest,
     # report, settings, about
 

@@ -711,6 +711,88 @@ def list_adapters():
         return {"error": str(e)}
 
 
+def get_adapter_details(adapter_name):
+    """Full IP configuration for ONE named adapter — drives the Network
+    Information page. Returns a dict of fields (ip, mask, gateway, dns,
+    mac, speed, status, dhcp, ...) or {"error": ...}. Windows-only."""
+    if not adapter_name:
+        return {"error": "No adapter name given"}
+    try:
+        # Escape single quotes in the name for PowerShell safety.
+        safe = adapter_name.replace("'", "''")
+        ps_cmd = r"""
+$name = '""" + safe + r"""'
+$ad = Get-NetAdapter -Name $name -ErrorAction SilentlyContinue
+if (-not $ad) { Write-Output '{}'; exit }
+$cfg = Get-NetIPConfiguration -InterfaceAlias $name -ErrorAction SilentlyContinue
+$ipv4 = Get-NetIPAddress -InterfaceAlias $name -AddressFamily IPv4 -ErrorAction SilentlyContinue | Select-Object -First 1
+$ipv6 = Get-NetIPAddress -InterfaceAlias $name -AddressFamily IPv6 -ErrorAction SilentlyContinue | Select-Object -First 1
+$dnsList = @()
+if ($cfg -and $cfg.DNSServer) {
+    foreach ($d in $cfg.DNSServer) {
+        if ($d.ServerAddresses) { $dnsList += $d.ServerAddresses }
+    }
+}
+$dnsList = $dnsList | Where-Object { $_ -match '^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$' }
+$gw = if ($cfg -and $cfg.IPv4DefaultGateway) { $cfg.IPv4DefaultGateway.NextHop } else { '' }
+$prefix = if ($ipv4) { [int]$ipv4.PrefixLength } else { 0 }
+$dhcp = if ($ipv4) { $ipv4.PrefixOrigin } else { '' }
+$linkSpeed = if ($ad.LinkSpeed) { $ad.LinkSpeed } else { '' }
+[pscustomobject]@{
+    name        = $ad.Name
+    description = $ad.InterfaceDescription
+    status      = $ad.Status
+    mac         = $ad.MacAddress
+    link_speed  = $linkSpeed
+    ipv4        = if ($ipv4) { $ipv4.IPAddress } else { '' }
+    ipv6        = if ($ipv6) { $ipv6.IPAddress } else { '' }
+    prefix      = $prefix
+    gateway     = $gw
+    dns         = ($dnsList -join ', ')
+    dhcp        = $dhcp
+    mtu         = $ad.MtuSize
+    virtual     = $ad.Virtual
+} | ConvertTo-Json
+"""  # noqa: W605 (regex backslashes are for PowerShell)
+        raw = run_powershell(ps_cmd, timeout=10)
+        if not raw or raw.strip() == "{}":
+            return {"error": f"Adapter '{adapter_name}' not found"}
+        data = json.loads(raw)
+
+        # Derive subnet mask from prefix length
+        prefix = data.get("prefix", 0)
+        mask = _prefix_to_mask(prefix) if prefix else ""
+
+        return {
+            "name": data.get("name", adapter_name),
+            "description": data.get("description", ""),
+            "status": data.get("status", ""),
+            "mac": data.get("mac", ""),
+            "link_speed": data.get("link_speed", ""),
+            "ipv4": data.get("ipv4", ""),
+            "ipv6": data.get("ipv6", ""),
+            "subnet_mask": mask,
+            "prefix": prefix,
+            "gateway": data.get("gateway", ""),
+            "dns": data.get("dns", ""),
+            "dhcp": "Enabled" if str(data.get("dhcp", "")).lower() == "dhcp" else "Static/Manual",
+            "mtu": data.get("mtu", ""),
+            "virtual": data.get("virtual", False),
+        }
+    except Exception as e:
+        return {"error": str(e)}
+
+
+def _prefix_to_mask(prefix):
+    """Convert CIDR prefix length (e.g. 24) to dotted mask (255.255.255.0)."""
+    try:
+        prefix = int(prefix)
+        mask = (0xffffffff >> (32 - prefix)) << (32 - prefix) if prefix else 0
+        return ".".join(str((mask >> (8 * i)) & 0xff) for i in (3, 2, 1, 0))
+    except (ValueError, TypeError):
+        return ""
+
+
 # ══════════════════════════════════════════
 # NETWORK MONITOR (live download/upload, for both the standalone screen
 # and the dashboard's "Live Network Monitor" + "Interface Traffic" charts)

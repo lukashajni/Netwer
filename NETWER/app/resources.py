@@ -77,6 +77,10 @@ class Icons:
         "warning": "fa6s.triangle-exclamation",
         "error": "fa6s.circle-xmark",
         "globe": "fa6s.globe",
+        "copy": "fa6s.copy",
+        "export": "fa6s.file-export",
+        "refresh": "fa6s.rotate",
+        "save": "fa6s.floppy-disk",
     }
 
     @classmethod
