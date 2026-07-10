@@ -88,7 +88,7 @@ class Icons:
         "dev_tv": "fa6s.tv",
         "dev_nas": "fa6s.hard-drive",
         "dev_printer": "fa6s.print",
-        "dev_router": "fa6s.wifi",
+        "dev_router": "mdi.router-wireless",
         "dev_console": "fa6s.gamepad",
         "dev_iot": "fa6s.lightbulb",
         "dev_generic": "fa6s.microchip",

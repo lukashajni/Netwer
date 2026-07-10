@@ -103,7 +103,10 @@ class DashboardPage(BasePage):
         row = QHBoxLayout()
         row.setSpacing(Theme.GAP)
 
+        MIDDLE_HEIGHT = 340  # fixed height so left and right columns align
+
         monitor_card = Card("Live Network Monitor", "monitor")
+        monitor_card.setFixedHeight(MIDDLE_HEIGHT)
         # Adapter selector in the card header (right side)
         from PyQt6.QtWidgets import QComboBox
         self.adapter_combo = QComboBox()
@@ -121,9 +124,16 @@ class DashboardPage(BasePage):
         self.adapter_combo.currentIndexChanged.connect(self._on_adapter_changed)
         monitor_card.header_layout.addWidget(self.adapter_combo)
 
+        # Legend row (Download = blue, Upload = purple)
+        legend = QHBoxLayout()
+        legend.setSpacing(16)
+        legend.addWidget(self._legend_item("Download", Theme.ACCENT))
+        legend.addWidget(self._legend_item("Upload", Theme.ACCENT_PURPLE))
+        legend.addStretch()
+        monitor_card.content_layout.addLayout(legend)
+
         self.chart = LiveChart(max_points=60)
-        self.chart.setMinimumHeight(200)
-        monitor_card.content_layout.addWidget(self.chart)
+        monitor_card.content_layout.addWidget(self.chart, 1)
 
         # Small label showing which adapter is currently monitored
         self.adapter_status = QLabel("Monitoring: detecting…")
@@ -149,7 +159,6 @@ class DashboardPage(BasePage):
         self.wifi_card = Card("WiFi", "wifi")
         wifi_body = QHBoxLayout()
         wifi_body.setSpacing(10)
-        # Left: the key/value rows
         wifi_left = QVBoxLayout()
         wifi_left.setSpacing(6)
         self._wifi_values = {}
@@ -158,30 +167,51 @@ class DashboardPage(BasePage):
             self._wifi_values[key] = val_lbl
             wifi_left.addWidget(container)
         wifi_body.addLayout(wifi_left, 1)
-        # Right: the visual signal indicator
         from ui.widgets.wifi_signal import WiFiSignal
-        self.wifi_signal = WiFiSignal(80)
+        self.wifi_signal = WiFiSignal(72)
         self.wifi_signal.set_disconnected()
         wifi_body.addWidget(self.wifi_signal, 0, Qt.AlignmentFlag.AlignCenter)
         self.wifi_card.content_layout.addLayout(wifi_body)
         right_col.addWidget(self.wifi_card)
 
-        # Network Map topology (fills the space, like the mockup)
-        from ui.widgets.network_map import NetworkMap
-        self.map_card = Card("Network Map", "network")
-        self.network_map = NetworkMap()
-        self.map_card.content_layout.addWidget(self.network_map)
-        right_col.addWidget(self.map_card)
-        right_col.addStretch()
-
         row.addLayout(right_col, 2)
         self._grid.addLayout(row)
+
+    def _legend_item(self, text, color):
+        """A small colored dot + label for the chart legend."""
+        w = QWidget()
+        w.setStyleSheet("background: transparent;")
+        lay = QHBoxLayout(w)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(6)
+        dot = QLabel()
+        dot.setFixedSize(10, 10)
+        dot.setStyleSheet(
+            f"background: {color}; border-radius: 5px;")
+        lay.addWidget(dot)
+        lbl = QLabel(text)
+        lbl.setStyleSheet(
+            f"color: {Theme.TEXT_SECONDARY}; font-size: {Theme.FONT_SIZE_TINY}px;"
+            f"background: transparent;")
+        lay.addWidget(lbl)
+        return w
 
     def _build_bottom_row(self):
         row = QHBoxLayout()
         row.setSpacing(Theme.GAP)
 
+        BOTTOM_HEIGHT = 250
+
+        # Network Map (moved here from the middle column; more room)
+        from ui.widgets.network_map import NetworkMap
+        self.map_card = Card("Network Map", "network")
+        self.map_card.setFixedHeight(BOTTOM_HEIGHT)
+        self.network_map = NetworkMap()
+        self.map_card.content_layout.addWidget(self.network_map)
+        row.addWidget(self.map_card, 2)
+
         self.devices_card = Card("Top Devices", "devices")
+        self.devices_card.setFixedHeight(BOTTOM_HEIGHT)
         self._devices_container = QVBoxLayout()
         self._devices_container.setSpacing(4)
         self.devices_card.content_layout.addLayout(self._devices_container)
@@ -192,9 +222,11 @@ class DashboardPage(BasePage):
         )
         self._devices_placeholder.hide()
         self._devices_container.addWidget(self._devices_placeholder)
-        row.addWidget(self.devices_card, 1)
+        self._devices_container.addStretch()
+        row.addWidget(self.devices_card, 2)
 
         self.resources_card = Card("System Resources", "resources")
+        self.resources_card.setFixedHeight(BOTTOM_HEIGHT)
         gauges = QHBoxLayout()
         gauges.setSpacing(8)
         self.gauge_cpu = Gauge("CPU", Theme.ACCENT)
@@ -203,7 +235,8 @@ class DashboardPage(BasePage):
         for g in (self.gauge_cpu, self.gauge_ram, self.gauge_disk):
             gauges.addWidget(g)
         self.resources_card.content_layout.addLayout(gauges)
-        row.addWidget(self.resources_card, 1)
+        self.resources_card.content_layout.addStretch()
+        row.addWidget(self.resources_card, 2)
 
         self._grid.addLayout(row)
 

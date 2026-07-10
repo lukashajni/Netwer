@@ -24,7 +24,7 @@ def collect(core, sections):
     if "network" in sections or "connectivity" in sections:
         eth = core.get_ethernet_info()
         if isinstance(eth, dict) and "error" not in eth:
-            data["network"] = {
+            net = {
                 "name": eth.get("adapter", ""),
                 "description": "",
                 "ipv4": eth.get("ip", ""),
@@ -36,6 +36,18 @@ def collect(core, sections):
                 "dhcp": "",
                 "link_speed": "",
             }
+            # Enrich with full adapter details (description, DHCP, link speed)
+            adapter_name = eth.get("adapter", "")
+            if adapter_name and hasattr(core, "get_adapter_details"):
+                details = core.get_adapter_details(adapter_name)
+                if isinstance(details, dict) and "error" not in details:
+                    net["description"] = details.get("description", "")
+                    net["dhcp"] = details.get("dhcp", "")
+                    net["link_speed"] = details.get("link_speed", "")
+                    # Prefer detailed subnet if base was empty
+                    if not net["subnet_mask"]:
+                        net["subnet_mask"] = details.get("subnet_mask", "")
+            data["network"] = net
 
     # System information
     if "system" in sections:

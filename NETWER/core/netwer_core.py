@@ -524,10 +524,13 @@ def _get_mac_for_ip(ip):
 
 
 def ping_sweep_stream(timeout_ms=150):
-    """Generator: scans the local /24 range. Yields progress + per-host
-    results, then a final summary. This is the same scan used to power
-    Ping Sweep, Top Devices, and Network Map — those three just format
-    the same `host` dicts differently on the frontend."""
+    """Generator: scans the local /24 range in PARALLEL (like Advanced IP
+    Scanner / Angry IP Scanner). Yields per-host results as they come in,
+    then a final summary. Powers Ping Sweep, Top Devices, and Network Map.
+
+    Parallel scanning cuts a full /24 sweep from ~60s (sequential) down to
+    a few seconds by pinging many hosts at once via a thread pool.
+    """
     try:
         network, gateway, cfg = _resolve_local_network_prefix()
     except RuntimeError as e:
@@ -536,34 +539,48 @@ def ping_sweep_stream(timeout_ms=150):
 
     yield {"network": network}
 
-    found = 0
-    for i in range(1, 255):
+    import concurrent.futures
+    import queue
+
+    results_q = queue.Queue()
+
+    def probe(i):
         ip = f"{network}.{i}"
         ms = ping_host(ip, timeout_ms)
+        if ms is None:
+            return None
+        try:
+            hostname = socket.gethostbyaddr(ip)[0]
+        except Exception:
+            hostname = "Unknown"
+        mac = _get_mac_for_ip(ip)
+        vendor = lookup_vendor(mac) if mac else "Unknown"
+        return {
+            "online": True,
+            "ip": ip,
+            "hostname": hostname,
+            "mac": mac or "Unknown",
+            "vendor": vendor,
+            "is_gateway": (ip == gateway),
+            "rtt_ms": ms,
+        }
 
-        if i % 16 == 0:
-            yield {"scanned": i}
-
-        if ms is not None:
+    found = 0
+    scanned = 0
+    # 64 workers scan the whole /24 in a few seconds
+    with concurrent.futures.ThreadPoolExecutor(max_workers=64) as pool:
+        futures = {pool.submit(probe, i): i for i in range(1, 255)}
+        for fut in concurrent.futures.as_completed(futures):
+            scanned += 1
+            if scanned % 32 == 0:
+                yield {"scanned": scanned}
             try:
-                hostname = socket.gethostbyaddr(ip)[0]
+                host = fut.result()
             except Exception:
-                hostname = "Unknown"
-
-            mac = _get_mac_for_ip(ip)
-            vendor = lookup_vendor(mac) if mac else "Unknown"
-            is_gateway = (ip == gateway)
-
-            found += 1
-            yield {
-                "online": True,
-                "ip": ip,
-                "hostname": hostname,
-                "mac": mac or "Unknown",
-                "vendor": vendor,
-                "is_gateway": is_gateway,
-                "rtt_ms": ms,
-            }
+                host = None
+            if host:
+                found += 1
+                yield host
 
     yield {"done": True, "found": found, "scanned": 254}
 

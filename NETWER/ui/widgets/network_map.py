@@ -72,10 +72,10 @@ class NetworkMap(QWidget):
         icon_r = 15          # icon half-size
         node_gap = 6         # gap between line end and icon
 
-        # Vertical positions
-        y_internet = 22
-        y_router = h * 0.40
-        y_devices = h - 52
+        # Vertical positions — leave room for the label UNDER each icon
+        y_internet = 24
+        y_router = h * 0.44
+        y_devices = h - 48
 
         line_pen = QPen(QColor(Theme.SUCCESS), 1.5)
         line_pen.setCapStyle(Qt.PenCapStyle.RoundCap)
