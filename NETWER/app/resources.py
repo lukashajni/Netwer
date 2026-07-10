@@ -81,6 +81,17 @@ class Icons:
         "export": "fa6s.file-export",
         "refresh": "fa6s.rotate",
         "save": "fa6s.floppy-disk",
+        # Device types (for Network Map)
+        "dev_pc": "fa6s.desktop",
+        "dev_laptop": "fa6s.laptop",
+        "dev_phone": "fa6s.mobile-screen",
+        "dev_tv": "fa6s.tv",
+        "dev_nas": "fa6s.hard-drive",
+        "dev_printer": "fa6s.print",
+        "dev_router": "fa6s.wifi",
+        "dev_console": "fa6s.gamepad",
+        "dev_iot": "fa6s.lightbulb",
+        "dev_generic": "fa6s.microchip",
     }
 
     @classmethod

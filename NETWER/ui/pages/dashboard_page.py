@@ -57,6 +57,15 @@ class DashboardPage(BasePage):
         self._ping_timer.timeout.connect(self._refresh_internet)
         self._internet_worker = None
 
+        # Live info refresh: re-read WiFi + Network Summary every few seconds
+        # so plugging in a WiFi adapter (or IP changes) shows up immediately,
+        # with no app restart.
+        self._info_timer = QTimer(self)
+        self._info_timer.setInterval(4000)
+        self._info_timer.timeout.connect(self._refresh_info)
+        self._wifi_worker = None
+        self._eth_worker = None
+
         self._loaded_once = False
         self._pending = set()
 
@@ -216,6 +225,7 @@ class DashboardPage(BasePage):
         self._resource_timer.stop()
         self._uptime_timer.stop()
         self._ping_timer.stop()
+        self._info_timer.stop()
         self._monitor_worker = None
         super().on_leave()
 
@@ -254,8 +264,25 @@ class DashboardPage(BasePage):
             self._window.end_loading()
         self._resource_timer.start()
         self._ping_timer.start()
+        self._info_timer.start()
         if self._boot_epoch is not None:
             self._uptime_timer.start()
+
+    def _refresh_info(self):
+        """Periodically re-read WiFi + Ethernet so changes (like plugging in
+        a WiFi adapter) appear live without restarting the app."""
+        if self._wifi_worker is None or not self._wifi_worker.isRunning():
+            w = OneshotWorker(self.core.get_wifi_info)
+            w.result.connect(self._on_wifi)
+            w.error.connect(lambda e: self._wifi_error())
+            self._wifi_worker = w
+            w.start()
+        if self._eth_worker is None or not self._eth_worker.isRunning():
+            w2 = OneshotWorker(self.core.get_ethernet_info)
+            w2.result.connect(self._on_eth)
+            w2.error.connect(lambda e: None)
+            self._eth_worker = w2
+            w2.start()
 
     def _refresh_internet(self):
         if self._internet_worker is not None and self._internet_worker.isRunning():

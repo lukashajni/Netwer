@@ -50,18 +50,22 @@ class ReportPage(BasePage):
         hint = QLabel("Select the sections to include:")
         hint.setStyleSheet(
             f"color: {Theme.TEXT_SECONDARY}; font-size: {Theme.FONT_SIZE_SMALL}px;"
-            f"background: transparent;"
+            f"background: transparent; padding-bottom: 4px;"
         )
         options_card.content_layout.addWidget(hint)
 
+        # Section icons for a nicer look
+        section_icons = {
+            "network": "network",
+            "system": "system",
+            "devices": "devices",
+            "connectivity": "ping",
+        }
         self._checks = {}
         for key in ALL_SECTIONS:
-            cb = QCheckBox(SECTION_LABELS[key])
-            cb.setChecked(True)
-            cb.setStyleSheet(self._checkbox_style())
-            cb.setCursor(Qt.CursorShape.PointingHandCursor)
-            self._checks[key] = cb
-            options_card.content_layout.addWidget(cb)
+            option = self._section_option(key, SECTION_LABELS[key],
+                                          section_icons.get(key, "report"))
+            options_card.content_layout.addWidget(option)
 
         options_card.content_layout.addSpacing(10)
 
@@ -119,12 +123,53 @@ class ReportPage(BasePage):
         self.body_layout.addLayout(row)
 
     # ── Styling ────────────────────────────────────────────────
+    def _section_option(self, key, label, icon_name):
+        """A clickable row with an icon, label, and a checkbox — nicer than
+        a bare checkbox. Clicking anywhere toggles it."""
+        from ui.widgets.card import Card  # not needed; build a frame
+        frame = QFrame()
+        frame.setObjectName("SectOpt")
+        frame.setCursor(Qt.CursorShape.PointingHandCursor)
+        frame.setStyleSheet(
+            f"#SectOpt {{ background: {Theme.BG_ELEVATED};"
+            f"border: 1px solid {Theme.BORDER}; border-radius: 8px; }}"
+            f"#SectOpt:hover {{ border-color: {Theme.ACCENT}; }}"
+            f"#SectOpt QLabel {{ background: transparent; border: none; }}"
+        )
+        lay = QHBoxLayout(frame)
+        lay.setContentsMargins(10, 8, 10, 8)
+        lay.setSpacing(10)
+
+        icon_lbl = QLabel()
+        icon_lbl.setPixmap(Icons.pixmap(icon_name, 15, Theme.ACCENT))
+        lay.addWidget(icon_lbl)
+
+        text = QLabel(label)
+        text.setStyleSheet(
+            f"color: {Theme.TEXT_BODY}; font-size: {Theme.FONT_SIZE_SMALL}px;"
+        )
+        lay.addWidget(text)
+        lay.addStretch()
+
+        cb = QCheckBox()
+        cb.setChecked(True)
+        cb.setStyleSheet(self._checkbox_style())
+        cb.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._checks[key] = cb
+        lay.addWidget(cb)
+
+        # Click anywhere on the row toggles the checkbox
+        def toggle(event):
+            cb.setChecked(not cb.isChecked())
+        frame.mousePressEvent = toggle
+
+        return frame
+
     def _checkbox_style(self):
         return (
-            f"QCheckBox {{ color: {Theme.TEXT_BODY}; font-size: {Theme.FONT_SIZE_SMALL}px;"
-            f"background: transparent; padding: 5px 0; spacing: 8px; }}"
-            f"QCheckBox::indicator {{ width: 16px; height: 16px; border-radius: 4px;"
-            f"border: 1px solid {Theme.BORDER_STRONG}; background: {Theme.BG_ELEVATED}; }}"
+            f"QCheckBox {{ background: transparent; spacing: 0; }}"
+            f"QCheckBox::indicator {{ width: 18px; height: 18px; border-radius: 5px;"
+            f"border: 1px solid {Theme.BORDER_STRONG}; background: {Theme.BG_CARD}; }}"
             f"QCheckBox::indicator:checked {{ background: {Theme.ACCENT};"
             f"border-color: {Theme.ACCENT}; }}"
         )
