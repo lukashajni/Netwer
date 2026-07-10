@@ -96,6 +96,14 @@ probe_stream("monitor_stream() [Download/Upload + Live Monitor graf]",
 print("\n  NAPOMENA: get_top_devices skenira mrezu, moze potrajati 10-30s")
 probe("get_top_devices(6) [Top Devices + vendor]", nc.get_top_devices, 6)
 
+# Vendor lookup (brzo, bez skeniranja mreze)
+print(f"\n{'='*60}")
+print("  Vendor lookup test (bez skeniranja)")
+print('='*60)
+for mac in ["9C-6B-00-50-01-66", "A4-E1-1A-00-00-00"]:
+    print(f"    {mac} -> {nc.lookup_vendor(mac)}")
+print(f"    Ukupno OUI unosa u tablici: {len(nc.OUI_TABLE)}")
+
 print("\n" + "#"*60)
 print("#  KRAJ DIJAGNOSTIKE — posalji sve gore nazad")
 print("#"*60)

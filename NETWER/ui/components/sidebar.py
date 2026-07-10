@@ -108,7 +108,7 @@ class Sidebar(QWidget):
         # Pravi NETWER logo (gradijent globus, prozirna pozadina).
         logo = QLabel()
         logo.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        logo.setPixmap(logo_pixmap(48))
+        logo.setPixmap(logo_pixmap(72))
         logo.setStyleSheet("background: transparent;")
         lay.addWidget(logo)
 

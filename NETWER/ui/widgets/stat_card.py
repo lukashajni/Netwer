@@ -1,8 +1,9 @@
 """
 NETWER — StatCard widget.
 
-Kartica za jednu kljucnu vrijednost (Internet Status, Download, Upload,
-Packet Loss, Uptime — gornji red dashboarda). Ikona je prava (qtawesome).
+Card for one key metric (Internet Status, Download, Upload, Packet Loss,
+Uptime — the dashboard's top row). Real qtawesome icon, modern data font,
+and an optional sparkline (mini trend chart) at the bottom like the mockup.
 """
 
 from PyQt6.QtCore import Qt
@@ -10,10 +11,12 @@ from PyQt6.QtWidgets import QFrame, QVBoxLayout, QHBoxLayout, QLabel
 
 from app.theme import Theme
 from app.resources import Icons
+from ui.widgets.sparkline import Sparkline
 
 
 class StatCard(QFrame):
-    def __init__(self, icon_name: str, label: str, parent=None):
+    def __init__(self, icon_name: str, label: str, spark_color: str = None,
+                 parent=None):
         super().__init__(parent)
         self.setObjectName("StatCard")
         self.setStyleSheet(
@@ -24,7 +27,7 @@ class StatCard(QFrame):
         )
 
         lay = QVBoxLayout(self)
-        lay.setContentsMargins(14, 12, 14, 12)
+        lay.setContentsMargins(14, 12, 14, 10)
         lay.setSpacing(4)
 
         top = QHBoxLayout()
@@ -52,6 +55,12 @@ class StatCard(QFrame):
         )
         lay.addWidget(self._sub)
 
+        # Optional sparkline at the bottom
+        self.spark = None
+        if spark_color:
+            self.spark = Sparkline(spark_color)
+            lay.addWidget(self.spark)
+
     def set_value(self, value: str, unit: str = "", color: str | None = None,
                   subtitle: str = "") -> None:
         col = color or Theme.TEXT_PRIMARY
@@ -66,8 +75,7 @@ class StatCard(QFrame):
             )
         self._sub.setText(subtitle)
 
-    def set_loading(self) -> None:
-        self._value.setText(
-            f"<span style='color:{Theme.TEXT_MUTED}; font-size:14px;'>u\u010ditavam\u2026</span>"
-        )
-        self._sub.setText("")
+    def push_spark(self, value: float) -> None:
+        """Add a point to the sparkline (if this card has one)."""
+        if self.spark is not None:
+            self.spark.push(value)

@@ -737,57 +737,103 @@ def find_psutil_interface(ps_name):
     return max(pool, key=lambda k: pool[k].bytes_recv + pool[k].bytes_sent)
 
 
+def _is_virtual_iface(name):
+    """Heuristic: is this psutil interface name a virtual/non-physical one?"""
+    low = name.lower()
+    keywords = ("vmware", "virtualbox", "vethernet", "hyper-v", "loopback",
+                "vmnet", "vpn", "tap", "tun", "pseudo", "bluetooth",
+                "isatap", "teredo", "wan miniport")
+    return any(k in low for k in keywords)
+
+
+def _pick_traffic_ifaces(adapter_name=""):
+    """Return the list of psutil interface names to monitor.
+
+    - If adapter_name is given, resolve it to a single psutil iface.
+    - Otherwise, return ALL real (physical, up) interfaces. We sum their
+      traffic, so it doesn't matter which one the OS routes through — the
+      one actually moving bytes dominates. This avoids the whole 'picked
+      the VMware adapter' problem entirely.
+    """
+    if not PSUTIL_AVAILABLE:
+        return []
+    io = psutil.net_io_counters(pernic=True)
+    stats = psutil.net_if_stats()
+
+    if adapter_name:
+        key = find_psutil_interface(adapter_name)
+        return [key] if key else []
+
+    picked = []
+    for name in io:
+        st = stats.get(name)
+        if st is None or not st.isup:
+            continue
+        if _is_virtual_iface(name):
+            continue
+        picked.append(name)
+    # Fallback: if we filtered everything out, use all up interfaces
+    if not picked:
+        picked = [n for n in io if stats.get(n) and stats[n].isup]
+    return picked
+
+
+def _sum_counters(iface_names):
+    """Sum bytes_recv/bytes_sent across the given psutil interfaces."""
+    io = psutil.net_io_counters(pernic=True)
+    recv = sent = 0
+    for n in iface_names:
+        c = io.get(n)
+        if c:
+            recv += c.bytes_recv
+            sent += c.bytes_sent
+    return recv, sent
+
+
 def monitor_stream(adapter_name="", max_samples=600):
     """Generator: yields one dict per second with current dl/ul Mbps and
     running totals. Drives both the standalone Network Monitor screen and
-    the dashboard's live traffic chart — same data, frontend just renders
-    it differently (single big chart vs. compact sparkline)."""
+    the dashboard's live traffic chart.
+
+    Auto mode sums ALL real (non-virtual) adapters, so traffic shows up
+    regardless of which adapter Windows routes through — no fragile
+    'guess the right adapter' logic, and VMware/VirtualBox adapters are
+    excluded automatically.
+    """
     if not PSUTIL_AVAILABLE:
         yield {"error": "psutil is required for Network Monitor. pip install psutil"}
         return
 
-    name = adapter_name
-    if not name:
-        raw = run_powershell(
-            "(Get-NetAdapter | Where-Object {$_.Status -eq 'Up'} | Select-Object -First 1).Name",
-            timeout=6
-        )
-        name = raw
-
-    if not name:
-        yield {"error": "No active adapter found"}
+    ifaces = _pick_traffic_ifaces(adapter_name)
+    if not ifaces:
+        yield {"error": "No active network interface found"}
         return
 
-    key = find_psutil_interface(name)
-    if not key:
-        yield {"error": "No network interfaces found via psutil"}
-        return
+    # Friendly label for what we're monitoring
+    if adapter_name:
+        label = adapter_name
+    elif len(ifaces) == 1:
+        label = ifaces[0]
+    else:
+        label = f"All physical adapters ({len(ifaces)})"
 
-    snap = psutil.net_io_counters(pernic=True).get(key)
-    if not snap:
-        yield {"error": f"Interface {key} not found"}
-        return
-
-    yield {"dl": 0.0, "ul": 0.0, "total_dl": 0.0, "total_ul": 0.0, "adapter": name, "iface": key}
-
-    total_dl = total_ul = 0.0
-    prev_recv, prev_sent = snap.bytes_recv, snap.bytes_sent
+    prev_recv, prev_sent = _sum_counters(ifaces)
     prev_time = time.time()
+    total_dl = total_ul = 0.0
+
+    yield {"dl": 0.0, "ul": 0.0, "total_dl": 0.0, "total_ul": 0.0,
+           "adapter": label, "iface": ",".join(ifaces)}
 
     for _ in range(max_samples):
         time.sleep(1)
-        cur = psutil.net_io_counters(pernic=True).get(key)
-        if not cur:
-            yield {"error": "Adapter disappeared"}
-            return
-
+        cur_recv, cur_sent = _sum_counters(ifaces)
         now = time.time()
         elapsed = max(now - prev_time, 0.001)
         prev_time = now
 
-        dl_bytes = max(0, cur.bytes_recv - prev_recv)
-        ul_bytes = max(0, cur.bytes_sent - prev_sent)
-        prev_recv, prev_sent = cur.bytes_recv, cur.bytes_sent
+        dl_bytes = max(0, cur_recv - prev_recv)
+        ul_bytes = max(0, cur_sent - prev_sent)
+        prev_recv, prev_sent = cur_recv, cur_sent
 
         dl_mbps = round(dl_bytes * 8 / elapsed / 1_048_576, 2)
         ul_mbps = round(ul_bytes * 8 / elapsed / 1_048_576, 2)
@@ -795,7 +841,8 @@ def monitor_stream(adapter_name="", max_samples=600):
         total_ul += ul_bytes / 1_048_576
 
         yield {"dl": dl_mbps, "ul": ul_mbps, "total_dl": round(total_dl, 2),
-               "total_ul": round(total_ul, 2), "adapter": name, "iface": key}
+               "total_ul": round(total_ul, 2), "adapter": label,
+               "iface": ",".join(ifaces)}
 
 
 def get_bandwidth_today():

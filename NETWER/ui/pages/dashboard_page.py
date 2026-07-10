@@ -50,6 +50,13 @@ class DashboardPage(BasePage):
         self._uptime_timer.setInterval(1000)
         self._uptime_timer.timeout.connect(self._tick_uptime)
 
+        # Ping refresh: re-check connectivity every 5s so the ping/loss
+        # sparklines keep moving (not just one reading at startup).
+        self._ping_timer = QTimer(self)
+        self._ping_timer.setInterval(5000)
+        self._ping_timer.timeout.connect(self._refresh_internet)
+        self._internet_worker = None
+
         self._loaded_once = False
         self._pending = set()
 
@@ -73,10 +80,10 @@ class DashboardPage(BasePage):
     def _build_stat_cards(self):
         row = QHBoxLayout()
         row.setSpacing(Theme.GAP)
-        self.card_internet = StatCard("internet", "Internet Status")
-        self.card_download = StatCard("download", "Download Speed")
-        self.card_upload = StatCard("upload", "Upload Speed")
-        self.card_loss = StatCard("packet_loss", "Packet Loss")
+        self.card_internet = StatCard("internet", "Internet Status", spark_color=Theme.SUCCESS)
+        self.card_download = StatCard("download", "Download Speed", spark_color=Theme.ACCENT)
+        self.card_upload = StatCard("upload", "Upload Speed", spark_color=Theme.ACCENT_PURPLE)
+        self.card_loss = StatCard("packet_loss", "Packet Loss", spark_color=Theme.SUCCESS)
         self.card_uptime = StatCard("uptime", "System Uptime")
         for c in (self.card_internet, self.card_download, self.card_upload,
                   self.card_loss, self.card_uptime):
@@ -88,9 +95,35 @@ class DashboardPage(BasePage):
         row.setSpacing(Theme.GAP)
 
         monitor_card = Card("Live Network Monitor", "monitor")
+        # Adapter selector in the card header (right side)
+        from PyQt6.QtWidgets import QComboBox
+        self.adapter_combo = QComboBox()
+        self.adapter_combo.setMinimumWidth(180)
+        self.adapter_combo.setStyleSheet(
+            f"QComboBox {{ background: {Theme.BG_ELEVATED}; color: {Theme.TEXT_BODY};"
+            f"border: 1px solid {Theme.BORDER_STRONG}; border-radius: 6px;"
+            f"padding: 3px 8px; font-size: {Theme.FONT_SIZE_TINY}px; }}"
+            f"QComboBox::drop-down {{ border: none; width: 18px; }}"
+            f"QComboBox QAbstractItemView {{ background: {Theme.BG_ELEVATED};"
+            f"color: {Theme.TEXT_BODY}; selection-background-color: {Theme.ACCENT};"
+            f"border: 1px solid {Theme.BORDER_STRONG}; outline: none; }}"
+        )
+        self.adapter_combo.addItem("Auto (recommended)", "")
+        self.adapter_combo.currentIndexChanged.connect(self._on_adapter_changed)
+        monitor_card.header_layout.addWidget(self.adapter_combo)
+
         self.chart = LiveChart(max_points=60)
         self.chart.setMinimumHeight(200)
         monitor_card.content_layout.addWidget(self.chart)
+
+        # Small label showing which adapter is currently monitored
+        self.adapter_status = QLabel("Monitoring: detecting…")
+        self.adapter_status.setStyleSheet(
+            f"color: {Theme.TEXT_MUTED}; font-size: {Theme.FONT_SIZE_TINY}px;"
+            f"background: transparent;"
+        )
+        monitor_card.content_layout.addWidget(self.adapter_status)
+
         row.addWidget(monitor_card, 3)
 
         right_col = QVBoxLayout()
@@ -105,12 +138,31 @@ class DashboardPage(BasePage):
         right_col.addWidget(self.summary_card)
 
         self.wifi_card = Card("WiFi", "wifi")
+        wifi_body = QHBoxLayout()
+        wifi_body.setSpacing(10)
+        # Left: the key/value rows
+        wifi_left = QVBoxLayout()
+        wifi_left.setSpacing(6)
         self._wifi_values = {}
         for key in ("Connection", "SSID", "Signal", "Channel"):
             container, val_lbl = kv_row(key, "\u2014", mono=(key == "Signal"))
             self._wifi_values[key] = val_lbl
-            self.wifi_card.content_layout.addWidget(container)
+            wifi_left.addWidget(container)
+        wifi_body.addLayout(wifi_left, 1)
+        # Right: the visual signal indicator
+        from ui.widgets.wifi_signal import WiFiSignal
+        self.wifi_signal = WiFiSignal(80)
+        self.wifi_signal.set_disconnected()
+        wifi_body.addWidget(self.wifi_signal, 0, Qt.AlignmentFlag.AlignCenter)
+        self.wifi_card.content_layout.addLayout(wifi_body)
         right_col.addWidget(self.wifi_card)
+
+        # Network Map topology (fills the space, like the mockup)
+        from ui.widgets.network_map import NetworkMap
+        self.map_card = Card("Network Map", "network")
+        self.network_map = NetworkMap()
+        self.map_card.content_layout.addWidget(self.network_map)
+        right_col.addWidget(self.map_card)
         right_col.addStretch()
 
         row.addLayout(right_col, 2)
@@ -163,6 +215,7 @@ class DashboardPage(BasePage):
     def on_leave(self):
         self._resource_timer.stop()
         self._uptime_timer.stop()
+        self._ping_timer.stop()
         self._monitor_worker = None
         super().on_leave()
 
@@ -187,6 +240,8 @@ class DashboardPage(BasePage):
         self._start_monitor()
         # Device scan starts but does NOT gate the reveal.
         self._load_devices()
+        # Adapter list also loads in background.
+        self._load_adapters()
 
     def _task_done(self, name: str):
         self._pending.discard(name)
@@ -198,8 +253,18 @@ class DashboardPage(BasePage):
             self._window.loading_progress("Ready")
             self._window.end_loading()
         self._resource_timer.start()
+        self._ping_timer.start()
         if self._boot_epoch is not None:
             self._uptime_timer.start()
+
+    def _refresh_internet(self):
+        if self._internet_worker is not None and self._internet_worker.isRunning():
+            return
+        w = OneshotWorker(self.core.ping_quick)
+        w.result.connect(self._on_internet)
+        w.error.connect(lambda e: None)
+        self._internet_worker = w
+        w.start()
 
     # ══════════════════════════════════════════════════════════
     # DATA LOADING
@@ -218,6 +283,7 @@ class DashboardPage(BasePage):
         if not reachable:
             self.card_internet.set_value("Offline", color=Theme.DANGER)
             self.card_loss.set_value("100", "%", color=Theme.DANGER, subtitle="No response")
+            self.card_loss.push_spark(100)
             return
         avg_ping = round(sum(r["avg"] for r in reachable) / len(reachable))
         avg_loss = round(sum(r["loss"] for r in reachable) / len(reachable), 1)
@@ -226,6 +292,9 @@ class DashboardPage(BasePage):
         loss_color = Theme.SUCCESS if avg_loss < 1 else Theme.WARNING
         self.card_loss.set_value(f"{avg_loss}", "%", color=loss_color,
                                  subtitle="Excellent" if avg_loss < 1 else "Fair")
+        # Feed sparklines: ping trend on the internet card, loss on its card
+        self.card_internet.push_spark(avg_ping)
+        self.card_loss.push_spark(avg_loss)
 
     def _load_uptime(self):
         w = OneshotWorker(self.core.get_system_info)
@@ -268,6 +337,9 @@ class DashboardPage(BasePage):
         self._set_summary("Gateway", d.get("gateway", "\u2014"))
         self._set_summary("DNS", d.get("dns", "\u2014"))
         self._set_summary("MAC Address", d.get("mac", "\u2014"))
+        # Remember gateway for the network map
+        self._gateway = d.get("gateway", "\u2014")
+        self._maybe_update_map()
 
     def _set_summary(self, key: str, value: str, color: str = None):
         lbl = self._summary_values.get(key)
@@ -293,13 +365,37 @@ class DashboardPage(BasePage):
             return
         self._set_wifi("Connection", "WiFi", Theme.SUCCESS)
         self._set_wifi("SSID", d.get("ssid", "\u2014"))
-        self._set_wifi("Signal", str(d.get("signal", "\u2014")), Theme.SUCCESS)
+        signal = d.get("signal", "\u2014")
+        self._set_wifi("Signal", str(signal), Theme.SUCCESS)
         self._set_wifi("Channel", str(d.get("channel", "\u2014")))
+        # Update the visual signal indicator. signal may be like "-42 dBm"
+        # or a percentage; try to derive a 0-100 strength.
+        pct = self._signal_to_percent(signal)
+        self.wifi_signal.set_signal(pct)
+
+    def _signal_to_percent(self, signal) -> float:
+        """Convert a signal reading to 0-100%. Accepts percent strings,
+        dBm values, or plain numbers."""
+        try:
+            s = str(signal).strip().lower()
+            if "%" in s:
+                return max(0, min(100, float(s.replace("%", "").strip())))
+            if "dbm" in s:
+                dbm = float(s.replace("dbm", "").strip())
+                # -30 dBm ≈ 100%, -90 dBm ≈ 0%
+                return max(0, min(100, (dbm + 90) / 60 * 100))
+            val = float(s)
+            if val < 0:  # looks like dBm
+                return max(0, min(100, (val + 90) / 60 * 100))
+            return max(0, min(100, val))
+        except (ValueError, TypeError):
+            return 50.0
 
     def _wifi_error(self):
         self._set_wifi("Connection", "Wired / N/A", Theme.TEXT_MUTED)
         for k in ("SSID", "Signal", "Channel"):
             self._set_wifi(k, "\u2014")
+        self.wifi_signal.set_disconnected()
 
     def _set_wifi(self, key: str, value: str, color: str = None):
         lbl = self._wifi_values.get(key)
@@ -331,6 +427,22 @@ class DashboardPage(BasePage):
         self._devices_placeholder.hide()
         for dev in devices:
             self._devices_container.addWidget(self._device_row(dev))
+        # Feed the network map too
+        self._all_devices = devices
+        self._maybe_update_map()
+
+    def _maybe_update_map(self):
+        """Update the topology map once we have both gateway and devices."""
+        gateway = getattr(self, "_gateway", None)
+        devices = getattr(self, "_all_devices", None)
+        if gateway and devices:
+            # Find router vendor from the device whose IP == gateway
+            router_vendor = ""
+            for d in devices:
+                if d.get("ip") == gateway:
+                    router_vendor = d.get("vendor", "") or ""
+                    break
+            self.network_map.set_topology(gateway, devices, router_vendor)
 
     def _device_row(self, dev: dict) -> QWidget:
         w = QWidget()
@@ -359,26 +471,70 @@ class DashboardPage(BasePage):
         return w
 
     # ── Live monitor (stream) ──────────────────────────────────
+    # ── Adapter selection ──────────────────────────────────────
+    def _load_adapters(self):
+        """Populate the adapter dropdown (background, after reveal)."""
+        w = OneshotWorker(self.core.list_adapters)
+        w.result.connect(self._on_adapters)
+        w.error.connect(lambda e: None)
+        self.register_worker(w)
+        w.start()
+
+    def _on_adapters(self, data):
+        adapters = data.get("items", data) if isinstance(data, dict) else data
+        if not isinstance(adapters, list):
+            return
+        current = self.adapter_combo.currentData()
+        self.adapter_combo.blockSignals(True)
+        # Keep the Auto entry, add real adapters that are Up
+        for a in adapters:
+            if not isinstance(a, dict):
+                continue
+            name = a.get("name", "")
+            status = a.get("status", "")
+            if not name:
+                continue
+            label = f"{name}" + ("" if status == "Up" else f"  ({status})")
+            self.adapter_combo.addItem(label, name)
+        self.adapter_combo.blockSignals(False)
+
+    def _on_adapter_changed(self, index):
+        """User picked a different adapter — restart monitor on it."""
+        selected = self.adapter_combo.currentData()
+        # Stop current monitor
+        if self._monitor_worker is not None:
+            self._monitor_worker.stop()
+            self._monitor_worker = None
+        self._selected_adapter = selected or ""
+        self._start_monitor()
+
     def _start_monitor(self):
         if self._monitor_worker is not None:
             return
         self.chart.reset()
         self.card_download.set_value("0.0", "Mbps", color=Theme.ACCENT, subtitle="Live")
         self.card_upload.set_value("0.0", "Mbps", color=Theme.ACCENT_PURPLE, subtitle="Live")
-        w = StreamWorker(self.core.monitor_stream, "")
+        adapter = getattr(self, "_selected_adapter", "")
+        w = StreamWorker(self.core.monitor_stream, adapter)
         w.result.connect(self._on_monitor)
-        w.error.connect(lambda e: None)
+        w.error.connect(lambda e: self.adapter_status.setText(f"Monitoring: {e}"))
         self.register_worker(w)
         self._monitor_worker = w
         w.start()
 
     def _on_monitor(self, d: dict):
+        # Show which adapter is actually being monitored
+        adapter = d.get("adapter", "")
+        if adapter:
+            self.adapter_status.setText(f"Monitoring: {adapter}")
         if "dl" in d and "ul" in d:
             self.chart.push(d["dl"], d["ul"])
             self.card_download.set_value(f"{d['dl']:.1f}", "Mbps",
                                          color=Theme.ACCENT, subtitle="Live")
             self.card_upload.set_value(f"{d['ul']:.1f}", "Mbps",
                                        color=Theme.ACCENT_PURPLE, subtitle="Live")
+            self.card_download.push_spark(d["dl"])
+            self.card_upload.push_spark(d["ul"])
 
     # ── System resources (timer) ───────────────────────────────
     def _refresh_resources(self, initial: bool = False):
