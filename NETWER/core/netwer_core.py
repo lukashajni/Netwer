@@ -536,8 +536,29 @@ def _resolve_local_network_prefix():
     return network, gateway, cfg
 
 
-def _get_mac_for_ip(ip):
-    """Best-effort MAC lookup via the ARP table (Windows: arp -a)."""
+def _get_own_ip_and_mac():
+    """Return (own_ip, own_mac) for the active adapter. ARP doesn't list
+    your own machine, so we resolve it separately to identify/label it in
+    scans."""
+    try:
+        info = get_ethernet_info()
+        if isinstance(info, dict) and "error" not in info:
+            ip = info.get("ip", "")
+            mac = info.get("mac", "")
+            if mac:
+                mac = mac.replace("-", ":").upper()
+            return ip, mac
+    except Exception:
+        pass
+    return None, None
+
+
+def _get_mac_for_ip(ip, own_ip=None, own_mac=None):
+    """Best-effort MAC lookup. For your OWN IP, ARP returns nothing, so use
+    the adapter's MAC passed in. Otherwise read the ARP table."""
+    # Own machine: ARP won't have it — use the adapter MAC.
+    if own_ip and ip == own_ip and own_mac:
+        return own_mac
     try:
         if platform.system() == "Windows":
             result = subprocess.run(["arp", "-a", ip], capture_output=True, text=True, timeout=3)
@@ -571,9 +592,10 @@ def ping_sweep_stream(timeout_ms=150):
     yield {"network": network}
 
     import concurrent.futures
-    import queue
 
-    results_q = queue.Queue()
+    # Resolve our own IP/MAC once — ARP won't list us, so we label our own
+    # machine (and thus resolve its vendor) using the adapter's MAC.
+    own_ip, own_mac = _get_own_ip_and_mac()
 
     def probe(i):
         ip = f"{network}.{i}"
@@ -584,7 +606,7 @@ def ping_sweep_stream(timeout_ms=150):
             hostname = socket.gethostbyaddr(ip)[0]
         except Exception:
             hostname = "Unknown"
-        mac = _get_mac_for_ip(ip)
+        mac = _get_mac_for_ip(ip, own_ip=own_ip, own_mac=own_mac)
         vendor = lookup_vendor(mac, allow_online=True) if mac else "Unknown"
         return {
             "online": True,
@@ -593,6 +615,7 @@ def ping_sweep_stream(timeout_ms=150):
             "mac": mac or "Unknown",
             "vendor": vendor,
             "is_gateway": (ip == gateway),
+            "is_self": (own_ip and ip == own_ip),
             "rtt_ms": ms,
         }
 

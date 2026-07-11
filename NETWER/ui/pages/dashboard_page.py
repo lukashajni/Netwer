@@ -82,6 +82,10 @@ class DashboardPage(BasePage):
         self._build_stat_cards()
         self._build_middle_row()
         self._build_bottom_row()
+        # Spotify-style: cards keep a sensible fixed size; extra vertical
+        # space when maximized goes into this trailing stretch instead of
+        # ballooning the cards.
+        self._grid.addStretch(1)
 
     # ══════════════════════════════════════════════════════════
     # UI CONSTRUCTION
@@ -107,7 +111,7 @@ class DashboardPage(BasePage):
         MIDDLE_HEIGHT = 340  # fixed height so left and right columns align
 
         monitor_card = Card("Live Network Monitor", "monitor")
-        monitor_card.setMinimumHeight(MIDDLE_HEIGHT)
+        monitor_card.setFixedHeight(MIDDLE_HEIGHT)
         # Adapter selector in the card header (right side)
         from PyQt6.QtWidgets import QComboBox
         self.adapter_combo = QComboBox()
@@ -176,7 +180,7 @@ class DashboardPage(BasePage):
         right_col.addWidget(self.wifi_card)
 
         row.addLayout(right_col, 2)
-        self._grid.addLayout(row, 3)
+        self._grid.addLayout(row, 0)
 
     def _legend_item(self, text, color):
         """A small colored dot + label for the chart legend."""
@@ -201,18 +205,18 @@ class DashboardPage(BasePage):
         row = QHBoxLayout()
         row.setSpacing(Theme.GAP)
 
-        BOTTOM_HEIGHT = 240
+        BOTTOM_HEIGHT = 270
 
         # Network Map (moved here from the middle column; more room)
         from ui.widgets.network_map import NetworkMap
         self.map_card = Card("Network Map", "network")
-        self.map_card.setMinimumHeight(BOTTOM_HEIGHT)
+        self.map_card.setFixedHeight(BOTTOM_HEIGHT)
         self.network_map = NetworkMap()
         self.map_card.content_layout.addWidget(self.network_map)
         row.addWidget(self.map_card, 2)
 
         self.devices_card = Card("Top Devices", "devices")
-        self.devices_card.setMinimumHeight(BOTTOM_HEIGHT)
+        self.devices_card.setFixedHeight(BOTTOM_HEIGHT)
         # Scrollable device list so it adapts to any number of devices
         from PyQt6.QtWidgets import QScrollArea, QFrame as _QFrame
         dev_scroll = QScrollArea()
@@ -237,11 +241,13 @@ class DashboardPage(BasePage):
         row.addWidget(self.devices_card, 2)
 
         self.resources_card = Card("System Resources", "resources")
-        self.resources_card.setMinimumHeight(BOTTOM_HEIGHT)
-        # Gauges sit in a moderate top space, not floating in the middle.
-        self.resources_card.content_layout.addSpacing(8)
+        self.resources_card.setFixedHeight(BOTTOM_HEIGHT)
+        # Gauges grouped tightly and centered, with a small top offset so
+        # they don't float awkwardly in the middle of the card.
+        self.resources_card.content_layout.addSpacing(14)
         gauges = QHBoxLayout()
-        gauges.setSpacing(4)
+        gauges.setSpacing(18)
+        gauges.setContentsMargins(0, 0, 0, 0)
         gauges.addStretch()
         self.gauge_cpu = Gauge("CPU", Theme.ACCENT)
         self.gauge_ram = Gauge("Memory", Theme.ACCENT_PURPLE)
@@ -253,7 +259,7 @@ class DashboardPage(BasePage):
         self.resources_card.content_layout.addStretch()
         row.addWidget(self.resources_card, 2)
 
-        self._grid.addLayout(row, 3)
+        self._grid.addLayout(row, 0)
 
     # ══════════════════════════════════════════════════════════
     # LIFECYCLE

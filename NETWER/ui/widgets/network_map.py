@@ -85,9 +85,9 @@ class NetworkMap(QWidget):
         icon_r = 17
         gap = 10   # gap between line ends and icons
 
-        y_internet = 34
-        y_router = h * 0.46
-        y_devices = h - 40
+        y_internet = 30
+        y_router = h * 0.42
+        y_devices = h - 58
 
         link_color = QColor(Theme.SUCCESS) if self._online else QColor(Theme.TEXT_FAINT)
         pen = QPen(link_color, 2.0)
