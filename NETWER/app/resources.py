@@ -85,12 +85,16 @@ class Icons:
         "dev_pc": "fa6s.desktop",
         "dev_laptop": "fa6s.laptop",
         "dev_phone": "fa6s.mobile-screen",
-        "dev_tv": "fa6s.tv",
+        "dev_tv": "mdi.television",
         "dev_nas": "fa6s.hard-drive",
         "dev_printer": "fa6s.print",
         "dev_router": "mdi.router-wireless",
         "dev_console": "fa6s.gamepad",
         "dev_iot": "fa6s.lightbulb",
+        "dev_camera": "mdi.cctv",
+        "dev_speaker": "fa6s.volume-high",
+        "dev_watch": "mdi.watch",
+        "dev_tablet": "fa6s.tablet-screen-button",
         "dev_generic": "fa6s.microchip",
     }
 

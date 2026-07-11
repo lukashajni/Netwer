@@ -82,6 +82,9 @@ class DashboardPage(BasePage):
         self._build_stat_cards()
         self._build_middle_row()
         self._build_bottom_row()
+        # Push everything up so cards keep their fixed heights instead of
+        # stretching to fill when the window grows.
+        self._grid.addStretch()
 
     # ══════════════════════════════════════════════════════════
     # UI CONSTRUCTION
@@ -96,6 +99,7 @@ class DashboardPage(BasePage):
         self.card_uptime = StatCard("uptime", "System Uptime")
         for c in (self.card_internet, self.card_download, self.card_upload,
                   self.card_loss, self.card_uptime):
+            c.setFixedHeight(120)
             row.addWidget(c)
         self._grid.addLayout(row)
 
@@ -200,7 +204,7 @@ class DashboardPage(BasePage):
         row = QHBoxLayout()
         row.setSpacing(Theme.GAP)
 
-        BOTTOM_HEIGHT = 250
+        BOTTOM_HEIGHT = 240
 
         # Network Map (moved here from the middle column; more room)
         from ui.widgets.network_map import NetworkMap
@@ -212,9 +216,17 @@ class DashboardPage(BasePage):
 
         self.devices_card = Card("Top Devices", "devices")
         self.devices_card.setFixedHeight(BOTTOM_HEIGHT)
-        self._devices_container = QVBoxLayout()
+        # Scrollable device list so it adapts to any number of devices
+        from PyQt6.QtWidgets import QScrollArea, QFrame as _QFrame
+        dev_scroll = QScrollArea()
+        dev_scroll.setWidgetResizable(True)
+        dev_scroll.setFrameShape(_QFrame.Shape.NoFrame)
+        dev_scroll.setStyleSheet("background: transparent; border: none;")
+        dev_holder = QWidget()
+        dev_holder.setStyleSheet("background: transparent;")
+        self._devices_container = QVBoxLayout(dev_holder)
+        self._devices_container.setContentsMargins(0, 0, 0, 0)
         self._devices_container.setSpacing(4)
-        self.devices_card.content_layout.addLayout(self._devices_container)
         self._devices_placeholder = QLabel("No devices found")
         self._devices_placeholder.setStyleSheet(
             f"color: {Theme.TEXT_MUTED}; font-size: {Theme.FONT_SIZE_SMALL}px;"
@@ -223,17 +235,23 @@ class DashboardPage(BasePage):
         self._devices_placeholder.hide()
         self._devices_container.addWidget(self._devices_placeholder)
         self._devices_container.addStretch()
+        dev_scroll.setWidget(dev_holder)
+        self.devices_card.content_layout.addWidget(dev_scroll)
         row.addWidget(self.devices_card, 2)
 
         self.resources_card = Card("System Resources", "resources")
         self.resources_card.setFixedHeight(BOTTOM_HEIGHT)
+        # Center the gauges vertically and horizontally in the card
+        self.resources_card.content_layout.addStretch()
         gauges = QHBoxLayout()
-        gauges.setSpacing(8)
+        gauges.setSpacing(6)
+        gauges.addStretch()
         self.gauge_cpu = Gauge("CPU", Theme.ACCENT)
         self.gauge_ram = Gauge("Memory", Theme.ACCENT_PURPLE)
         self.gauge_disk = Gauge("Disk", Theme.SUCCESS)
         for g in (self.gauge_cpu, self.gauge_ram, self.gauge_disk):
             gauges.addWidget(g)
+        gauges.addStretch()
         self.resources_card.content_layout.addLayout(gauges)
         self.resources_card.content_layout.addStretch()
         row.addWidget(self.resources_card, 2)
@@ -340,6 +358,7 @@ class DashboardPage(BasePage):
     def _on_internet(self, data: dict):
         items = data.get("items", [])
         reachable = [r for r in items if not r.get("unreachable")]
+        self._internet_online = bool(reachable)
         if not reachable:
             self.card_internet.set_value("Offline", color=Theme.DANGER)
             self.card_loss.set_value("100", "%", color=Theme.DANGER, subtitle="No response")
@@ -486,7 +505,9 @@ class DashboardPage(BasePage):
             return
         self._devices_placeholder.hide()
         for dev in devices:
-            self._devices_container.addWidget(self._device_row(dev))
+            # Insert before the trailing stretch (last item)
+            idx = self._devices_container.count() - 1
+            self._devices_container.insertWidget(idx, self._device_row(dev))
         # Feed the network map too
         self._all_devices = devices
         self._maybe_update_map()
@@ -502,7 +523,8 @@ class DashboardPage(BasePage):
                 if d.get("ip") == gateway:
                     router_vendor = d.get("vendor", "") or ""
                     break
-            self.network_map.set_topology(gateway, devices, router_vendor)
+            self.network_map.set_topology(gateway, devices, router_vendor,
+                                          online=getattr(self, "_internet_online", True))
 
     def _device_row(self, dev: dict) -> QWidget:
         w = QWidget()
