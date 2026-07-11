@@ -139,16 +139,47 @@ OUI_TABLE = {
 }
 
 
-def lookup_vendor(mac_address):
-    """Best-effort vendor name from a MAC address using the local OUI table.
-    Returns 'Unknown' if not found — does not call out to the network."""
+_ONLINE_VENDOR_CACHE = {}
+
+
+def lookup_vendor(mac_address, allow_online=False):
+    """Vendor name from a MAC address.
+
+    First checks the local OUI table (fast, offline). If not found and
+    allow_online=True, queries a free online API (like real network tools
+    do) and caches the result. Online lookups only happen inside the
+    device-scan worker, never on the UI thread.
+    """
     if not mac_address:
         return "Unknown"
     cleaned = re.sub(r'[^0-9A-Fa-f]', '', mac_address).upper()
     if len(cleaned) < 6:
         return "Unknown"
     prefix = cleaned[:6]
-    return OUI_TABLE.get(prefix, "Unknown")
+
+    # 1) Local table
+    vendor = OUI_TABLE.get(prefix)
+    if vendor:
+        return vendor
+
+    # 2) Cache from earlier online lookups
+    if prefix in _ONLINE_VENDOR_CACHE:
+        return _ONLINE_VENDOR_CACHE[prefix]
+
+    # 3) Online lookup (opt-in, worker only)
+    if allow_online:
+        try:
+            from core.oui_extended import online_vendor_lookup
+            name = online_vendor_lookup(mac_address)
+            if name:
+                _ONLINE_VENDOR_CACHE[prefix] = name
+                return name
+        except Exception:
+            pass
+        # Cache the miss so we don't retry every scan
+        _ONLINE_VENDOR_CACHE[prefix] = "Unknown"
+
+    return "Unknown"
 
 
 # ══════════════════════════════════════════
@@ -554,7 +585,7 @@ def ping_sweep_stream(timeout_ms=150):
         except Exception:
             hostname = "Unknown"
         mac = _get_mac_for_ip(ip)
-        vendor = lookup_vendor(mac) if mac else "Unknown"
+        vendor = lookup_vendor(mac, allow_online=True) if mac else "Unknown"
         return {
             "online": True,
             "ip": ip,

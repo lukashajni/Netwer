@@ -1,10 +1,12 @@
 """
 NETWER — NetworkMap widget.
 
-LAN topology like the reference: Internet at top (green when the connection
-is up), Router in the middle with its IP shown BESIDE the icon, and
-discovered devices in a row below. Lines connect the tiers and never cross
-label text. Device icons are chosen per type from hostname/vendor hints.
+LAN topology: Internet (top), Router (middle), devices (row below).
+- Internet: label sits to the RIGHT of the globe icon
+- Router: name + IP stacked to the RIGHT of the router icon (name above IP)
+- Devices: icon with name + IP stacked below, clearly separated
+- Connection lines are green when online, and routed so they never cross
+  any icon or text.
 """
 
 from PyQt6.QtCore import Qt, QRectF, QPointF
@@ -16,7 +18,6 @@ from app.resources import Icons
 
 
 def guess_device_icon(dev: dict) -> str:
-    """Pick an icon name based on hostname/vendor hints."""
     text = f"{dev.get('hostname','')} {dev.get('vendor','')}".lower()
 
     def has(*words):
@@ -45,8 +46,7 @@ def guess_device_icon(dev: dict) -> str:
         return "dev_printer"
     if has("playstation", "ps4", "ps5", "xbox", "nintendo", "switch"):
         return "dev_console"
-    if has("camera", "cam", "hikvision", "dahua", "axis", "cctv", "ring",
-           "nest cam"):
+    if has("camera", "cam", "hikvision", "dahua", "axis", "cctv", "ring"):
         return "dev_camera"
     if has("echo", "alexa", "sonos", "speaker", "homepod"):
         return "dev_speaker"
@@ -66,10 +66,9 @@ class NetworkMap(QWidget):
         self._gateway = "—"
         self._router_vendor = ""
         self._devices = []
-        self._online = True   # is the internet connection up?
+        self._online = True
 
-    def set_topology(self, gateway: str, devices: list, router_vendor: str = "",
-                     online: bool = True):
+    def set_topology(self, gateway, devices, router_vendor="", online=True):
         self._gateway = gateway or "—"
         self._router_vendor = router_vendor
         self._online = online
@@ -83,87 +82,87 @@ class NetworkMap(QWidget):
         w = self.width()
         h = self.height()
         cx = w / 2
-        icon_r = 16
-        node_gap = 8
-        label_space = 34
+        icon_r = 17
+        gap = 10   # gap between line ends and icons
 
-        y_internet = 30
-        y_router = h * 0.44
-        y_devices = h - label_space - icon_r - 4
+        y_internet = 34
+        y_router = h * 0.46
+        y_devices = h - 40
 
-        # Line color: green when online, muted when offline
         link_color = QColor(Theme.SUCCESS) if self._online else QColor(Theme.TEXT_FAINT)
-        line_pen = QPen(link_color, 1.6)
-        line_pen.setCapStyle(Qt.PenCapStyle.RoundCap)
-        p.setPen(line_pen)
+        pen = QPen(link_color, 2.0)
+        pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+        p.setPen(pen)
 
-        # Internet -> Router
-        p.drawLine(QPointF(cx, y_internet + icon_r + node_gap),
-                   QPointF(cx, y_router - icon_r - node_gap))
+        # ── Internet -> Router (vertical green line, stops at icon edges) ──
+        p.drawLine(QPointF(cx, y_internet + icon_r + gap),
+                   QPointF(cx, y_router - icon_r - gap))
 
+        # ── Router -> devices ──
         n = len(self._devices)
         if n > 0:
-            bus_y = y_router + icon_r + 26
-            p.drawLine(QPointF(cx, y_router + icon_r + node_gap),
-                       QPointF(cx, bus_y))
+            bus_y = y_router + icon_r + 24
+            p.drawLine(QPointF(cx, y_router + icon_r + gap), QPointF(cx, bus_y))
             xs = self._device_xs(w, n)
             if n > 1:
                 p.drawLine(QPointF(xs[0], bus_y), QPointF(xs[-1], bus_y))
             for x in xs:
-                p.drawLine(QPointF(x, bus_y),
-                           QPointF(x, y_devices - icon_r - node_gap))
+                p.drawLine(QPointF(x, bus_y), QPointF(x, y_devices - icon_r - gap))
 
-        # Internet node — icon green when online
-        internet_color = QColor(Theme.SUCCESS) if self._online else QColor(Theme.TEXT_MUTED)
-        self._draw_icon(p, cx, y_internet, "internet", internet_color, icon_r)
-        self._draw_center_label(p, cx, y_internet + icon_r + 3,
-                                "Internet", internet_color.name(), bold=True)
+        # ── Internet node: icon + "Internet" label to the RIGHT ──
+        icol = QColor(Theme.SUCCESS) if self._online else QColor(Theme.TEXT_MUTED)
+        self._icon(p, cx, y_internet, "internet", icol, icon_r)
+        self._text_left(p, cx + icon_r + 8, y_internet, "Internet",
+                        icol.name(), bold=True, size=9)
 
-        # Router node — IP shown BESIDE the icon (to the right)
-        self._draw_icon(p, cx, y_router, "dev_router", QColor(Theme.ACCENT), icon_r)
-        router_label = self._router_vendor or "Router"
-        # Name centered under icon
-        self._draw_center_label(p, cx, y_router + icon_r + 3, router_label,
-                                Theme.TEXT_BODY, bold=True)
-        # IP to the right of the icon, vertically centered on it
+        # ── Router node: icon + name (above) + IP (below) to the RIGHT ──
+        self._icon(p, cx, y_router, "dev_router", QColor(Theme.ACCENT), icon_r)
+        router_name = self._router_vendor or "Router"
+        rx = cx + icon_r + 8
+        self._text_left(p, rx, y_router - 7, router_name, Theme.TEXT_BODY,
+                        bold=True, size=9)
         if self._gateway and self._gateway != "—":
-            p.setPen(QColor(Theme.TEXT_MUTED))
-            f = QFont(Theme.FONT_MONO, 8)
-            p.setFont(f)
-            p.drawText(QRectF(cx + icon_r + 8, y_router - 7, 130, 14),
-                       Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
-                       self._gateway)
+            self._text_left(p, rx, y_router + 6, self._gateway,
+                            Theme.TEXT_MUTED, mono=True, size=8)
 
-        # Device nodes
+        # ── Device nodes: icon with name + IP stacked BELOW, separated ──
         if n > 0:
             xs = self._device_xs(w, n)
             for x, dev in zip(xs, self._devices):
-                self._draw_icon(p, x, y_devices, guess_device_icon(dev),
-                                QColor(Theme.TEXT_SECONDARY), icon_r)
+                self._icon(p, x, y_devices, guess_device_icon(dev),
+                           QColor(Theme.TEXT_SECONDARY), icon_r)
                 name = dev.get("hostname") or dev.get("ip", "?")
-                self._draw_center_label(p, x, y_devices + icon_r + 3,
-                                        str(name)[:14], Theme.TEXT_BODY, bold=True)
-                self._draw_center_label(p, x, y_devices + icon_r + 16,
-                                        dev.get("ip", ""), Theme.TEXT_MUTED,
-                                        mono=True)
+                self._text_center(p, x, y_devices + icon_r + 5, str(name)[:14],
+                                  Theme.TEXT_BODY, bold=True, size=8)
+                self._text_center(p, x, y_devices + icon_r + 18,
+                                  dev.get("ip", ""), Theme.TEXT_MUTED,
+                                  mono=True, size=8)
         p.end()
 
     def _device_xs(self, w, n):
         if n == 1:
             return [w / 2]
-        margin = 54
+        margin = 56
         span = w - 2 * margin
         return [margin + span * i / (n - 1) for i in range(n)]
 
-    def _draw_icon(self, p, cx, cy, icon_name, color, icon_r):
-        pm = Icons.pixmap(icon_name, icon_r * 2, color.name())
-        p.drawPixmap(int(cx - icon_r), int(cy - icon_r), pm)
+    def _icon(self, p, cx, cy, name, color, r):
+        pm = Icons.pixmap(name, r * 2, color.name())
+        p.drawPixmap(int(cx - r), int(cy - r), pm)
 
-    def _draw_center_label(self, p, cx, y_top, text, color, bold=False, mono=False):
+    def _text_center(self, p, cx, y_top, text, color, bold=False, mono=False, size=8):
         p.setPen(QColor(color))
-        family = Theme.FONT_MONO if mono else Theme.FONT_FAMILY
-        f = QFont(family, 8)
-        f.setBold(bold)
+        fam = Theme.FONT_MONO if mono else Theme.FONT_FAMILY
+        f = QFont(fam, size); f.setBold(bold)
         p.setFont(f)
         p.drawText(QRectF(cx - 70, y_top, 140, 13),
                    Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop, text)
+
+    def _text_left(self, p, x, cy, text, color, bold=False, mono=False, size=8):
+        """Draw text left-aligned, vertically centered on cy."""
+        p.setPen(QColor(color))
+        fam = Theme.FONT_MONO if mono else Theme.FONT_FAMILY
+        f = QFont(fam, size); f.setBold(bold)
+        p.setFont(f)
+        p.drawText(QRectF(x, cy - 8, 150, 16),
+                   Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, text)
