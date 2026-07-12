@@ -241,24 +241,33 @@ class DashboardPage(BasePage):
         self.devices_card.content_layout.addWidget(dev_scroll)
         row.addWidget(self.devices_card, 2)
 
+        # Third column: Recent Activity stacked ABOVE System Resources
+        right_col = QVBoxLayout()
+        right_col.setSpacing(Theme.GAP)
+
+        from ui.widgets.recent_activity import RecentActivity
+        self.activity_card = Card("Recent Activity", "check")
+        self.activity_card.setFixedHeight(150)
+        self.recent_activity = RecentActivity(limit=5)
+        self.activity_card.content_layout.addWidget(self.recent_activity)
+        right_col.addWidget(self.activity_card)
+
         self.resources_card = Card("System Resources", "resources")
-        self.resources_card.setFixedHeight(BOTTOM_HEIGHT)
-        # Gauges evenly spread with breathing room, vertically centered.
-        self.resources_card.content_layout.addStretch(1)
+        self.resources_card.setFixedHeight(BOTTOM_HEIGHT - 150 - Theme.GAP)
         gauges = QHBoxLayout()
         gauges.setSpacing(0)
         gauges.setContentsMargins(8, 0, 8, 0)
         self.gauge_cpu = Gauge("CPU", Theme.ACCENT)
         self.gauge_ram = Gauge("Memory", Theme.ACCENT_PURPLE)
         self.gauge_disk = Gauge("Disk", Theme.SUCCESS)
-        # Equal stretch around each gauge = even spacing across the card
         for g in (self.gauge_cpu, self.gauge_ram, self.gauge_disk):
             gauges.addStretch(1)
             gauges.addWidget(g)
             gauges.addStretch(1)
         self.resources_card.content_layout.addLayout(gauges)
-        self.resources_card.content_layout.addStretch(1)
-        row.addWidget(self.resources_card, 2)
+        right_col.addWidget(self.resources_card)
+
+        row.addLayout(right_col, 2)
 
         self._grid.addLayout(row, 0)
 
@@ -512,6 +521,10 @@ class DashboardPage(BasePage):
             # Insert before the trailing stretch (last item)
             idx = self._devices_container.count() - 1
             self._devices_container.insertWidget(idx, self._device_row(dev))
+        # Record the scan in the activity log
+        from app.activity import activity
+        activity.add("Network scan completed",
+                     f"{len(devices)} devices found", kind="success")
         # Feed the network map too
         self._all_devices = devices
         self._maybe_update_map()

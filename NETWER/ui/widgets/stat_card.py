@@ -7,7 +7,7 @@ and an optional sparkline (mini trend chart) at the bottom like the mockup.
 """
 
 from PyQt6.QtCore import Qt
-from PyQt6.QtWidgets import QFrame, QVBoxLayout, QHBoxLayout, QLabel
+from PyQt6.QtWidgets import QFrame, QVBoxLayout, QHBoxLayout, QLabel, QWidget
 
 from app.theme import Theme
 from app.resources import Icons
@@ -55,11 +55,18 @@ class StatCard(QFrame):
         )
         lay.addWidget(self._sub)
 
-        # Optional sparkline at the bottom
+        # Sparkline at the bottom. Cards WITHOUT one still reserve the same
+        # vertical space, so the header/value text lines up across every card
+        # in the row (otherwise a no-sparkline card sits lower than the rest).
         self.spark = None
         if spark_color:
             self.spark = Sparkline(spark_color)
             lay.addWidget(self.spark)
+        else:
+            filler = QWidget()
+            filler.setFixedHeight(Sparkline.HEIGHT)
+            filler.setStyleSheet("background: transparent;")
+            lay.addWidget(filler)
 
     def set_value(self, value: str, unit: str = "", color: str | None = None,
                   subtitle: str = "") -> None:

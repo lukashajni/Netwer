@@ -274,5 +274,8 @@ class ReportPage(BasePage):
             import shutil
             shutil.copyfile(self._temp_pdf, path)
             self._status.setText(f"Saved \u2713  {path}")
+            from app.activity import activity
+            import os as _os
+            activity.add("Report saved", _os.path.basename(path), kind="success")
         except Exception as e:
             self._status.setText(f"Save failed: {e}")

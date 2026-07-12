@@ -17,12 +17,13 @@ from app.theme import Theme
 
 
 class Sparkline(QWidget):
+    HEIGHT = 32   # shared so cards without a sparkline can reserve the space
+
     def __init__(self, color: str, max_points: int = 40, parent=None):
         super().__init__(parent)
         self._color = color
         self._data = deque(maxlen=max_points)
-        self.setMinimumHeight(30)
-        self.setMaximumHeight(34)
+        self.setFixedHeight(self.HEIGHT)
         self.setStyleSheet("background: transparent;")
 
     def push(self, value: float) -> None:
