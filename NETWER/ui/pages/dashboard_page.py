@@ -206,7 +206,7 @@ class DashboardPage(BasePage):
         row = QHBoxLayout()
         row.setSpacing(Theme.GAP)
 
-        BOTTOM_HEIGHT = 270
+        BOTTOM_HEIGHT = 300
 
         # Network Map (moved here from the middle column; more room)
         from ui.widgets.network_map import NetworkMap

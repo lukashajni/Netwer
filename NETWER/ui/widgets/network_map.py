@@ -1,23 +1,27 @@
 """
-NETWER — NetworkMap widget.
+NETWER — NetworkMap widget (rebuilt on real layouts, not hand-painted math).
 
-LAN topology: Internet (top), Router (middle), devices (row below).
-- Internet: label sits to the RIGHT of the globe icon
-- Router: name + IP stacked to the RIGHT of the router icon (name above IP)
-- Devices: icon with name + IP stacked below, clearly separated
-- Connection lines are green when online, and routed so they never cross
-  any icon or text.
+Architecture: Internet / Router / Devices are REAL child widgets arranged
+by Qt's layout engine (QVBoxLayout + QHBoxLayout), the same system that
+lays out the whole Dashboard. Qt guarantees these never overlap, no matter
+the widget's size — no more fragile pixel arithmetic.
+
+Connector lines are drawn in NetworkMap's own paintEvent, which Qt always
+renders BEHIND child widgets. That means the icons are structurally
+guaranteed to sit on top of the lines — a line can never visually cross a
+logo, by construction, not by careful coordinate tuning.
 """
 
-from PyQt6.QtCore import Qt, QRectF, QPointF
-from PyQt6.QtGui import QPainter, QColor, QPen, QFont
-from PyQt6.QtWidgets import QWidget
+from PyQt6.QtCore import Qt, QPoint, QPointF
+from PyQt6.QtGui import QPainter, QColor, QPen
+from PyQt6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel
 
 from app.theme import Theme
 from app.resources import Icons
 
 
 def guess_device_icon(dev: dict) -> str:
+    """Pick an icon name based on hostname/vendor hints."""
     text = f"{dev.get('hostname','')} {dev.get('vendor','')}".lower()
 
     def has(*words):
@@ -59,7 +63,7 @@ def guess_device_icon(dev: dict) -> str:
 
 
 def device_display_name(dev: dict) -> str:
-    """Best available name: hostname, else vendor, else IP."""
+    """Best available name: real hostname, else vendor, else IP."""
     hostname = (dev.get("hostname") or "").strip()
     if hostname and hostname.lower() not in ("unknown", "?", ""):
         return hostname
@@ -69,116 +73,227 @@ def device_display_name(dev: dict) -> str:
     return dev.get("ip", "?")
 
 
+class _LabeledIcon(QWidget):
+    """Icon with title (+ optional subtitle) to its RIGHT.
+
+    Layout trick: the node is symmetric around its ICON. Empty space of the
+    same width as the text block is reserved on the LEFT, so when the node
+    is centered in the map, the ICON lands exactly on the map's centerline —
+    the same centerline the device row centers on. Without this the icon
+    would be offset by half the text width and the connector lines would
+    not line up with the devices below.
+    """
+
+    TEXT_WIDTH = 120   # room for "MikroTik" + an IP address
+
+    def __init__(self, icon_name, icon_color, title, subtitle="",
+                 subtitle_mono=False, title_color=None, icon_size=32, parent=None):
+        super().__init__(parent)
+        self.setStyleSheet("background: transparent;")
+
+        lay = QHBoxLayout(self)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(9)
+
+        # Mirror spacer: same width as the text block, on the left.
+        left_spacer = QWidget()
+        left_spacer.setFixedWidth(self.TEXT_WIDTH)
+        left_spacer.setStyleSheet("background: transparent;")
+        lay.addWidget(left_spacer)
+
+        self.icon_label = QLabel()
+        self.icon_label.setFixedSize(icon_size, icon_size)
+        self.icon_label.setStyleSheet("background: transparent;")
+        lay.addWidget(self.icon_label)
+
+        text_holder = QWidget()
+        text_holder.setFixedWidth(self.TEXT_WIDTH)
+        text_holder.setStyleSheet("background: transparent;")
+        text_box = QVBoxLayout(text_holder)
+        text_box.setSpacing(0)
+        text_box.setContentsMargins(0, 0, 0, 0)
+        text_box.setAlignment(Qt.AlignmentFlag.AlignVCenter)
+
+        self.title_label = QLabel(title)
+        self.title_label.setStyleSheet("background: transparent;")
+        text_box.addWidget(self.title_label)
+
+        self.subtitle_label = None
+        if subtitle:
+            self.subtitle_label = QLabel(subtitle)
+            self.subtitle_label.setStyleSheet("background: transparent;")
+            text_box.addWidget(self.subtitle_label)
+
+        lay.addWidget(text_holder)
+
+        self._icon_name = icon_name
+        self._subtitle_mono = subtitle_mono
+        self.set_colors(icon_color, title_color or Theme.TEXT_BODY)
+
+    def set_colors(self, icon_color, title_color):
+        self.icon_label.setPixmap(Icons.pixmap(self._icon_name,
+                                               self.icon_label.width(), icon_color))
+        self.title_label.setStyleSheet(
+            f"color: {title_color}; font-family: '{Theme.FONT_FAMILY}';"
+            f"font-size: 10px; font-weight: 600; background: transparent;"
+        )
+        if self.subtitle_label:
+            font = Theme.FONT_MONO if self._subtitle_mono else Theme.FONT_FAMILY
+            self.subtitle_label.setStyleSheet(
+                f"color: {Theme.TEXT_MUTED}; font-family: '{font}';"
+                f"font-size: 9px; background: transparent;"
+            )
+
+    def set_title(self, text):
+        self.title_label.setText(text)
+
+    def set_subtitle(self, text):
+        if self.subtitle_label:
+            self.subtitle_label.setText(text)
+
+
+class _DeviceNode(QWidget):
+    """Icon centered above a name + IP, stacked below — used for devices."""
+
+    def __init__(self, icon_name, icon_color, name, ip, icon_size=28, parent=None):
+        super().__init__(parent)
+        self.setStyleSheet("background: transparent;")
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(4, 0, 4, 0)
+        lay.setSpacing(4)
+        lay.setAlignment(Qt.AlignmentFlag.AlignHCenter)
+
+        self.icon_label = QLabel()
+        self.icon_label.setFixedSize(icon_size, icon_size)
+        self.icon_label.setPixmap(Icons.pixmap(icon_name, icon_size, icon_color))
+        self.icon_label.setStyleSheet("background: transparent;")
+        lay.addWidget(self.icon_label, alignment=Qt.AlignmentFlag.AlignHCenter)
+
+        name_lbl = QLabel(name)
+        name_lbl.setAlignment(Qt.AlignmentFlag.AlignHCenter)
+        name_lbl.setStyleSheet(
+            f"color: {Theme.TEXT_BODY}; font-family: '{Theme.FONT_FAMILY}';"
+            f"font-size: 9px; font-weight: 600; background: transparent;"
+        )
+        lay.addWidget(name_lbl)
+
+        ip_lbl = QLabel(ip)
+        ip_lbl.setAlignment(Qt.AlignmentFlag.AlignHCenter)
+        ip_lbl.setStyleSheet(
+            f"color: {Theme.TEXT_MUTED}; font-family: '{Theme.FONT_MONO}';"
+            f"font-size: 8px; background: transparent;"
+        )
+        lay.addWidget(ip_lbl)
+
+
 class NetworkMap(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setMinimumHeight(190)
         self.setStyleSheet("background: transparent;")
+        self.setMinimumHeight(180)
+        self._online = True
         self._gateway = "—"
         self._router_vendor = ""
         self._devices = []
-        self._online = True
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(6, 10, 6, 8)
+        root.setSpacing(0)
+
+        self._internet_node = _LabeledIcon(
+            "internet", Theme.SUCCESS, "Internet", icon_size=32)
+        root.addWidget(self._internet_node, alignment=Qt.AlignmentFlag.AlignHCenter)
+
+        root.addStretch(1)
+
+        self._router_node = _LabeledIcon(
+            "dev_router", Theme.ACCENT, "Router", "—",
+            subtitle_mono=True, icon_size=32)
+        root.addWidget(self._router_node, alignment=Qt.AlignmentFlag.AlignHCenter)
+
+        root.addStretch(1)
+
+        self._devices_container = QWidget()
+        self._devices_container.setStyleSheet("background: transparent;")
+        self._devices_layout = QHBoxLayout(self._devices_container)
+        self._devices_layout.setContentsMargins(0, 0, 0, 0)
+        self._devices_layout.setSpacing(2)
+        root.addWidget(self._devices_container)
 
     def set_topology(self, gateway, devices, router_vendor="", online=True):
         self._gateway = gateway or "—"
         self._router_vendor = router_vendor
         self._online = online
         self._devices = [d for d in devices if d.get("ip") != gateway][:5]
+
+        # Internet node reflects connection state
+        icol = Theme.SUCCESS if online else Theme.TEXT_MUTED
+        self._internet_node.set_colors(icol, icol)
+
+        # Router node: name above IP, to the right of the icon
+        self._router_node.set_title(self._router_vendor or "Router")
+        self._router_node.set_subtitle(self._gateway)
+
+        # Rebuild the device row
+        while self._devices_layout.count():
+            item = self._devices_layout.takeAt(0)
+            w = item.widget()
+            if w:
+                w.deleteLater()
+
+        if self._devices:
+            self._devices_layout.addStretch(1)
+            for dev in self._devices:
+                name = device_display_name(dev)[:14]
+                icon_name = guess_device_icon(dev)
+                node = _DeviceNode(icon_name, Theme.TEXT_SECONDARY, name,
+                                   dev.get("ip", ""))
+                self._devices_layout.addWidget(node)
+                self._devices_layout.addStretch(1)
+
         self.update()
 
     def paintEvent(self, event):
+        # Lines are painted here, in the PARENT's paintEvent — Qt always
+        # composites child widgets (the icons) on top of this, so a line
+        # can never visually cover an icon, regardless of layout size.
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
-
-        w = self.width()
-        h = self.height()
-        cx = w / 2
-        icon_r = 17
-        gap = 12          # guaranteed clearance between a line end and an icon
-        label_h = 32      # space under a device icon for name + IP
-
-        # Lay out from the bottom up so spacing is guaranteed regardless of
-        # the widget's height. Devices sit above their labels; the bus sits
-        # a fixed clearance above the device icons; the router above that.
-        y_devices = h - label_h - icon_r - 4
-        bus_y = y_devices - icon_r - gap - 14      # bus is clearly above icons
-        y_router = bus_y - 26 - icon_r             # router above the bus
-        y_internet = icon_r + 8   # pinned to the top of the map area
 
         link_color = QColor(Theme.SUCCESS) if self._online else QColor(Theme.TEXT_FAINT)
         pen = QPen(link_color, 2.0)
         pen.setCapStyle(Qt.PenCapStyle.RoundCap)
         p.setPen(pen)
 
-        # ── Internet -> Router (vertical, ends at icon edges) ──
-        p.drawLine(QPointF(cx, y_internet + icon_r + gap),
-                   QPointF(cx, y_router - icon_r - gap))
+        def top_of(widget: QLabel) -> QPointF:
+            return QPointF(widget.mapTo(self, QPoint(widget.width() // 2, 0)))
 
-        # ── Router -> bus -> devices ──
-        n = len(self._devices)
-        if n > 0:
-            p.drawLine(QPointF(cx, y_router + icon_r + gap), QPointF(cx, bus_y))
-            xs = self._device_xs(w, n)
-            if n > 1:
-                p.drawLine(QPointF(xs[0], bus_y), QPointF(xs[-1], bus_y))
-            for x in xs:
-                p.drawLine(QPointF(x, bus_y),
-                           QPointF(x, y_devices - icon_r - gap))
+        def bottom_of(widget: QLabel) -> QPointF:
+            return QPointF(widget.mapTo(self, QPoint(widget.width() // 2, widget.height())))
 
-        # ── Internet node: icon + "Internet" label to the RIGHT ──
-        icol = QColor(Theme.SUCCESS) if self._online else QColor(Theme.TEXT_MUTED)
-        self._icon(p, cx, y_internet, "internet", icol, icon_r)
-        self._text_left(p, cx + icon_r + 8, y_internet, "Internet",
-                        icol.name(), bold=True, size=9)
+        internet_bottom = bottom_of(self._internet_node.icon_label)
+        router_top = top_of(self._router_node.icon_label)
+        router_bottom = bottom_of(self._router_node.icon_label)
 
-        # ── Router node: icon + name (above) + IP (below) to the RIGHT ──
-        self._icon(p, cx, y_router, "dev_router", QColor(Theme.ACCENT), icon_r)
-        router_name = self._router_vendor or "Router"
-        rx = cx + icon_r + 8
-        self._text_left(p, rx, y_router - 7, router_name, Theme.TEXT_BODY,
-                        bold=True, size=9)
-        if self._gateway and self._gateway != "—":
-            self._text_left(p, rx, y_router + 6, self._gateway,
-                            Theme.TEXT_MUTED, mono=True, size=8)
+        # Internet -> Router
+        p.drawLine(internet_bottom, router_top)
 
-        # ── Device nodes: icon with name + IP stacked BELOW, separated ──
-        if n > 0:
-            xs = self._device_xs(w, n)
-            for x, dev in zip(xs, self._devices):
-                self._icon(p, x, y_devices, guess_device_icon(dev),
-                           QColor(Theme.TEXT_SECONDARY), icon_r)
-                name = device_display_name(dev)
-                self._text_center(p, x, y_devices + icon_r + 5, str(name)[:14],
-                                  Theme.TEXT_BODY, bold=True, size=8)
-                self._text_center(p, x, y_devices + icon_r + 18,
-                                  dev.get("ip", ""), Theme.TEXT_MUTED,
-                                  mono=True, size=8)
+        # Router -> bus -> devices
+        device_tops = []
+        for i in range(self._devices_layout.count()):
+            item = self._devices_layout.itemAt(i)
+            w = item.widget()
+            if isinstance(w, _DeviceNode):
+                device_tops.append(top_of(w.icon_label))
+
+        if device_tops:
+            bus_y = (router_bottom.y() + device_tops[0].y()) / 2
+            cx = router_bottom.x()
+            p.drawLine(QPointF(cx, router_bottom.y()), QPointF(cx, bus_y))
+            xs = [pt.x() for pt in device_tops]
+            if len(xs) > 1:
+                p.drawLine(QPointF(min(xs), bus_y), QPointF(max(xs), bus_y))
+            for pt in device_tops:
+                p.drawLine(QPointF(pt.x(), bus_y), pt)
+
         p.end()
-
-    def _device_xs(self, w, n):
-        if n == 1:
-            return [w / 2]
-        margin = 56
-        span = w - 2 * margin
-        return [margin + span * i / (n - 1) for i in range(n)]
-
-    def _icon(self, p, cx, cy, name, color, r):
-        pm = Icons.pixmap(name, r * 2, color.name())
-        p.drawPixmap(int(cx - r), int(cy - r), pm)
-
-    def _text_center(self, p, cx, y_top, text, color, bold=False, mono=False, size=8):
-        p.setPen(QColor(color))
-        fam = Theme.FONT_MONO if mono else Theme.FONT_FAMILY
-        f = QFont(fam, size); f.setBold(bold)
-        p.setFont(f)
-        p.drawText(QRectF(cx - 70, y_top, 140, 13),
-                   Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop, text)
-
-    def _text_left(self, p, x, cy, text, color, bold=False, mono=False, size=8):
-        """Draw text left-aligned, vertically centered on cy."""
-        p.setPen(QColor(color))
-        fam = Theme.FONT_MONO if mono else Theme.FONT_FAMILY
-        f = QFont(fam, size); f.setBold(bold)
-        p.setFont(f)
-        p.drawText(QRectF(x, cy - 8, 150, 16),
-                   Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, text)
