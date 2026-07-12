@@ -26,21 +26,28 @@ class Card(QFrame):
         outer.setContentsMargins(14, 12, 14, 14)
         outer.setSpacing(10)
 
-        header = QHBoxLayout()
-        header.setSpacing(7)
-        if icon_name:
-            icon_lbl = QLabel()
-            icon_lbl.setPixmap(Icons.pixmap(icon_name, 14, Theme.TEXT_SECONDARY))
-            header.addWidget(icon_lbl)
-        title_lbl = QLabel(title)
-        title_lbl.setStyleSheet(
-            f"color: {Theme.TEXT_BODY}; font-size: {Theme.FONT_SIZE_BODY}px;"
-            f"font-weight: 500;"
-        )
-        header.addWidget(title_lbl)
-        header.addStretch()
-        self.header_layout = header
-        outer.addLayout(header)
+        # Cards used as compact stat tiles pass an empty title — in that case
+        # skip the header entirely, otherwise it eats ~30px of height and the
+        # content gets clipped.
+        self.header_layout = QHBoxLayout()
+        if title or icon_name:
+            header = self.header_layout
+            header.setSpacing(7)
+            if icon_name:
+                icon_lbl = QLabel()
+                icon_lbl.setPixmap(Icons.pixmap(icon_name, 14, Theme.TEXT_SECONDARY))
+                header.addWidget(icon_lbl)
+            title_lbl = QLabel(title)
+            title_lbl.setStyleSheet(
+                f"color: {Theme.TEXT_BODY}; font-size: {Theme.FONT_SIZE_BODY}px;"
+                f"font-weight: 500;"
+            )
+            header.addWidget(title_lbl)
+            header.addStretch()
+            outer.addLayout(header)
+        else:
+            outer.setContentsMargins(14, 12, 14, 12)
+            outer.setSpacing(0)
 
         self.content_layout = QVBoxLayout()
         self.content_layout.setSpacing(6)

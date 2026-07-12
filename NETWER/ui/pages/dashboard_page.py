@@ -279,9 +279,15 @@ class DashboardPage(BasePage):
             self._loaded_once = True
             self._begin_loading()
         else:
+            # Returning to the page: restart EVERY live timer that on_leave
+            # stopped. Missing one here (info/ping) silently kills live
+            # refresh — e.g. a WiFi adapter plugged in later never shows up.
             self._start_monitor()
             self._resource_timer.start()
+            self._ping_timer.start()
+            self._info_timer.start()
             self._refresh_resources()
+            self._refresh_info()
             if self._boot_epoch is not None:
                 self._uptime_timer.start()
 

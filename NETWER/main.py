@@ -21,6 +21,8 @@ from core import netwer_core
 from ui.main_window import MainWindow
 from ui.pages.dashboard_page import DashboardPage
 from ui.pages.network_info_page import NetworkInfoPage
+from ui.pages.wifi_info_page import WiFiInfoPage
+from ui.pages.system_info_page import SystemInfoPage
 from ui.pages.report_page import ReportPage
 
 
@@ -77,6 +79,12 @@ def _register_pages(window: MainWindow) -> None:
     )
     window.register_page(
         "network", "network", NetworkInfoPage(netwer_core), subtitle="IP, MAC, Adapter"
+    )
+    window.register_page(
+        "wifi", "wifi", WiFiInfoPage(netwer_core), subtitle="Wireless Details"
+    )
+    window.register_page(
+        "system", "system", SystemInfoPage(netwer_core), subtitle="Hardware & OS"
     )
     window.register_page(
         "report", "report", ReportPage(netwer_core), subtitle="Export PDF"

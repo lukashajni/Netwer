@@ -310,7 +310,10 @@ def get_wifi_info():
         signal = extract(r'^\s*Signal\s*:\s*(.+)$')
         radio = extract(r'^\s*(?:Radio type|Vrsta radija)\s*:\s*(.+)$')
         auth = extract(r'^\s*(?:Authentication|Autentifikacija)\s*:\s*(.+)$')
+        cipher = extract(r'^\s*(?:Cipher|Šifra)\s*:\s*(.+)$')
         channel = extract(r'^\s*(?:Channel|Kanal)\s*:\s*(\d+)')
+        rx_rate = extract(r'^\s*(?:Receive rate \(Mbps\)|Brzina primanja)\s*:\s*(.+)$')
+        tx_rate = extract(r'^\s*(?:Transmit rate \(Mbps\)|Brzina slanja)\s*:\s*(.+)$')
 
         bssid_m = re.search(r'([0-9a-fA-F]{2}[: -]){5}[0-9a-fA-F]{2}', wifi)
         bssid = bssid_m.group(0).strip() if bssid_m else "Unknown"
@@ -327,10 +330,104 @@ def get_wifi_info():
         elif "802.11a" in radio:
             band = "5 GHz (Legacy)"
 
+        # Link speed: prefer the receive rate; fall back to transmit
+        link_speed = "Unknown"
+        rate = rx_rate if rx_rate != "Unknown" else tx_rate
+        if rate != "Unknown":
+            link_speed = f"{rate} Mbps"
+
         return {
             "ssid": ssid, "bssid": bssid, "signal": signal,
             "radio": radio, "band": band, "auth": auth, "channel": channel,
+            "cipher": cipher, "link_speed": link_speed,
+            "rx_rate": rx_rate, "tx_rate": tx_rate,
         }
+    except Exception as e:
+        return {"error": str(e)}
+
+
+def scan_wifi_networks():
+    """Scan for nearby wireless networks (netsh wlan show networks).
+
+    Returns {"networks": [...]} where each entry has ssid, signal (%),
+    signal_dbm (approx), auth, encryption, band and channel. Windows reports
+    signal as a percentage; we convert to an approximate dBm for display,
+    since dBm is what network tools conventionally show.
+
+    Takes a few seconds (the adapter has to sweep the channels), so call it
+    from a worker, never on the UI thread.
+    """
+    try:
+        result = subprocess.run(
+            ["netsh", "wlan", "show", "networks", "mode=bssid"],
+            capture_output=True, text=True, timeout=25)
+        out = result.stdout
+
+        if "There is no wireless interface" in out or not out.strip():
+            return {"error": "No WiFi adapter found or it is turned off."}
+
+        networks = []
+        current = None
+
+        for line in out.splitlines():
+            line = line.strip()
+
+            m = re.match(r'^SSID\s+\d+\s*:\s*(.*)$', line)
+            if m:
+                if current and current.get("ssid"):
+                    networks.append(current)
+                name = m.group(1).strip()
+                current = {
+                    "ssid": name or "(hidden network)",
+                    "auth": "Unknown", "encryption": "Unknown",
+                    "signal": 0, "signal_dbm": -100,
+                    "channel": "", "band": "", "radio": "",
+                }
+                continue
+
+            if current is None:
+                continue
+
+            m = re.match(r'^(?:Authentication|Autentifikacija)\s*:\s*(.+)$', line)
+            if m:
+                current["auth"] = m.group(1).strip()
+                continue
+
+            m = re.match(r'^(?:Encryption|Šifriranje)\s*:\s*(.+)$', line)
+            if m:
+                current["encryption"] = m.group(1).strip()
+                continue
+
+            m = re.match(r'^(?:Signal|Signal)\s*:\s*(\d+)%', line)
+            if m:
+                pct = int(m.group(1))
+                # Keep the strongest BSSID seen for this SSID
+                if pct > current["signal"]:
+                    current["signal"] = pct
+                    # Windows % -> approximate dBm (0% = -100, 100% = -50)
+                    current["signal_dbm"] = round(pct / 2.0 - 100)
+                continue
+
+            m = re.match(r'^(?:Channel|Kanal)\s*:\s*(\d+)', line)
+            if m and not current["channel"]:
+                ch = int(m.group(1))
+                current["channel"] = str(ch)
+                current["band"] = "2.4 GHz" if ch <= 14 else "5 GHz"
+                continue
+
+            m = re.match(r'^(?:Radio type|Vrsta radija)\s*:\s*(.+)$', line)
+            if m and not current["radio"]:
+                current["radio"] = m.group(1).strip()
+                continue
+
+        if current and current.get("ssid"):
+            networks.append(current)
+
+        networks.sort(key=lambda n: n["signal"], reverse=True)
+        return {"networks": networks, "count": len(networks)}
+
+    except subprocess.TimeoutExpired:
+        return {"error": "WiFi scan timed out"}
     except Exception as e:
         return {"error": str(e)}
 
@@ -377,6 +474,74 @@ $up   = New-TimeSpan -Start $boot -End (Get-Date)
         return {"error": "psutil not available and not on Windows"}
     except Exception as e:
         return {"error": str(e)}
+
+
+def get_system_details():
+    """Extended system information for the System Information page.
+
+    Builds on get_system_info() (computer/CPU/RAM/OS/uptime) and adds
+    hardware detail — core counts, CPU frequency, architecture, OS build,
+    Python version, disk layout. Uses platform/psutil rather than more
+    PowerShell so it's testable and fast.
+    """
+    details = {}
+
+    # Start from the existing snapshot (name, CPU model, RAM, OS, uptime)
+    base = get_system_info()
+    if isinstance(base, dict) and "error" not in base:
+        details.update(base)
+
+    try:
+        details["architecture"] = platform.machine() or "Unknown"
+        details["python_version"] = platform.python_version()
+        details["hostname"] = socket.gethostname()
+
+        # OS build/version detail
+        if platform.system() == "Windows":
+            details["os_build"] = platform.version() or "Unknown"
+            details["os_release"] = platform.release() or ""
+        else:
+            details["os_build"] = platform.version() or "Unknown"
+            details["os_release"] = platform.release() or ""
+
+        if PSUTIL_AVAILABLE:
+            details["cores_physical"] = psutil.cpu_count(logical=False) or 0
+            details["cores_logical"] = psutil.cpu_count(logical=True) or 0
+
+            freq = psutil.cpu_freq()
+            if freq:
+                details["cpu_freq_current"] = round(freq.current)
+                details["cpu_freq_max"] = round(freq.max) if freq.max else 0
+
+            mem = psutil.virtual_memory()
+            details["ram_total_gb"] = round(mem.total / (1024 ** 3), 2)
+            details["ram_used_gb"] = round(mem.used / (1024 ** 3), 2)
+            details["ram_available_gb"] = round(mem.available / (1024 ** 3), 2)
+
+            # Disk partitions
+            disks = []
+            for part in psutil.disk_partitions(all=False):
+                try:
+                    usage = psutil.disk_usage(part.mountpoint)
+                    disks.append({
+                        "device": part.device,
+                        "mountpoint": part.mountpoint,
+                        "fstype": part.fstype,
+                        "total_gb": round(usage.total / (1024 ** 3), 2),
+                        "used_gb": round(usage.used / (1024 ** 3), 2),
+                        "percent": round(usage.percent, 1),
+                    })
+                except (PermissionError, OSError):
+                    continue
+            details["disks"] = disks
+
+            boot = psutil.boot_time()
+            details["boot_time"] = boot
+
+        return details
+    except Exception as e:
+        details["error"] = str(e)
+        return details
 
 
 # ══════════════════════════════════════════

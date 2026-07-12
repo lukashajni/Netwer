@@ -53,7 +53,7 @@ class Icons:
         "system": "fa6s.microchip",
         "ping": "fa6s.satellite-dish",
         "ping_stability": "fa6s.wave-square",
-        "ping_sweep": "fa6s.radar",
+        "ping_sweep": "mdi.radar",
         "port_scanner": "fa6s.plug",
         "dns": "fa6s.magnifying-glass",
         "reverse_dns": "fa6s.right-left",
