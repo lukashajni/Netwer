@@ -23,6 +23,7 @@ from PyQt6.QtWidgets import (
 )
 
 from app.theme import Theme
+from app.formatting import format_speed, scale_for_axis
 from ui.pages.base_page import BasePage
 from ui.widgets.stat_card import StatCard
 from ui.widgets.gauge import Gauge
@@ -242,21 +243,21 @@ class DashboardPage(BasePage):
 
         self.resources_card = Card("System Resources", "resources")
         self.resources_card.setFixedHeight(BOTTOM_HEIGHT)
-        # Gauges grouped tightly and centered, with a small top offset so
-        # they don't float awkwardly in the middle of the card.
-        self.resources_card.content_layout.addSpacing(14)
+        # Gauges evenly spread with breathing room, vertically centered.
+        self.resources_card.content_layout.addStretch(1)
         gauges = QHBoxLayout()
-        gauges.setSpacing(18)
-        gauges.setContentsMargins(0, 0, 0, 0)
-        gauges.addStretch()
+        gauges.setSpacing(0)
+        gauges.setContentsMargins(8, 0, 8, 0)
         self.gauge_cpu = Gauge("CPU", Theme.ACCENT)
         self.gauge_ram = Gauge("Memory", Theme.ACCENT_PURPLE)
         self.gauge_disk = Gauge("Disk", Theme.SUCCESS)
+        # Equal stretch around each gauge = even spacing across the card
         for g in (self.gauge_cpu, self.gauge_ram, self.gauge_disk):
+            gauges.addStretch(1)
             gauges.addWidget(g)
-        gauges.addStretch()
+            gauges.addStretch(1)
         self.resources_card.content_layout.addLayout(gauges)
-        self.resources_card.content_layout.addStretch()
+        self.resources_card.content_layout.addStretch(1)
         row.addWidget(self.resources_card, 2)
 
         self._grid.addLayout(row, 0)
@@ -529,12 +530,25 @@ class DashboardPage(BasePage):
             self.network_map.set_topology(gateway, devices, router_vendor,
                                           online=getattr(self, "_internet_online", True))
 
+    @staticmethod
+    def device_display_name(dev: dict) -> str:
+        """Best available name for a device: real hostname, else the vendor
+        (e.g. 'LG Electronics'), else the IP. Avoids showing 'Unknown' when
+        we actually know the manufacturer."""
+        hostname = (dev.get("hostname") or "").strip()
+        if hostname and hostname.lower() not in ("unknown", "?", ""):
+            return hostname
+        vendor = (dev.get("vendor") or "").strip()
+        if vendor and vendor.lower() != "unknown":
+            return vendor
+        return dev.get("ip", "?")
+
     def _device_row(self, dev: dict) -> QWidget:
         w = QWidget()
         w.setStyleSheet("background: transparent;")
         row = QHBoxLayout(w)
         row.setContentsMargins(0, 3, 0, 3)
-        name = dev.get("hostname") or dev.get("ip", "?")
+        name = self.device_display_name(dev)
         n = QLabel(str(name)[:18])
         n.setStyleSheet(f"color: {Theme.TEXT_BODY}; font-family: '{Theme.FONT_DATA}'; font-size: {Theme.FONT_SIZE_SMALL}px; background: transparent;")
         ip = QLabel(dev.get("ip", ""))
@@ -597,8 +611,8 @@ class DashboardPage(BasePage):
         if self._monitor_worker is not None:
             return
         self.chart.reset()
-        self.card_download.set_value("0.0", "Mbps", color=Theme.ACCENT, subtitle="Live")
-        self.card_upload.set_value("0.0", "Mbps", color=Theme.ACCENT_PURPLE, subtitle="Live")
+        self.card_download.set_value("0.0", "Kbps", color=Theme.ACCENT, subtitle="Live")
+        self.card_upload.set_value("0.0", "Kbps", color=Theme.ACCENT_PURPLE, subtitle="Live")
         adapter = getattr(self, "_selected_adapter", "")
         w = StreamWorker(self.core.monitor_stream, adapter)
         w.result.connect(self._on_monitor)
@@ -614,9 +628,12 @@ class DashboardPage(BasePage):
             self.adapter_status.setText(f"Monitoring: {adapter}")
         if "dl" in d and "ul" in d:
             self.chart.push(d["dl"], d["ul"])
-            self.card_download.set_value(f"{d['dl']:.1f}", "Mbps",
+            # Adaptive units: Kbps / Mbps / Gbps depending on the value
+            dl_val, dl_unit = format_speed(d["dl"])
+            ul_val, ul_unit = format_speed(d["ul"])
+            self.card_download.set_value(dl_val, dl_unit,
                                          color=Theme.ACCENT, subtitle="Live")
-            self.card_upload.set_value(f"{d['ul']:.1f}", "Mbps",
+            self.card_upload.set_value(ul_val, ul_unit,
                                        color=Theme.ACCENT_PURPLE, subtitle="Live")
             self.card_download.push_spark(d["dl"])
             self.card_upload.push_spark(d["ul"])

@@ -58,6 +58,17 @@ def guess_device_icon(dev: dict) -> str:
     return "dev_generic"
 
 
+def device_display_name(dev: dict) -> str:
+    """Best available name: hostname, else vendor, else IP."""
+    hostname = (dev.get("hostname") or "").strip()
+    if hostname and hostname.lower() not in ("unknown", "?", ""):
+        return hostname
+    vendor = (dev.get("vendor") or "").strip()
+    if vendor and vendor.lower() != "unknown":
+        return vendor
+    return dev.get("ip", "?")
+
+
 class NetworkMap(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -83,31 +94,36 @@ class NetworkMap(QWidget):
         h = self.height()
         cx = w / 2
         icon_r = 17
-        gap = 10   # gap between line ends and icons
+        gap = 12          # guaranteed clearance between a line end and an icon
+        label_h = 32      # space under a device icon for name + IP
 
-        y_internet = 30
-        y_router = h * 0.42
-        y_devices = h - 58
+        # Lay out from the bottom up so spacing is guaranteed regardless of
+        # the widget's height. Devices sit above their labels; the bus sits
+        # a fixed clearance above the device icons; the router above that.
+        y_devices = h - label_h - icon_r - 4
+        bus_y = y_devices - icon_r - gap - 14      # bus is clearly above icons
+        y_router = bus_y - 26 - icon_r             # router above the bus
+        y_internet = icon_r + 8   # pinned to the top of the map area
 
         link_color = QColor(Theme.SUCCESS) if self._online else QColor(Theme.TEXT_FAINT)
         pen = QPen(link_color, 2.0)
         pen.setCapStyle(Qt.PenCapStyle.RoundCap)
         p.setPen(pen)
 
-        # ── Internet -> Router (vertical green line, stops at icon edges) ──
+        # ── Internet -> Router (vertical, ends at icon edges) ──
         p.drawLine(QPointF(cx, y_internet + icon_r + gap),
                    QPointF(cx, y_router - icon_r - gap))
 
-        # ── Router -> devices ──
+        # ── Router -> bus -> devices ──
         n = len(self._devices)
         if n > 0:
-            bus_y = y_router + icon_r + 24
             p.drawLine(QPointF(cx, y_router + icon_r + gap), QPointF(cx, bus_y))
             xs = self._device_xs(w, n)
             if n > 1:
                 p.drawLine(QPointF(xs[0], bus_y), QPointF(xs[-1], bus_y))
             for x in xs:
-                p.drawLine(QPointF(x, bus_y), QPointF(x, y_devices - icon_r - gap))
+                p.drawLine(QPointF(x, bus_y),
+                           QPointF(x, y_devices - icon_r - gap))
 
         # ── Internet node: icon + "Internet" label to the RIGHT ──
         icol = QColor(Theme.SUCCESS) if self._online else QColor(Theme.TEXT_MUTED)
@@ -131,7 +147,7 @@ class NetworkMap(QWidget):
             for x, dev in zip(xs, self._devices):
                 self._icon(p, x, y_devices, guess_device_icon(dev),
                            QColor(Theme.TEXT_SECONDARY), icon_r)
-                name = dev.get("hostname") or dev.get("ip", "?")
+                name = device_display_name(dev)
                 self._text_center(p, x, y_devices + icon_r + 5, str(name)[:14],
                                   Theme.TEXT_BODY, bold=True, size=8)
                 self._text_center(p, x, y_devices + icon_r + 18,
