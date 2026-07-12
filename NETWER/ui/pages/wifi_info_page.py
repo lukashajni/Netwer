@@ -38,11 +38,17 @@ class WiFiInfoPage(BasePage):
         self._connected = False
         self._scan_worker = None
         self._info_worker = None
+        self._last_scan_time = None
 
         # Live refresh of the connection info (adapter plugged in, roaming…)
         self._refresh_timer = QTimer(self)
         self._refresh_timer.setInterval(4000)
         self._refresh_timer.timeout.connect(self._refresh_info)
+
+        # Keeps the "last scan: 2m ago" label current
+        self._scan_label_timer = QTimer(self)
+        self._scan_label_timer.setInterval(15000)
+        self._scan_label_timer.timeout.connect(self._update_last_scan_label)
 
         self._build_headline_row()
         self._build_detail_row()
@@ -153,6 +159,13 @@ class WiFiInfoPage(BasePage):
         self.networks_card = Card("Available Networks", "ping_sweep")
         self.networks_card.setFixedHeight(DETAIL_H)
 
+        # "Last scan" indicator, updated live so it reads "2m ago"
+        self.last_scan_label = QLabel("Never scanned")
+        self.last_scan_label.setStyleSheet(
+            f"color: {Theme.TEXT_FAINT}; font-size: {Theme.FONT_SIZE_TINY}px;"
+            f"background: transparent;")
+        self.networks_card.header_layout.addWidget(self.last_scan_label)
+
         self.btn_scan = QPushButton("  Scan")
         self.btn_scan.setIcon(Icons.get("refresh", Theme.TEXT_BODY))
         self.btn_scan.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -212,10 +225,20 @@ class WiFiInfoPage(BasePage):
     def on_enter(self):
         self._refresh_info()
         self._refresh_timer.start()
+        self._scan_label_timer.start()
+        self._update_last_scan_label()
 
     def on_leave(self):
         self._refresh_timer.stop()
+        self._scan_label_timer.stop()
         super().on_leave()
+
+    def _update_last_scan_label(self):
+        if self._last_scan_time is None:
+            self.last_scan_label.setText("Never scanned")
+            return
+        from app.activity import time_ago
+        self.last_scan_label.setText(f"Last scan: {time_ago(self._last_scan_time)}")
 
     # ══════════════════════════════════════════════════════════
     # Connection info
@@ -351,6 +374,10 @@ class WiFiInfoPage(BasePage):
             self._net_list.insertWidget(0, self._net_placeholder)
 
     def _on_networks(self, data: dict):
+        import time
+        self._last_scan_time = time.time()
+        self._update_last_scan_label()
+
         networks = data.get("networks", [])
         if not networks:
             self._net_placeholder.setText("No networks found")

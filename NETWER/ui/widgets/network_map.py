@@ -135,13 +135,13 @@ class _LabeledIcon(QWidget):
                                                self.icon_label.width(), icon_color))
         self.title_label.setStyleSheet(
             f"color: {title_color}; font-family: '{Theme.FONT_FAMILY}';"
-            f"font-size: 10px; font-weight: 600; background: transparent;"
+            f"font-size: 12px; font-weight: 600; background: transparent;"
         )
         if self.subtitle_label:
             font = Theme.FONT_MONO if self._subtitle_mono else Theme.FONT_FAMILY
             self.subtitle_label.setStyleSheet(
                 f"color: {Theme.TEXT_MUTED}; font-family: '{font}';"
-                f"font-size: 9px; background: transparent;"
+                f"font-size: 11px; background: transparent;"
             )
 
     def set_title(self, text):
@@ -173,7 +173,7 @@ class _DeviceNode(QWidget):
         name_lbl.setAlignment(Qt.AlignmentFlag.AlignHCenter)
         name_lbl.setStyleSheet(
             f"color: {Theme.TEXT_BODY}; font-family: '{Theme.FONT_FAMILY}';"
-            f"font-size: 9px; font-weight: 600; background: transparent;"
+            f"font-size: 11px; font-weight: 600; background: transparent;"
         )
         lay.addWidget(name_lbl)
 
@@ -181,7 +181,7 @@ class _DeviceNode(QWidget):
         ip_lbl.setAlignment(Qt.AlignmentFlag.AlignHCenter)
         ip_lbl.setStyleSheet(
             f"color: {Theme.TEXT_MUTED}; font-family: '{Theme.FONT_MONO}';"
-            f"font-size: 8px; background: transparent;"
+            f"font-size: 10px; background: transparent;"
         )
         lay.addWidget(ip_lbl)
 

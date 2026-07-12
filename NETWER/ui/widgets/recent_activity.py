@@ -47,13 +47,6 @@ class RecentActivity(QWidget):
         scroll.setWidget(holder)
         outer.addWidget(scroll)
 
-        self._empty = QLabel("No activity yet")
-        self._empty.setStyleSheet(
-            f"color: {Theme.TEXT_MUTED}; font-size: {Theme.FONT_SIZE_SMALL}px;"
-            f"background: transparent;"
-        )
-        self._list.insertWidget(0, self._empty)
-
         activity.changed.connect(self.refresh)
 
         # Refresh the relative timestamps periodically ("2m ago" → "3m ago")
@@ -62,14 +55,20 @@ class RecentActivity(QWidget):
         self._tick.timeout.connect(self.refresh)
         self._tick.start()
 
+        # refresh() builds either the rows or the empty-state label, so we
+        # don't keep a permanent placeholder around — an earlier version did,
+        # and it stayed visible under the list once entries appeared.
         self.refresh()
 
     def refresh(self):
-        # Clear existing rows (keep the trailing stretch)
+        # Remove every row (the trailing stretch is the last item and stays).
+        # setParent(None) detaches immediately; deleteLater() alone would let
+        # the old widget linger visibly until Qt's event loop got round to it.
         while self._list.count() > 1:
             item = self._list.takeAt(0)
             w = item.widget()
             if w:
+                w.setParent(None)
                 w.deleteLater()
 
         entries = activity.entries(self._limit)

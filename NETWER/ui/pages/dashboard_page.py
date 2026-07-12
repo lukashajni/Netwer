@@ -19,7 +19,7 @@ import time
 
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QScrollArea
+    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QScrollArea, QPushButton
 )
 
 from app.theme import Theme
@@ -164,19 +164,22 @@ class DashboardPage(BasePage):
 
         self.wifi_card = Card("WiFi", "wifi")
         wifi_body = QHBoxLayout()
-        wifi_body.setSpacing(10)
+        wifi_body.setSpacing(14)
         wifi_left = QVBoxLayout()
         wifi_left.setSpacing(6)
+        wifi_left.addStretch()
         self._wifi_values = {}
         for key in ("Connection", "SSID", "Signal", "Channel"):
             container, val_lbl = kv_row(key, "\u2014", mono=(key == "Signal"))
             self._wifi_values[key] = val_lbl
             wifi_left.addWidget(container)
+        wifi_left.addStretch()
         wifi_body.addLayout(wifi_left, 1)
         from ui.widgets.wifi_signal import WiFiSignal
-        self.wifi_signal = WiFiSignal(72)
+        self.wifi_signal = WiFiSignal(92)
         self.wifi_signal.set_disconnected()
-        wifi_body.addWidget(self.wifi_signal, 0, Qt.AlignmentFlag.AlignCenter)
+        wifi_body.addWidget(self.wifi_signal, 0,
+                            Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignHCenter)
         self.wifi_card.content_layout.addLayout(wifi_body)
         right_col.addWidget(self.wifi_card)
 
@@ -248,6 +251,17 @@ class DashboardPage(BasePage):
         from ui.widgets.recent_activity import RecentActivity
         self.activity_card = Card("Recent Activity", "check")
         self.activity_card.setFixedHeight(150)
+
+        self.btn_view_all = QPushButton("View All")
+        self.btn_view_all.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_view_all.setStyleSheet(
+            f"QPushButton {{ background: {Theme.BG_ELEVATED}; color: {Theme.TEXT_SECONDARY};"
+            f"border: 1px solid {Theme.BORDER_STRONG}; border-radius: 6px;"
+            f"padding: 3px 10px; font-size: {Theme.FONT_SIZE_TINY}px; }}"
+            f"QPushButton:hover {{ border-color: {Theme.ACCENT}; color: {Theme.TEXT_BODY}; }}")
+        self.btn_view_all.clicked.connect(self._show_all_activity)
+        self.activity_card.header_layout.addWidget(self.btn_view_all)
+
         self.recent_activity = RecentActivity(limit=5)
         self.activity_card.content_layout.addWidget(self.recent_activity)
         right_col.addWidget(self.activity_card)
@@ -337,6 +351,12 @@ class DashboardPage(BasePage):
         self._info_timer.start()
         if self._boot_epoch is not None:
             self._uptime_timer.start()
+
+    def _show_all_activity(self):
+        """Open the full activity history in a dialog."""
+        from ui.components.activity_dialog import ActivityDialog
+        dlg = ActivityDialog(self)
+        dlg.exec()
 
     def _refresh_info(self):
         """Periodically re-read WiFi + Ethernet so changes (like plugging in

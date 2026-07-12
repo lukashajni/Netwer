@@ -76,7 +76,7 @@ class Gauge(QWidget):
         super().__init__(parent)
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
-        lay.setSpacing(6)
+        lay.setSpacing(12)
         lay.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
         self._ring = _Ring(color)
