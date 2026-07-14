@@ -740,6 +740,40 @@ def _get_mac_for_ip(ip, own_ip=None, own_mac=None):
     return None
 
 
+def _read_arp_table():
+    """Read the full ARP table → {ip: mac}. Devices that block ping (common
+    on Windows firewalls) still show up here if they've communicated on the
+    LAN recently. Real scanners cross-reference this so a silent host isn't
+    invisible."""
+    table = {}
+    try:
+        if platform.system() == "Windows":
+            result = subprocess.run(["arp", "-a"], capture_output=True,
+                                    text=True, timeout=5)
+            for line in result.stdout.splitlines():
+                m = re.search(
+                    r'(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\s+'
+                    r'(([0-9A-Fa-f]{2}[-:]){5}[0-9A-Fa-f]{2})', line)
+                if m:
+                    ip = m.group(1)
+                    mac = m.group(2).replace("-", ":").upper()
+                    # Skip broadcast/multicast placeholder entries
+                    if mac not in ("FF:FF:FF:FF:FF:FF",) and not ip.endswith(".255"):
+                        table[ip] = mac
+        else:
+            result = subprocess.run(["arp", "-n"], capture_output=True,
+                                    text=True, timeout=5)
+            for line in result.stdout.splitlines():
+                m = re.search(
+                    r'(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}).+?'
+                    r'(([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2})', line)
+                if m:
+                    table[m.group(1)] = m.group(2).upper()
+    except Exception:
+        pass
+    return table
+
+
 def ping_sweep_stream(timeout_ms=150):
     """Generator: scans the local /24 range in PARALLEL (like Advanced IP
     Scanner / Angry IP Scanner). Yields per-host results as they come in,
@@ -786,6 +820,7 @@ def ping_sweep_stream(timeout_ms=150):
 
     found = 0
     scanned = 0
+    seen_ips = set()
     # 64 workers scan the whole /24 in a few seconds
     with concurrent.futures.ThreadPoolExecutor(max_workers=64) as pool:
         futures = {pool.submit(probe, i): i for i in range(1, 255)}
@@ -799,7 +834,38 @@ def ping_sweep_stream(timeout_ms=150):
                 host = None
             if host:
                 found += 1
+                seen_ips.add(host["ip"])
                 yield host
+
+    # Second pass: the ping sweep populates the OS ARP table as a side
+    # effect. Devices that block ping (typical Windows firewall default)
+    # never answered above, but they're now in the ARP table — pick them up
+    # so a silent PC still appears, like a real scanner does.
+    arp = _read_arp_table()
+    for ip, mac in arp.items():
+        if ip in seen_ips or ip == own_ip:
+            continue
+        # Only same-subnet addresses
+        if not ip.startswith(network + "."):
+            continue
+        try:
+            hostname = socket.gethostbyaddr(ip)[0]
+        except Exception:
+            hostname = "Unknown"
+        vendor = lookup_vendor(mac, allow_online=True) if mac else "Unknown"
+        found += 1
+        seen_ips.add(ip)
+        yield {
+            "online": True,
+            "ip": ip,
+            "hostname": hostname,
+            "mac": mac or "Unknown",
+            "vendor": vendor,
+            "is_gateway": (ip == gateway),
+            "is_self": False,
+            "rtt_ms": None,     # answered via ARP, not ping
+            "via": "arp",
+        }
 
     yield {"done": True, "found": found, "scanned": 254}
 

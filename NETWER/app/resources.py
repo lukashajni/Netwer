@@ -81,6 +81,7 @@ class Icons:
         "export": "fa6s.file-export",
         "refresh": "fa6s.rotate",
         "save": "fa6s.floppy-disk",
+        "github": "fa6b.github",
         # Device types (for Network Map)
         "dev_pc": "fa6s.desktop",
         "dev_laptop": "fa6s.laptop",

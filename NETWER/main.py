@@ -24,6 +24,7 @@ from ui.pages.network_info_page import NetworkInfoPage
 from ui.pages.wifi_info_page import WiFiInfoPage
 from ui.pages.system_info_page import SystemInfoPage
 from ui.pages.report_page import ReportPage
+from ui.pages.about_page import AboutPage
 
 
 # Globalni stylesheet — rjesava "crni selektirani" izgled tako sto
@@ -88,6 +89,9 @@ def _register_pages(window: MainWindow) -> None:
     )
     window.register_page(
         "report", "report", ReportPage(netwer_core), subtitle="Export PDF"
+    )
+    window.register_page(
+        "about", "about", AboutPage(netwer_core), subtitle="About NETWER"
     )
     # Sljedece: wifi, system, ping, ping_stability, ping_sweep,
     # port_scanner, dns, reverse_dns, traceroute, monitor, speedtest,

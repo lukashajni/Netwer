@@ -23,6 +23,7 @@ from PyQt6.QtWidgets import (
 )
 
 from app.theme import Theme
+from app.resources import Icons
 from app.formatting import format_speed, scale_for_axis
 from ui.pages.base_page import BasePage
 from ui.widgets.stat_card import StatCard
@@ -221,6 +222,20 @@ class DashboardPage(BasePage):
 
         self.devices_card = Card("Top Devices", "devices")
         self.devices_card.setFixedHeight(BOTTOM_HEIGHT)
+
+        # Rescan button in the card header — re-runs the network scan,
+        # refreshing both Top Devices and the Network Map.
+        self.btn_rescan = QPushButton("  Rescan")
+        self.btn_rescan.setIcon(Icons.get("refresh", Theme.TEXT_BODY))
+        self.btn_rescan.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_rescan.setStyleSheet(
+            f"QPushButton {{ background: {Theme.BG_ELEVATED}; color: {Theme.TEXT_SECONDARY};"
+            f"border: 1px solid {Theme.BORDER_STRONG}; border-radius: 6px;"
+            f"padding: 3px 12px; font-size: {Theme.FONT_SIZE_TINY}px; }}"
+            f"QPushButton:hover {{ border-color: {Theme.ACCENT}; color: {Theme.TEXT_BODY}; }}"
+            f"QPushButton:disabled {{ color: {Theme.TEXT_FAINT}; }}")
+        self.btn_rescan.clicked.connect(self._rescan_network)
+        self.devices_card.header_layout.addWidget(self.btn_rescan)
         # Scrollable device list so it adapts to any number of devices
         from PyQt6.QtWidgets import QScrollArea, QFrame as _QFrame
         dev_scroll = QScrollArea()
@@ -526,15 +541,44 @@ class DashboardPage(BasePage):
                     f"font-size: {Theme.FONT_SIZE_SMALL}px; background: transparent;"
                 )
 
+    def _rescan_network(self):
+        """Manually re-run the network scan (button in Top Devices header).
+        Clears the current list/map and scans again — picks up devices that
+        came online since the last scan."""
+        if getattr(self, "_devices_scanning", False):
+            return
+        self._devices_scanning = True
+        self.btn_rescan.setEnabled(False)
+        self.btn_rescan.setText("  Scanning…")
+
+        # Clear existing device rows (keep placeholder + trailing stretch)
+        while self._devices_container.count() > 2:
+            item = self._devices_container.takeAt(0)
+            w = item.widget()
+            if w and w is not self._devices_placeholder:
+                w.setParent(None)
+                w.deleteLater()
+        self._all_devices = []
+        self._load_devices()
+
     def _load_devices(self):
-        # Runs in background AFTER reveal — shows its own inline spinner text.
+        # Runs in background — shows its own inline spinner text.
         self._devices_placeholder.setText("Scanning local network…")
         self._devices_placeholder.show()
-        w = OneshotWorker(self.core.get_top_devices, 6)
+        w = OneshotWorker(self.core.get_top_devices, 12)
         w.result.connect(self._on_devices)
-        w.error.connect(lambda e: self._devices_placeholder.setText("Scan unavailable"))
+        w.error.connect(lambda e: self._on_scan_error())
+        w.done.connect(self._on_scan_done)
         self.register_worker(w)
         w.start()
+
+    def _on_scan_error(self):
+        self._devices_placeholder.setText("Scan unavailable")
+
+    def _on_scan_done(self):
+        self._devices_scanning = False
+        self.btn_rescan.setEnabled(True)
+        self.btn_rescan.setText("  Rescan")
 
     def _on_devices(self, data: dict):
         devices = data.get("devices", [])
@@ -544,14 +588,12 @@ class DashboardPage(BasePage):
             return
         self._devices_placeholder.hide()
         for dev in devices:
-            # Insert before the trailing stretch (last item)
-            idx = self._devices_container.count() - 1
+            # Insert before the placeholder + trailing stretch (last two items)
+            idx = max(0, self._devices_container.count() - 2)
             self._devices_container.insertWidget(idx, self._device_row(dev))
-        # Record the scan in the activity log
         from app.activity import activity
         activity.add("Network scan completed",
                      f"{len(devices)} devices found", kind="success")
-        # Feed the network map too
         self._all_devices = devices
         self._maybe_update_map()
 
