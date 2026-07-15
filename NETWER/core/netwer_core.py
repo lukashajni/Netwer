@@ -642,24 +642,58 @@ def ping_stability_stream(target="8.8.8.8", count=20):
 
 
 def ping_custom_stream(target="8.8.8.8", count=4, interval_ms=500):
-    times, lost = [], 0
-    for i in range(1, count + 1):
+    """Ping a target, yielding one result per packet.
+
+    count=0 means CONTINUOUS — run until the caller stops iterating (the
+    worker's cancel flag closes the generator). Running stats (avg/min/max/
+    jitter/loss) are emitted alongside each packet so the UI can update live
+    rather than only at the end.
+    """
+    times, lost, sent = [], 0, 0
+    i = 0
+    continuous = (count == 0)
+
+    while continuous or i < count:
+        i += 1
+        sent += 1
         ms = ping_host(target, 2000)
+
         if ms is not None:
             times.append(ms)
-            yield {"i": i, "ms": ms, "status": "ok"}
+            status = "ok"
         else:
             lost += 1
-            yield {"i": i, "status": "timeout"}
-        if i < count:
+            status = "timeout"
+
+        # Jitter: mean deviation between consecutive replies
+        jitter = 0.0
+        if len(times) > 1:
+            deltas = [abs(times[j] - times[j - 1]) for j in range(1, len(times))]
+            jitter = round(sum(deltas) / len(deltas), 1)
+
+        yield {
+            "i": i,
+            "ms": ms,
+            "status": status,
+            "avg": round(sum(times) / len(times), 1) if times else None,
+            "min": min(times) if times else None,
+            "max": max(times) if times else None,
+            "jitter": jitter,
+            "loss": round((lost / sent) * 100, 1),
+            "sent": sent,
+        }
+
+        if continuous or i < count:
             time.sleep(interval_ms / 1000)
 
     if times:
+        deltas = [abs(times[j] - times[j - 1]) for j in range(1, len(times))]
+        jitter = round(sum(deltas) / len(deltas), 1) if deltas else 0.0
         yield {"done": True, "avg": round(sum(times) / len(times), 1),
-               "min": min(times), "max": max(times),
-               "loss": round((lost / count) * 100)}
+               "min": min(times), "max": max(times), "jitter": jitter,
+               "loss": round((lost / sent) * 100, 1), "sent": sent}
     else:
-        yield {"done": True, "error": "All packets lost"}
+        yield {"done": True, "error": "All packets lost", "sent": sent}
 
 
 # ══════════════════════════════════════════

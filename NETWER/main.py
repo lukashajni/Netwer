@@ -22,6 +22,7 @@ from ui.main_window import MainWindow
 from ui.pages.dashboard_page import DashboardPage
 from ui.pages.network_info_page import NetworkInfoPage
 from ui.pages.wifi_info_page import WiFiInfoPage
+from ui.pages.ping_page import PingPage
 from ui.pages.system_info_page import SystemInfoPage
 from ui.pages.report_page import ReportPage
 from ui.pages.about_page import AboutPage
@@ -86,6 +87,9 @@ def _register_pages(window: MainWindow) -> None:
     )
     window.register_page(
         "system", "system", SystemInfoPage(netwer_core), subtitle="Hardware & OS"
+    )
+    window.register_page(
+        "ping", "ping", PingPage(netwer_core), subtitle="Test Connectivity"
     )
     window.register_page(
         "report", "report", ReportPage(netwer_core), subtitle="Export PDF"

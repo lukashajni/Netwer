@@ -82,6 +82,9 @@ class Icons:
         "refresh": "fa6s.rotate",
         "save": "fa6s.floppy-disk",
         "github": "fa6b.github",
+        "play": "fa6s.play",
+        "stop": "fa6s.stop",
+        "terminal": "fa6s.terminal",
         # Device types (for Network Map)
         "dev_pc": "fa6s.desktop",
         "dev_laptop": "fa6s.laptop",

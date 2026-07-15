@@ -76,17 +76,21 @@ class Gauge(QWidget):
         super().__init__(parent)
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
-        lay.setSpacing(12)
+        lay.setSpacing(0)
         lay.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
         self._ring = _Ring(color)
         lay.addWidget(self._ring, alignment=Qt.AlignmentFlag.AlignCenter)
 
+        # Explicit gap: the layout's AlignCenter packs children together, so
+        # setSpacing() alone doesn't separate the ring from its caption.
+        lay.addSpacing(14)
+
         self._label = QLabel(label)
         self._label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._label.setStyleSheet(
             f"color: {Theme.TEXT_SECONDARY}; font-family: '{Theme.FONT_FAMILY}';"
-            f"font-size: {Theme.FONT_SIZE_TINY}px;"
+            f"font-size: {Theme.FONT_SIZE_TINY}px; background: transparent;"
         )
         lay.addWidget(self._label)
 

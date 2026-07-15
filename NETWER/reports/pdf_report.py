@@ -19,7 +19,7 @@ from reportlab.lib.units import mm
 from reportlab.lib import colors
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.platypus import (
-    SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+    SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, KeepTogether
 )
 
 # Brand palette (print-friendly versions of the app theme)
@@ -89,7 +89,10 @@ def _section_title(text):
 
 def _kv_table(rows):
     data = [[k, v if v not in (None, "") else "\u2014"] for k, v in rows]
-    t = Table(data, colWidths=[45 * mm, None])
+    # splitByRow=0 forbids the table from breaking across pages. KeepTogether
+    # alone isn't enough — a Table will happily split itself unless told not
+    # to, which is what left half a table stranded on the previous page.
+    t = Table(data, colWidths=[45 * mm, None], splitByRow=0, repeatRows=0)
     style = [
         ("FONTNAME", (0, 0), (0, -1), "Helvetica"),
         ("FONTNAME", (1, 0), (1, -1), "Helvetica-Bold"),
@@ -110,7 +113,12 @@ def _kv_table(rows):
 
 def _grid_table(header, rows, success_col=None, col_widths=None):
     data = [header] + rows
-    t = Table(data, colWidths=col_widths)
+    # splitByRow=0 forbids the table from breaking across pages — KeepTogether
+    # alone isn't enough, because a Table will still split itself unless told
+    # not to. That's what stranded half a table on the previous page.
+    # repeatRows=1 keeps the header with the rows if a table is ever so long
+    # that ReportLab has no choice but to move it wholesale to a new page.
+    t = Table(data, colWidths=col_widths, splitByRow=0, repeatRows=1)
     style = [
         ("BACKGROUND", (0, 0), (-1, 0), C_HEADER),
         ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
@@ -184,60 +192,71 @@ def build_report(path, data: dict, sections=None):
     # Network Configuration
     if "network" in sections and data.get("network"):
         n = data["network"]
-        story.append(_section_title("Network Configuration"))
-        story.append(_kv_table([
-            ("Adapter", n.get("name", "")),
-            ("Description", n.get("description", "")),
-            ("IPv4 Address", n.get("ipv4", "")),
-            ("Subnet Mask", n.get("subnet_mask", "")),
-            ("Gateway", n.get("gateway", "")),
-            ("DNS Servers", n.get("dns", "")),
-            ("Public IP", n.get("public_ip", "")),
-            ("MAC Address", n.get("mac", "")),
-            ("DHCP", n.get("dhcp", "")),
-            ("Link Speed", n.get("link_speed", "")),
+        # KeepTogether: a section's heading and its table must never be
+        # split across a page break — ReportLab would otherwise strand the
+        # heading at the bottom of one page and the rows on the next.
+        story.append(KeepTogether([
+            _section_title("Network Configuration"),
+            _kv_table([
+                ("Adapter", n.get("name", "")),
+                ("Description", n.get("description", "")),
+                ("IPv4 Address", n.get("ipv4", "")),
+                ("Subnet Mask", n.get("subnet_mask", "")),
+                ("Gateway", n.get("gateway", "")),
+                ("DNS Servers", n.get("dns", "")),
+                ("Public IP", n.get("public_ip", "")),
+                ("MAC Address", n.get("mac", "")),
+                ("DHCP", n.get("dhcp", "")),
+                ("Link Speed", n.get("link_speed", "")),
+            ]),
         ]))
         story.append(Spacer(1, 10))
 
     # System Information
     if "system" in sections and data.get("system"):
         s = data["system"]
-        story.append(_section_title("System Information"))
-        story.append(_kv_table([
-            ("Computer Name", s.get("computer", "")),
-            ("Operating System", s.get("os", "")),
-            ("Processor", s.get("cpu", "")),
-            ("Total RAM", f"{s.get('ram', '')} GB" if s.get("ram") else ""),
-            ("System Uptime", s.get("uptime", "")),
+        story.append(KeepTogether([
+            _section_title("System Information"),
+            _kv_table([
+                ("Computer Name", s.get("computer", "")),
+                ("Operating System", s.get("os", "")),
+                ("Processor", s.get("cpu", "")),
+                ("Total RAM", f"{s.get('ram', '')} GB" if s.get("ram") else ""),
+                ("System Uptime", s.get("uptime", "")),
+            ]),
         ]))
         story.append(Spacer(1, 10))
 
     # Connected Devices
     if "devices" in sections and data.get("devices"):
         devs = data["devices"]
-        story.append(_section_title("Connected Devices"))
         rows = [[d.get("hostname", "") or d.get("ip", ""),
                  d.get("ip", ""), d.get("mac", ""),
                  d.get("vendor", "") if d.get("vendor") != "Unknown" else "—",
                  "Online"] for d in devs]
-        story.append(_grid_table(
-            ["Hostname", "IP Address", "MAC Address", "Vendor", "Status"],
-            rows, success_col=4,
-            col_widths=[38 * mm, 30 * mm, 34 * mm, 30 * mm, 20 * mm]))
+        story.append(KeepTogether([
+            _section_title("Connected Devices"),
+            _grid_table(
+                ["Hostname", "IP Address", "MAC Address", "Vendor", "Status"],
+                rows, success_col=4,
+                col_widths=[38 * mm, 30 * mm, 34 * mm, 30 * mm, 20 * mm]),
+        ]))
         story.append(Spacer(1, 10))
 
     # Connectivity Test
     if "connectivity" in sections and data.get("connectivity"):
         pings = data["connectivity"]
-        story.append(_section_title("Connectivity Test"))
         rows = [[p.get("label", ""), p.get("ip", ""),
                  f"{p.get('avg','')} ms", f"{p.get('min','')} ms",
                  f"{p.get('max','')} ms", f"{p.get('loss','')}%"]
                 for p in pings]
-        story.append(_grid_table(
-            ["Target", "Address", "Avg", "Min", "Max", "Loss"],
-            rows, success_col=5,
-            col_widths=[35 * mm, 32 * mm, 22 * mm, 22 * mm, 22 * mm, 20 * mm]))
+        story.append(KeepTogether([
+            _section_title("Connectivity Test"),
+            _grid_table(
+                ["Target", "Address", "Avg", "Min", "Max", "Loss"],
+                rows, success_col=5,
+                col_widths=[35 * mm, 32 * mm, 22 * mm, 22 * mm, 22 * mm, 20 * mm]),
+        ]))
 
     doc.build(story, onFirstPage=_header_footer, onLaterPages=_header_footer)
     return path
