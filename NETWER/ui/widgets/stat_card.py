@@ -73,12 +73,12 @@ class StatCard(QFrame):
         col = color or Theme.TEXT_PRIMARY
         if unit:
             self._value.setText(
-                f"<span style='color:{col}; font-family:\"{Theme.FONT_DATA}\"; font-size:18px; font-weight:600;'>{value}</span>"
+                f"<span style='color:{col}; font-family:{Theme.FONT_DATA}; font-size:18px; font-weight:600;'>{value}</span>"
                 f" <span style='color:{Theme.TEXT_MUTED}; font-size:11px;'>{unit}</span>"
             )
         else:
             self._value.setText(
-                f"<span style='color:{col}; font-family:\"{Theme.FONT_DATA}\"; font-size:18px; font-weight:600;'>{value}</span>"
+                f"<span style='color:{col}; font-family:{Theme.FONT_DATA}; font-size:18px; font-weight:600;'>{value}</span>"
             )
         self._sub.setText(subtitle)
 

@@ -69,7 +69,7 @@ class TerminalOutput(QWidget):
         left = QLabel(text)
         left.setStyleSheet(
             f"color: {color if kind == 'error' else Theme.TEXT_SECONDARY};"
-            f"font-family: '{Theme.FONT_MONO}';"
+            f"font-family: {Theme.FONT_MONO};"
             f"font-size: {Theme.FONT_SIZE_TINY}px; background: transparent;")
         h.addWidget(left)
         h.addStretch()
@@ -77,7 +77,7 @@ class TerminalOutput(QWidget):
         if value:
             right = QLabel(value)
             right.setStyleSheet(
-                f"color: {color}; font-family: '{Theme.FONT_MONO}';"
+                f"color: {color}; font-family: {Theme.FONT_MONO};"
                 f"font-size: {Theme.FONT_SIZE_TINY}px; background: transparent;")
             h.addWidget(right)
 

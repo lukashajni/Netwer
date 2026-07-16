@@ -77,7 +77,7 @@ class SystemInfoPage(BasePage):
 
         value = QLabel("\u2014")
         value.setStyleSheet(
-            f"color: {value_color}; font-family: '{Theme.FONT_DATA}';"
+            f"color: {value_color}; font-family: {Theme.FONT_DATA};"
             f"font-size: 15px; font-weight: 600; background: transparent;")
         card.content_layout.addWidget(value)
 

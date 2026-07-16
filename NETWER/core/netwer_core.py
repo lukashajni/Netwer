@@ -700,19 +700,186 @@ def ping_custom_stream(target="8.8.8.8", count=4, interval_ms=500):
 # PORT SCANNER
 # ══════════════════════════════════════════
 
-PORT_NAMES = {
-    21: "FTP", 22: "SSH", 23: "Telnet", 25: "SMTP", 53: "DNS",
-    80: "HTTP", 110: "POP3", 135: "RPC", 139: "NetBIOS", 143: "IMAP",
-    443: "HTTPS", 445: "SMB", 3389: "RDP",
+# Well-known service map: port -> (service name, transport/protocol note).
+# Covers the ports a real scanner flags by default plus common extras.
+PORT_SERVICES = {
+    20: ("FTP-Data", "TCP"), 21: ("FTP", "TCP"), 22: ("SSH", "TCP"),
+    23: ("Telnet", "TCP"), 25: ("SMTP", "TCP"), 53: ("DNS", "TCP/UDP"),
+    67: ("DHCP", "UDP"), 68: ("DHCP", "UDP"), 69: ("TFTP", "UDP"),
+    80: ("HTTP", "TCP"), 110: ("POP3", "TCP"), 111: ("RPCbind", "TCP"),
+    123: ("NTP", "UDP"), 135: ("MS-RPC", "TCP"), 137: ("NetBIOS-NS", "UDP"),
+    138: ("NetBIOS-DGM", "UDP"), 139: ("NetBIOS-SSN", "TCP"),
+    143: ("IMAP", "TCP"), 161: ("SNMP", "UDP"), 162: ("SNMP-Trap", "UDP"),
+    389: ("LDAP", "TCP"), 443: ("HTTPS", "TCP"), 445: ("SMB", "TCP"),
+    465: ("SMTPS", "TCP"), 500: ("IKE/IPsec", "UDP"), 514: ("Syslog", "UDP"),
+    515: ("LPD/Printer", "TCP"), 587: ("SMTP-Submission", "TCP"),
+    631: ("IPP/Printer", "TCP"), 636: ("LDAPS", "TCP"), 993: ("IMAPS", "TCP"),
+    995: ("POP3S", "TCP"), 1080: ("SOCKS", "TCP"), 1194: ("OpenVPN", "UDP"),
+    1433: ("MSSQL", "TCP"), 1521: ("Oracle", "TCP"), 1723: ("PPTP", "TCP"),
+    1883: ("MQTT", "TCP"), 1900: ("SSDP/UPnP", "UDP"), 2049: ("NFS", "TCP"),
+    3128: ("Squid-Proxy", "TCP"), 3306: ("MySQL", "TCP"),
+    3389: ("RDP", "TCP"), 3690: ("SVN", "TCP"), 4444: ("Metasploit", "TCP"),
+    5000: ("UPnP/Flask", "TCP"), 5060: ("SIP", "TCP/UDP"),
+    5432: ("PostgreSQL", "TCP"), 5555: ("ADB/Android", "TCP"),
+    5672: ("AMQP/RabbitMQ", "TCP"), 5900: ("VNC", "TCP"),
+    5985: ("WinRM-HTTP", "TCP"), 5986: ("WinRM-HTTPS", "TCP"),
+    6379: ("Redis", "TCP"), 6667: ("IRC", "TCP"), 8000: ("HTTP-Alt", "TCP"),
+    8008: ("HTTP-Alt", "TCP"), 8080: ("HTTP-Proxy", "TCP"),
+    8443: ("HTTPS-Alt", "TCP"), 8888: ("HTTP-Alt", "TCP"),
+    9000: ("HTTP-Alt/PHP-FPM", "TCP"), 9090: ("HTTP-Alt", "TCP"),
+    9100: ("JetDirect/Printer", "TCP"), 9200: ("Elasticsearch", "TCP"),
+    11211: ("Memcached", "TCP"), 27017: ("MongoDB", "TCP"),
+    32400: ("Plex", "TCP"), 51820: ("WireGuard", "UDP"),
 }
+
+# Curated scan profiles (which ports to probe).
+PORT_PROFILES = {
+    "common": [21, 22, 23, 25, 53, 80, 110, 135, 139, 143, 443, 445, 993,
+               995, 3306, 3389, 5900, 8080, 8443],
+    "top100": sorted(PORT_SERVICES.keys()),
+    "web": [80, 443, 8000, 8008, 8080, 8443, 8888, 9000, 9090, 3000, 5000],
+    "database": [1433, 1521, 3306, 5432, 6379, 9200, 11211, 27017],
+    "remote": [22, 23, 3389, 5900, 5985, 5986],
+}
+
+# Backwards-compatible alias (older callers used PORT_NAMES).
+PORT_NAMES = {p: v[0] for p, v in PORT_SERVICES.items()}
+
+
+def port_service(port):
+    """Return (service_name, protocol) for a port, or ('Unknown', 'TCP')."""
+    return PORT_SERVICES.get(int(port), ("Unknown", "TCP"))
+
+
+def _classify_port(ip, port, timeout):
+    """Probe a single TCP port and classify the result the way a real
+    scanner does:
+        open     — connection succeeded (service is listening)
+        closed   — host actively refused (RST) → port reachable, nothing there
+        filtered — no response within timeout (firewall dropping packets)
+    Returns a dict with port, service, protocol, state.
+    """
+    service, proto = port_service(port)
+    state = "filtered"
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.settimeout(timeout)
+        result = s.connect_ex((ip, int(port)))
+        s.close()
+        if result == 0:
+            state = "open"
+        elif result in (111, 10061):        # ECONNREFUSED (Linux / Windows)
+            state = "closed"
+        else:
+            state = "filtered"              # timeout / unreachable → filtered
+    except socket.timeout:
+        state = "filtered"
+    except Exception:
+        state = "filtered"
+    return {"port": int(port), "service": service, "protocol": proto,
+            "state": state}
+
+
+def _parse_port_spec(spec):
+    """Turn a user port spec into a sorted unique list of ints.
+    Accepts a profile name ('common', 'web', ...), a comma list ('22,80,443'),
+    ranges ('1-1024'), or a mix ('22,80,8000-8100'). Returns [] if invalid."""
+    spec = (spec or "").strip().lower()
+    if not spec:
+        return PORT_PROFILES["common"]
+    if spec in PORT_PROFILES:
+        return PORT_PROFILES[spec]
+    ports = set()
+    for chunk in spec.replace(" ", "").split(","):
+        if not chunk:
+            continue
+        if "-" in chunk:
+            try:
+                a, b = chunk.split("-", 1)
+                a, b = int(a), int(b)
+                if a > b:
+                    a, b = b, a
+                a = max(1, a)
+                b = min(65535, b)
+                ports.update(range(a, b + 1))
+            except ValueError:
+                return []
+        else:
+            try:
+                p = int(chunk)
+                if 1 <= p <= 65535:
+                    ports.add(p)
+            except ValueError:
+                return []
+    return sorted(ports)
+
+
+def port_scan_stream(ip, ports=None, timeout_ms=600, max_workers=100):
+    """Generator: scan a host's ports IN PARALLEL and yield results live.
+
+    ip         — target host (IP or resolvable hostname)
+    ports      — profile name, spec string, or explicit list of ints.
+                 Defaults to the 'common' profile.
+    timeout_ms — per-port connect timeout.
+
+    Yields:
+        {"target": ip, "resolved": ip, "total": N}         (once, at start)
+        {"port", "service", "protocol", "state", "scanned"} (per port)
+        {"done": True, "open": n_open, "closed": n_closed,
+         "filtered": n_filtered, "total": N}                (once, at end)
+    Ports are streamed back as each probe completes, so the UI fills live.
+    Only open ports are guaranteed interesting; closed/filtered are reported
+    too so the user sees the full picture (like nmap's default output).
+    """
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    # Resolve hostname → IP up front.
+    try:
+        resolved = socket.gethostbyname(ip)
+    except Exception:
+        yield {"error": f"Could not resolve host: {ip}"}
+        return
+
+    if isinstance(ports, str) or ports is None:
+        port_list = _parse_port_spec(ports)
+    else:
+        port_list = sorted({int(p) for p in ports if 1 <= int(p) <= 65535})
+
+    if not port_list:
+        yield {"error": "No valid ports to scan."}
+        return
+
+    total = len(port_list)
+    timeout = max(0.1, timeout_ms / 1000.0)
+    yield {"target": ip, "resolved": resolved, "total": total}
+
+    counts = {"open": 0, "closed": 0, "filtered": 0}
+    scanned = 0
+    workers = min(max_workers, total)
+
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        futures = {pool.submit(_classify_port, resolved, p, timeout): p
+                   for p in port_list}
+        for fut in as_completed(futures):
+            res = fut.result()
+            scanned += 1
+            counts[res["state"]] = counts.get(res["state"], 0) + 1
+            res["scanned"] = scanned
+            yield res
+
+    yield {"done": True, "open": counts["open"], "closed": counts["closed"],
+           "filtered": counts["filtered"], "total": total}
 
 
 def port_scan_quick_stream(ip):
-    ports = list(PORT_NAMES.keys())
-    for port in ports:
-        open_ = scan_port(ip, port, timeout=0.5)
-        yield {"port": port, "name": PORT_NAMES.get(port, ""), "open": open_}
-    yield {"done": True}
+    """Legacy helper kept for compatibility: quick common-port scan yielding
+    the old {"port", "name", "open"} shape."""
+    for res in port_scan_stream(ip, ports="common"):
+        if "port" in res and "state" in res:
+            yield {"port": res["port"], "name": res["service"],
+                   "open": res["state"] == "open"}
+        elif res.get("done"):
+            yield {"done": True}
 
 
 def port_scan_custom(ip, port):
@@ -808,19 +975,58 @@ def _read_arp_table():
     return table
 
 
-def ping_sweep_stream(timeout_ms=150):
-    """Generator: scans the local /24 range in PARALLEL (like Advanced IP
-    Scanner / Angry IP Scanner). Yields per-host results as they come in,
-    then a final summary. Powers Ping Sweep, Top Devices, and Network Map.
+def _parse_subnet_prefix(subnet):
+    """Normalise a user-supplied subnet to a 3-octet prefix like
+    '192.168.88'. Accepts '192.168.88.0/24', '192.168.88.0', '192.168.88.',
+    or '192.168.88'. Only /24 (or an implied /24) is supported — returns
+    None on anything invalid."""
+    if not subnet:
+        return None
+    s = subnet.strip().split("/")[0].strip()
+    parts = [p for p in s.split(".") if p != ""]
+    if len(parts) < 3:
+        return None
+    try:
+        octets = [int(p) for p in parts[:3]]
+    except ValueError:
+        return None
+    if not all(0 <= o <= 255 for o in octets):
+        return None
+    return ".".join(str(o) for o in octets)
+
+
+def ping_sweep_stream(timeout_ms=150, subnet=None):
+    """Generator: scans a /24 range in PARALLEL (like Advanced IP Scanner /
+    Angry IP Scanner). Yields per-host results as they come in, then a final
+    summary. Powers Ping Sweep, Top Devices, and Network Map.
+
+    subnet — optional CIDR or prefix to scan (e.g. "192.168.88.0/24" or
+             "192.168.88"). When omitted, the local /24 is auto-detected
+             and the gateway is highlighted (Top Devices / Network Map path).
 
     Parallel scanning cuts a full /24 sweep from ~60s (sequential) down to
     a few seconds by pinging many hosts at once via a thread pool.
     """
-    try:
-        network, gateway, cfg = _resolve_local_network_prefix()
-    except RuntimeError as e:
-        yield {"error": str(e)}
-        return
+    if subnet:
+        parsed = _parse_subnet_prefix(subnet)
+        if parsed is None:
+            yield {"error": f"Invalid subnet: {subnet}"}
+            return
+        network = parsed
+        # Best-effort gateway guess for a user-supplied subnet; if it matches
+        # the local network the real gateway still lines up.
+        try:
+            _, gateway, cfg = _resolve_local_network_prefix()
+            if not gateway.startswith(network + "."):
+                gateway = f"{network}.1"
+        except RuntimeError:
+            gateway = f"{network}.1"
+    else:
+        try:
+            network, gateway, cfg = _resolve_local_network_prefix()
+        except RuntimeError as e:
+            yield {"error": str(e)}
+            return
 
     yield {"network": network}
 

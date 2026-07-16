@@ -56,6 +56,7 @@ class Icons:
         "ping_sweep": "mdi.radar",
         "port_scanner": "fa6s.plug",
         "dns": "fa6s.magnifying-glass",
+        "dns_tools": "fa6s.signs-post",
         "reverse_dns": "fa6s.right-left",
         "traceroute": "fa6s.route",
         "monitor": "fa6s.chart-line",
@@ -74,6 +75,7 @@ class Icons:
         "resources": "fa6s.server",
         # Statusi / razno
         "check": "fa6s.circle-check",
+        "checkmark": "fa6s.check",
         "warning": "fa6s.triangle-exclamation",
         "error": "fa6s.circle-xmark",
         "globe": "fa6s.globe",
@@ -112,3 +114,26 @@ class Icons:
     def pixmap(cls, name: str, size: int = 16, color: str = None) -> QPixmap:
         """Vrati QPixmap zadane veličine (za QLabel ikone u karticama)."""
         return cls.get(name, color).pixmap(size, size)
+
+    #: Cache za PNG-ove ikona koje QSS koristi kao image: url(...).
+    _png_cache = {}
+
+    @classmethod
+    def png_path(cls, name: str, size: int = 16, color: str = "#ffffff") -> str:
+        """Renderiraj ikonu u PNG na disk i vrati putanju (s file-URL slash
+        formatom). Potrebno jer Qt stylesheet ne može crtati qtawesome ikonu
+        izravno — treba mu image: url(putanja). Rezultat se kešira."""
+        key = (name, size, color)
+        if key in cls._png_cache and os.path.isfile(cls._png_cache[key]):
+            return cls._png_cache[key]
+        import tempfile
+        pm = cls.pixmap(name, size, color)
+        out_dir = os.path.join(tempfile.gettempdir(), "netwer_icons")
+        os.makedirs(out_dir, exist_ok=True)
+        safe = name.replace("/", "_") + f"_{size}_{color.lstrip('#')}.png"
+        path = os.path.join(out_dir, safe)
+        pm.save(path, "PNG")
+        # QSS url() na Windowsu voli forward-slashe.
+        url_path = path.replace("\\", "/")
+        cls._png_cache[key] = url_path
+        return url_path

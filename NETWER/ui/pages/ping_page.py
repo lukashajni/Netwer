@@ -58,12 +58,11 @@ class PingPage(BasePage):
         row.setSpacing(8)
 
         self.target_input = QLineEdit()
-        self.target_input.setText("8.8.8.8")
-        self.target_input.setPlaceholderText("IP address or hostname")
+        self.target_input.setPlaceholderText("IP address or hostname (e.g. 8.8.8.8)")
         self.target_input.setStyleSheet(
             f"QLineEdit {{ background: {Theme.BG_CARD}; color: {Theme.TEXT_BODY};"
             f"border: 1px solid {Theme.BORDER_STRONG}; border-radius: 8px;"
-            f"padding: 9px 12px; font-family: '{Theme.FONT_MONO}';"
+            f"padding: 9px 12px; font-family: {Theme.FONT_MONO};"
             f"font-size: {Theme.FONT_SIZE_BODY}px; }}"
             f"QLineEdit:focus {{ border-color: {Theme.ACCENT}; }}")
         self.target_input.returnPressed.connect(self._toggle)
@@ -95,7 +94,7 @@ class PingPage(BasePage):
 
     def _style_run_button(self, running: bool):
         color = Theme.DANGER if running else Theme.ACCENT
-        hover = "#c9433d" if running else Theme.ACCENT_PURPLE
+        hover = Theme.DANGER_HOVER if running else Theme.ACCENT_PURPLE
         self.btn_run.setStyleSheet(
             f"QPushButton {{ background: {color}; color: white; border: none;"
             f"border-radius: 8px; padding: 9px 20px;"
@@ -127,7 +126,7 @@ class PingPage(BasePage):
 
         value = QLabel("\u2014")
         value.setStyleSheet(
-            f"color: {color}; font-family: '{Theme.FONT_DATA}';"
+            f"color: {color}; font-family: {Theme.FONT_DATA};"
             f"font-size: 20px; font-weight: 600; background: transparent;")
         card.content_layout.addWidget(value)
         card.content_layout.addStretch()
@@ -269,7 +268,7 @@ class PingPage(BasePage):
     def _set_stat(self, stat, value, unit, color):
         if unit:
             stat["value"].setText(
-                f"<span style='color:{color}; font-family:\"{Theme.FONT_DATA}\";"
+                f"<span style='color:{color}; font-family:{Theme.FONT_DATA};"
                 f"font-size:20px; font-weight:600;'>{value}</span>"
                 f" <span style='color:{Theme.TEXT_MUTED}; font-size:12px;'>{unit}</span>")
         else:
@@ -282,6 +281,6 @@ class PingPage(BasePage):
                      self.stat_jitter, self.stat_loss):
             stat["value"].setText("\u2014")
             stat["value"].setStyleSheet(
-                f"color: {Theme.TEXT_MUTED}; font-family: '{Theme.FONT_DATA}';"
+                f"color: {Theme.TEXT_MUTED}; font-family: {Theme.FONT_DATA};"
                 f"font-size: 20px; font-weight: 600; background: transparent;")
         self.sent_label.setText("")

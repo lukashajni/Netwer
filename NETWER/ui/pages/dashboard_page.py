@@ -480,7 +480,7 @@ class DashboardPage(BasePage):
             lbl.setText(str(value))
             if color:
                 lbl.setStyleSheet(
-                    f"color: {color}; font-family: '{Theme.FONT_MONO}';"
+                    f"color: {color}; font-family: {Theme.FONT_MONO};"
                     f"font-size: {Theme.FONT_SIZE_SMALL}px; background: transparent;"
                 )
 
@@ -631,14 +631,14 @@ class DashboardPage(BasePage):
         row.setContentsMargins(0, 3, 0, 3)
         name = self.device_display_name(dev)
         n = QLabel(str(name)[:18])
-        n.setStyleSheet(f"color: {Theme.TEXT_BODY}; font-family: '{Theme.FONT_DATA}'; font-size: {Theme.FONT_SIZE_SMALL}px; background: transparent;")
+        n.setStyleSheet(f"color: {Theme.TEXT_BODY}; font-family: {Theme.FONT_DATA}; font-size: {Theme.FONT_SIZE_SMALL}px; background: transparent;")
         ip = QLabel(dev.get("ip", ""))
-        ip.setStyleSheet(f"color: {Theme.TEXT_MUTED}; font-family: '{Theme.FONT_MONO}'; font-size: {Theme.FONT_SIZE_TINY}px; background: transparent;")
+        ip.setStyleSheet(f"color: {Theme.TEXT_MUTED}; font-family: {Theme.FONT_MONO}; font-size: {Theme.FONT_SIZE_TINY}px; background: transparent;")
         vendor_name = dev.get("vendor", "")
         if vendor_name == "Unknown":
             vendor_name = "—"
         vendor = QLabel(vendor_name)
-        vendor.setStyleSheet(f"color: {Theme.ACCENT}; font-family: '{Theme.FONT_DATA}'; font-size: {Theme.FONT_SIZE_TINY}px; background: transparent;")
+        vendor.setStyleSheet(f"color: {Theme.ACCENT}; font-family: {Theme.FONT_DATA}; font-size: {Theme.FONT_SIZE_TINY}px; background: transparent;")
         status = QLabel("Online")
         status.setStyleSheet(f"color: {Theme.SUCCESS}; font-size: {Theme.FONT_SIZE_TINY}px; background: transparent;")
         row.addWidget(n)

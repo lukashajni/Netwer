@@ -23,6 +23,10 @@ from ui.pages.dashboard_page import DashboardPage
 from ui.pages.network_info_page import NetworkInfoPage
 from ui.pages.wifi_info_page import WiFiInfoPage
 from ui.pages.ping_page import PingPage
+from ui.pages.ping_sweep_page import PingSweepPage
+from ui.pages.port_scanner_page import PortScannerPage
+from ui.pages.dns_tools_page import DnsToolsPage
+from ui.pages.speedtest_page import SpeedTestPage
 from ui.pages.system_info_page import SystemInfoPage
 from ui.pages.report_page import ReportPage
 from ui.pages.about_page import AboutPage
@@ -34,7 +38,7 @@ from ui.pages.about_page import AboutPage
 GLOBAL_QSS = f"""
 * {{
     outline: none;
-    font-family: "{Theme.FONT_FAMILY}";
+    font-family: {Theme.FONT_FAMILY};
     color: {Theme.TEXT_BODY};
 }}
 QWidget {{
@@ -92,6 +96,22 @@ def _register_pages(window: MainWindow) -> None:
         "ping", "ping", PingPage(netwer_core), subtitle="Test Connectivity"
     )
     window.register_page(
+        "ping_sweep", "ping_sweep", PingSweepPage(netwer_core),
+        subtitle="Discover Devices"
+    )
+    window.register_page(
+        "port_scanner", "port_scanner", PortScannerPage(netwer_core),
+        subtitle="Open & Filtered Ports"
+    )
+    window.register_page(
+        "dns_tools", "dns_tools", DnsToolsPage(netwer_core),
+        subtitle="DNS, Reverse DNS, Traceroute"
+    )
+    window.register_page(
+        "speedtest", "speedtest", SpeedTestPage(netwer_core),
+        subtitle="Bandwidth Test"
+    )
+    window.register_page(
         "report", "report", ReportPage(netwer_core), subtitle="Export PDF"
     )
     window.register_page(
@@ -127,8 +147,19 @@ def main() -> int:
         )
         box.exec()
 
-    # Font stack: Segoe UI Variable (Win11) -> Segoe UI -> fallback
-    font = QFont(Theme.FONT_FAMILY, 10)
+    # Font stack: Segoe UI Variable (Win11) -> Segoe UI (Win10) -> sans.
+    # Registriramo fallback lanac tako da Qt zna čime zamijeniti primarni
+    # font ako ga OS nema (npr. Windows 10, Linux). Bez ovoga bi na tim
+    # sustavima tekst pao na ružni Qt default i vidljivost bi patila.
+    QFont.insertSubstitutions(Theme.FONT_FAMILY_PRIMARY, [
+        "Segoe UI Variable", "Segoe UI", "Inter", "Helvetica Neue",
+        "Arial", "sans-serif",
+    ])
+    QFont.insertSubstitutions(Theme.FONT_MONO_PRIMARY, [
+        "Cascadia Mono", "Consolas", "JetBrains Mono",
+        "DejaVu Sans Mono", "monospace",
+    ])
+    font = QFont(Theme.FONT_FAMILY_PRIMARY, 10)
     font.setStyleStrategy(QFont.StyleStrategy.PreferAntialias)
     app.setFont(font)
 

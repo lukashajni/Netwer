@@ -87,6 +87,19 @@ def _section_title(text):
     return Paragraph(text.upper(), style)
 
 
+def _device_display_name(dev):
+    """Best available name for a device: real hostname, else the vendor
+    (e.g. 'LG Electronics'), else the IP. Mirrors the dashboard's Top
+    Devices logic so the PDF never prints a bare 'Unknown'."""
+    hostname = (dev.get("hostname") or "").strip()
+    if hostname and hostname.lower() not in ("unknown", "?", ""):
+        return hostname
+    vendor = (dev.get("vendor") or "").strip()
+    if vendor and vendor.lower() != "unknown":
+        return vendor
+    return dev.get("ip", "") or "—"
+
+
 def _kv_table(rows):
     data = [[k, v if v not in (None, "") else "\u2014"] for k, v in rows]
     # splitByRow=0 forbids the table from breaking across pages. KeepTogether
@@ -230,7 +243,7 @@ def build_report(path, data: dict, sections=None):
     # Connected Devices
     if "devices" in sections and data.get("devices"):
         devs = data["devices"]
-        rows = [[d.get("hostname", "") or d.get("ip", ""),
+        rows = [[_device_display_name(d),
                  d.get("ip", ""), d.get("mac", ""),
                  d.get("vendor", "") if d.get("vendor") != "Unknown" else "—",
                  "Online"] for d in devs]

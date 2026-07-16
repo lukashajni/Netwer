@@ -33,14 +33,18 @@ class BasePage(QWidget):
     PAGE_TITLE = "Page"
     PAGE_SUBTITLE = ""
 
-    def __init__(self, core, parent=None):
+    def __init__(self, core, parent=None, embedded=False):
         """
         core — modul netwer_core (backend). Stranica NIKAD ne zove backend
                izravno u glavnoj niti; koristi ga samo da workeru preda
                referencu na funkciju.
+        embedded — kad je True, stranica ne crta vlastiti naslov/podnaslov
+               (koristi se kad je ugniježđena u kontejner poput DNS Tools
+               koji ima svoj zajednički header + tabove).
         """
         super().__init__(parent)
         self.core = core
+        self._embedded = embedded
         self._workers = []  # aktivni workeri ove stranice
         self._window = None  # referenca na MainWindow (za loading koordinaciju)
 
@@ -48,10 +52,12 @@ class BasePage(QWidget):
 
         # Vanjski layout — podklase dodaju sadržaj u self.body_layout
         self._root = QVBoxLayout(self)
-        self._root.setContentsMargins(24, 20, 24, 20)
+        margins = (0, 0, 0, 0) if embedded else (24, 20, 24, 20)
+        self._root.setContentsMargins(*margins)
         self._root.setSpacing(16)
 
-        self._build_header()
+        if not embedded:
+            self._build_header()
 
         # Ovamo podklase slažu svoj sadržaj.
         self.body_layout = QVBoxLayout()
@@ -62,7 +68,7 @@ class BasePage(QWidget):
     def _build_header(self) -> None:
         title = QLabel(self.PAGE_TITLE)
         title.setStyleSheet(
-            f"color: {Theme.TEXT_PRIMARY}; font-family: '{Theme.FONT_FAMILY}';"
+            f"color: {Theme.TEXT_PRIMARY}; font-family: {Theme.FONT_FAMILY};"
             f"font-size: {Theme.FONT_SIZE_TITLE}px; font-weight: 600;"
         )
         self._root.addWidget(title)
@@ -70,7 +76,7 @@ class BasePage(QWidget):
         if self.PAGE_SUBTITLE:
             sub = QLabel(self.PAGE_SUBTITLE)
             sub.setStyleSheet(
-                f"color: {Theme.TEXT_MUTED}; font-family: '{Theme.FONT_FAMILY}';"
+                f"color: {Theme.TEXT_MUTED}; font-family: {Theme.FONT_FAMILY};"
                 f"font-size: {Theme.FONT_SIZE_SMALL}px;"
             )
             self._root.addWidget(sub)

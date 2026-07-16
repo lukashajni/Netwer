@@ -29,7 +29,7 @@ class ActivityDialog(QDialog):
         header = QHBoxLayout()
         title = QLabel("Activity History")
         title.setStyleSheet(
-            f"color: {Theme.TEXT_PRIMARY}; font-family: '{Theme.FONT_FAMILY}';"
+            f"color: {Theme.TEXT_PRIMARY}; font-family: {Theme.FONT_FAMILY};"
             f"font-size: 17px; font-weight: 600; background: transparent;")
         header.addWidget(title)
         header.addStretch()

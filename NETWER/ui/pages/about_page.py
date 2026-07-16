@@ -129,7 +129,7 @@ class AboutPage(BasePage):
         name = QLabel("NETWER")
         name.setAlignment(Qt.AlignmentFlag.AlignCenter)
         name.setStyleSheet(
-            f"color: {Theme.TEXT_PRIMARY}; font-family: '{Theme.FONT_FAMILY}';"
+            f"color: {Theme.TEXT_PRIMARY}; font-family: {Theme.FONT_FAMILY};"
             f"font-size: 25px; font-weight: 600; letter-spacing: 8px;"
             f"padding-top: 6px;")
         lay.addWidget(name)
@@ -137,7 +137,7 @@ class AboutPage(BasePage):
         ver = QLabel(APP_VERSION)
         ver.setAlignment(Qt.AlignmentFlag.AlignCenter)
         ver.setStyleSheet(
-            f"color: {Theme.ACCENT}; font-family: '{Theme.FONT_DATA}';"
+            f"color: {Theme.ACCENT}; font-family: {Theme.FONT_DATA};"
             f"font-size: {Theme.FONT_SIZE_SMALL}px; letter-spacing: 2px;")
         lay.addWidget(ver)
 
@@ -175,7 +175,7 @@ class AboutPage(BasePage):
         desc = QLabel(DESCRIPTION)
         desc.setWordWrap(True)
         desc.setStyleSheet(
-            f"color: {Theme.TEXT_SECONDARY}; font-family: '{Theme.FONT_FAMILY}';"
+            f"color: {Theme.TEXT_SECONDARY}; font-family: {Theme.FONT_FAMILY};"
             f"font-size: {Theme.FONT_SIZE_SMALL}px; line-height: 170%;"
             f"background: transparent; padding-bottom: 16px;")
         lay.addWidget(desc)
@@ -214,7 +214,7 @@ class AboutPage(BasePage):
     def _section_label(self, text):
         lbl = QLabel(text)
         lbl.setStyleSheet(
-            f"color: {Theme.TEXT_BODY}; font-family: '{Theme.FONT_FAMILY}';"
+            f"color: {Theme.TEXT_BODY}; font-family: {Theme.FONT_FAMILY};"
             f"font-size: {Theme.FONT_SIZE_BODY}px; font-weight: 500;"
             f"background: transparent; padding-bottom: 8px;")
         return lbl
@@ -222,7 +222,7 @@ class AboutPage(BasePage):
     def _badge(self, text, color):
         lbl = QLabel(text)
         lbl.setStyleSheet(
-            f"color: {color}; font-family: '{Theme.FONT_FAMILY}';"
+            f"color: {color}; font-family: {Theme.FONT_FAMILY};"
             f"font-size: {Theme.FONT_SIZE_TINY}px;"
             f"background: {Theme.BG_ELEVATED};"
             f"border: 1px solid {Theme.BORDER}; border-radius: 6px;"
@@ -247,7 +247,7 @@ class AboutPage(BasePage):
 
         v = QLabel(str(value))
         v.setStyleSheet(
-            f"color: {Theme.TEXT_PRIMARY}; font-family: '{Theme.FONT_DATA}';"
+            f"color: {Theme.TEXT_PRIMARY}; font-family: {Theme.FONT_DATA};"
             f"font-size: 15px; font-weight: 600;")
         lay.addWidget(v)
         return tile
@@ -331,7 +331,7 @@ class AboutPage(BasePage):
             f"border: 1px solid {Theme.BORDER}; }}"
             f"QMessageBox QLabel {{ background: transparent; border: none;"
             f"color: {Theme.TEXT_BODY};"
-            f"font-family: '{Theme.FONT_FAMILY}';"
+            f"font-family: {Theme.FONT_FAMILY};"
             f"font-size: {Theme.FONT_SIZE_SMALL}px; }}"
             f"QMessageBox QPushButton {{ background: {Theme.ACCENT};"
             f"color: white; border: none; border-radius: 6px;"

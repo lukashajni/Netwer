@@ -128,6 +128,24 @@ class Sidebar(QWidget):
         )
         lay.addWidget(ver)
 
+    def add_section(self, label: str) -> None:
+        """Suptilni naslov sekcije koji grupira stavke ispod sebe
+        (npr. 'Tools' iznad DNS/Reverse DNS/Traceroute). Prazan label
+        ubaci samo mali razmak kao vizualni odjeljivač."""
+        if not label:
+            spacer = QLabel("")
+            spacer.setFixedHeight(10)
+            spacer.setStyleSheet("background: transparent;")
+            self.layout().addWidget(spacer)
+            return
+        header = QLabel(label.upper())
+        header.setStyleSheet(
+            f"color: {Theme.TEXT_FAINT}; font-size: 10px; font-weight: 600;"
+            f"letter-spacing: 1.5px; background: transparent;"
+            f"padding: 14px 0 4px 16px;"
+        )
+        self.layout().addWidget(header)
+
     def add_item(self, key: str, icon_name: str, title: str,
                  subtitle: str = "") -> None:
         item = NavItem(key, icon_name, title, subtitle)

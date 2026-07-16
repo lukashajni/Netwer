@@ -78,14 +78,14 @@ class UsageBar(QWidget):
 
         self._detail = QLabel("")
         self._detail.setStyleSheet(
-            f"color: {Theme.TEXT_FAINT}; font-family: '{Theme.FONT_MONO}';"
+            f"color: {Theme.TEXT_FAINT}; font-family: {Theme.FONT_MONO};"
             f"font-size: {Theme.FONT_SIZE_TINY}px; background: transparent;")
         top.addWidget(self._detail)
         top.addStretch()
 
         self._value_label = QLabel("0%")
         self._value_label.setStyleSheet(
-            f"color: {color}; font-family: '{Theme.FONT_DATA}';"
+            f"color: {color}; font-family: {Theme.FONT_DATA};"
             f"font-size: {Theme.FONT_SIZE_BODY}px; font-weight: 600;"
             f"background: transparent;")
         top.addWidget(self._value_label)

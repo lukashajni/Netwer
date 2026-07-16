@@ -42,6 +42,7 @@ class Theme:
     SUCCESS = "#3ec98a"   # zeleno — connected, online, excellent
     WARNING = "#f0a830"   # žuto — upozorenje, uptime
     DANGER = "#e2504a"    # crveno — greška, offline, timeout
+    DANGER_HOVER = "#c9433d"  # tamnija varijanta za hover na crvenom gumbu
     INFO = "#4d9bff"      # info (isto kao accent)
 
     # ── Grafovi (PyQtGraph) ────────────────────────────────────
@@ -52,11 +53,23 @@ class Theme:
     CHART_FILL_UL = (176, 124, 255, 35)
 
     # ── Tipografija ────────────────────────────────────────────
-    FONT_FAMILY = "Segoe UI Variable Display"  # Windows 11 sistemski font
-    FONT_MONO = "Cascadia Code"       # moderni monospace (Win11); fallback Consolas
-    # Za vrijednosti podataka: cistiji, deblji sans (ne monospace).
-    # "Segoe UI Semibold" je siroko dostupan na Win10/11 i djeluje dotjeranije.
-    FONT_DATA = "Segoe UI Semibold"
+    # Font STACKOVI s fallbackovima. Windows 11 ima "Segoe UI Variable",
+    # Windows 10 "Segoe UI", a drugi OS-ovi padnu na sans-serif — tako
+    # tekst ostaje čitak svugdje, ne samo na Win11. Qt stylesheet i QFont
+    # oba razumiju zarezom odvojenu listu obitelji.
+    FONT_FAMILY = ('"Segoe UI Variable Display", "Segoe UI Variable", '
+                   '"Segoe UI", "Inter", "Helvetica Neue", Arial, sans-serif')
+    FONT_MONO = ('"Cascadia Code", "Cascadia Mono", Consolas, '
+                 '"JetBrains Mono", "DejaVu Sans Mono", monospace')
+    # Za vrijednosti podataka: čišći, deblji sans (ne monospace).
+    FONT_DATA = ('"Segoe UI Semibold", "Segoe UI Variable Display Semibold", '
+                 '"Segoe UI", "Inter", Arial, sans-serif')
+
+    #: Prva stvarna obitelj iz svakog stacka — za QFont(...) pozive koji
+    #: žele jedno ime (Qt svejedno primijeni substituciju, ali ovo je čišće).
+    FONT_FAMILY_PRIMARY = "Segoe UI Variable Display"
+    FONT_MONO_PRIMARY = "Cascadia Code"
+
     FONT_SIZE_TITLE = 22
     FONT_SIZE_HEADING = 15
     FONT_SIZE_BODY = 13

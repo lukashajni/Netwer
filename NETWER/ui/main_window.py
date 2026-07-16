@@ -85,6 +85,10 @@ class MainWindow(QMainWindow):
         # Let the page talk back to the window for loading coordination.
         page.set_window(self)
 
+    def register_section(self, label: str) -> None:
+        """Dodaj naslov sekcije u sidebar prije sljedećih stranica."""
+        self.sidebar.add_section(label)
+
     def finalize_sidebar(self) -> None:
         self.sidebar.add_stretch_and_status()
 
@@ -108,6 +112,22 @@ class MainWindow(QMainWindow):
         # Keep overlay on top if still loading
         if self._loading_active:
             self._overlay.raise_()
+
+    def goto(self, key: str) -> None:
+        """Public navigation used by cross-page actions (e.g. Ping Sweep
+        jumping to the Port Scanner). Updates the sidebar highlight too."""
+        if key in self._pages:
+            self.sidebar.set_active(key)
+            self._navigate(key)
+
+    def scan_ports_for(self, ip: str) -> None:
+        """Jump to the Port Scanner pre-targeted at ip and start scanning."""
+        page = self._pages.get("port_scanner")
+        if page is None:
+            return
+        self.goto("port_scanner")
+        if hasattr(page, "set_target"):
+            page.set_target(ip, autostart=True)
 
     def _fade_in(self, widget: QWidget) -> None:
         effect = QGraphicsOpacityEffect(widget)

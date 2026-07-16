@@ -81,7 +81,7 @@ class WiFiInfoPage(BasePage):
         sig_text.addWidget(sig_label)
         self.signal_verdict = QLabel("—")
         self.signal_verdict.setStyleSheet(
-            f"color: {Theme.TEXT_MUTED}; font-family: '{Theme.FONT_DATA}';"
+            f"color: {Theme.TEXT_MUTED}; font-family: {Theme.FONT_DATA};"
             f"font-size: 19px; font-weight: 600; background: transparent;")
         sig_text.addWidget(self.signal_verdict)
         self.signal_detail = QLabel("Not connected")
@@ -124,7 +124,7 @@ class WiFiInfoPage(BasePage):
 
         value = QLabel("—")
         value.setStyleSheet(
-            f"color: {Theme.TEXT_MUTED}; font-family: '{Theme.FONT_DATA}';"
+            f"color: {Theme.TEXT_MUTED}; font-family: {Theme.FONT_DATA};"
             f"font-size: 16px; font-weight: 600; background: transparent;")
         card.content_layout.addWidget(value)
 
@@ -268,14 +268,14 @@ class WiFiInfoPage(BasePage):
             color = signal_color(dbm)
             self.signal_verdict.setText(signal_quality(dbm))
             self.signal_verdict.setStyleSheet(
-                f"color: {color}; font-family: '{Theme.FONT_DATA}';"
+                f"color: {color}; font-family: {Theme.FONT_DATA};"
                 f"font-size: 19px; font-weight: 600; background: transparent;")
             self.signal_detail.setText(f"{dbm} dBm · {pct}%")
         else:
             self.signal_glyph.set_signal(pct)
             self.signal_verdict.setText(f"{pct}%")
             self.signal_verdict.setStyleSheet(
-                f"color: {Theme.SUCCESS}; font-family: '{Theme.FONT_DATA}';"
+                f"color: {Theme.SUCCESS}; font-family: {Theme.FONT_DATA};"
                 f"font-size: 19px; font-weight: 600; background: transparent;")
             self.signal_detail.setText(str(signal_raw))
 
@@ -309,7 +309,7 @@ class WiFiInfoPage(BasePage):
         self.signal_glyph.set_disconnected()
         self.signal_verdict.setText("No WiFi")
         self.signal_verdict.setStyleSheet(
-            f"color: {Theme.TEXT_MUTED}; font-family: '{Theme.FONT_DATA}';"
+            f"color: {Theme.TEXT_MUTED}; font-family: {Theme.FONT_DATA};"
             f"font-size: 19px; font-weight: 600; background: transparent;")
         self.signal_detail.setText("Adapter off or wired connection")
 
@@ -321,7 +321,7 @@ class WiFiInfoPage(BasePage):
     def _set_stat(self, card, value, sub, color, sub_color=None):
         card["value"].setText(str(value))
         card["value"].setStyleSheet(
-            f"color: {color}; font-family: '{Theme.FONT_DATA}';"
+            f"color: {color}; font-family: {Theme.FONT_DATA};"
             f"font-size: 16px; font-weight: 600; background: transparent;")
         card["sub"].setText(str(sub))
         card["sub"].setStyleSheet(
@@ -419,7 +419,7 @@ class WiFiInfoPage(BasePage):
         ssid = QLabel(ssid_text)
         ssid.setStyleSheet(
             f"color: {Theme.SUCCESS if is_current else Theme.TEXT_BODY};"
-            f"font-family: '{Theme.FONT_DATA}'; font-size: {Theme.FONT_SIZE_SMALL}px;"
+            f"font-family: {Theme.FONT_DATA}; font-size: {Theme.FONT_SIZE_SMALL}px;"
             f"font-weight: {'600' if is_current else '400'};"
             f"background: transparent; border: none;")
         row.addWidget(ssid, 1)
@@ -438,7 +438,7 @@ class WiFiInfoPage(BasePage):
         sig.setFixedWidth(60)
         sig.setAlignment(Qt.AlignmentFlag.AlignRight)
         sig.setStyleSheet(
-            f"color: {signal_color(dbm)}; font-family: '{Theme.FONT_MONO}';"
+            f"color: {signal_color(dbm)}; font-family: {Theme.FONT_MONO};"
             f"font-size: {Theme.FONT_SIZE_TINY}px; background: transparent; border: none;")
         row.addWidget(sig)
 

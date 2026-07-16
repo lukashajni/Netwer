@@ -49,7 +49,7 @@ class InfoTable(QFrame):
 
         k = QLabel(key)
         k.setStyleSheet(
-            f"color: {Theme.TEXT_SECONDARY}; font-family: '{Theme.FONT_FAMILY}';"
+            f"color: {Theme.TEXT_SECONDARY}; font-family: {Theme.FONT_FAMILY};"
             f"font-size: {Theme.FONT_SIZE_SMALL}px; background: transparent;"
         )
         k.setMinimumWidth(150)
@@ -72,7 +72,7 @@ class InfoTable(QFrame):
         self._rows.append((f"--- {title} ---", ""))
         lbl = QLabel(title)
         lbl.setStyleSheet(
-            f"color: {Theme.ACCENT}; font-family: '{Theme.FONT_FAMILY}';"
+            f"color: {Theme.ACCENT}; font-family: {Theme.FONT_FAMILY};"
             f"font-size: {Theme.FONT_SIZE_TINY}px; font-weight: 600;"
             f"background: transparent; padding: 10px 14px 4px 14px;"
             f"text-transform: uppercase; letter-spacing: 1px;"

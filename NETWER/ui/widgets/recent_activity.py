@@ -103,7 +103,7 @@ class RecentActivity(QWidget):
         text_box.setSpacing(1)
         title = QLabel(entry.get("title", ""))
         title.setStyleSheet(
-            f"color: {Theme.TEXT_BODY}; font-family: '{Theme.FONT_FAMILY}';"
+            f"color: {Theme.TEXT_BODY}; font-family: {Theme.FONT_FAMILY};"
             f"font-size: {Theme.FONT_SIZE_SMALL}px; background: transparent;"
         )
         text_box.addWidget(title)
@@ -112,7 +112,7 @@ class RecentActivity(QWidget):
         if detail:
             d = QLabel(detail)
             d.setStyleSheet(
-                f"color: {Theme.TEXT_MUTED}; font-family: '{Theme.FONT_MONO}';"
+                f"color: {Theme.TEXT_MUTED}; font-family: {Theme.FONT_MONO};"
                 f"font-size: {Theme.FONT_SIZE_TINY}px; background: transparent;"
             )
             text_box.addWidget(d)

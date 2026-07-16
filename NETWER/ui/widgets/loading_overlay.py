@@ -80,7 +80,7 @@ class LoadingOverlay(QWidget):
         name = QLabel("NETWER")
         name.setAlignment(Qt.AlignmentFlag.AlignCenter)
         name.setStyleSheet(
-            f"color: {Theme.TEXT_PRIMARY}; font-family: '{Theme.FONT_FAMILY}';"
+            f"color: {Theme.TEXT_PRIMARY}; font-family: {Theme.FONT_FAMILY};"
             f"font-size: 26px; font-weight: 600; letter-spacing: 8px;"
             f"background: transparent;"
         )
@@ -94,7 +94,7 @@ class LoadingOverlay(QWidget):
         self._sub = QLabel(message)
         self._sub.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._sub.setStyleSheet(
-            f"color: {Theme.TEXT_MUTED}; font-family: '{Theme.FONT_FAMILY}';"
+            f"color: {Theme.TEXT_MUTED}; font-family: {Theme.FONT_FAMILY};"
             f"font-size: {Theme.FONT_SIZE_BODY}px; background: transparent;"
         )
         lay.addWidget(self._sub, alignment=Qt.AlignmentFlag.AlignCenter)

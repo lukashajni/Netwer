@@ -25,6 +25,7 @@ from app.theme import Theme
 from app.resources import Icons
 from ui.pages.base_page import BasePage
 from ui.widgets.card import Card
+from ui.widgets.spinner import Spinner
 from workers import OneshotWorker
 from reports import report_data
 from reports.pdf_report import build_report, SECTION_LABELS, ALL_SECTIONS
@@ -166,12 +167,14 @@ class ReportPage(BasePage):
         return frame
 
     def _checkbox_style(self):
+        check_png = Icons.png_path("checkmark", 13, "#ffffff")
         return (
             f"QCheckBox {{ background: transparent; spacing: 0; }}"
-            f"QCheckBox::indicator {{ width: 18px; height: 18px; border-radius: 5px;"
+            f"QCheckBox::indicator {{ width: 20px; height: 20px; border-radius: 5px;"
             f"border: 1px solid {Theme.BORDER_STRONG}; background: {Theme.BG_CARD}; }}"
+            f"QCheckBox::indicator:hover {{ border-color: {Theme.ACCENT}; }}"
             f"QCheckBox::indicator:checked {{ background: {Theme.ACCENT};"
-            f"border-color: {Theme.ACCENT}; }}"
+            f"border-color: {Theme.ACCENT}; image: url({check_png}); }}"
         )
 
     def _primary_button_style(self):
@@ -200,6 +203,7 @@ class ReportPage(BasePage):
         self.btn_generate.setEnabled(False)
         self.btn_save.setEnabled(False)
         self._status.setText("Collecting data… (scanning may take a few seconds)")
+        self._show_loading("Collecting network data\u2026")
 
         # Collect data in a worker, then build the PDF
         w = OneshotWorker(report_data.collect, self.core, sections)
@@ -225,8 +229,32 @@ class ReportPage(BasePage):
             self.btn_generate.setEnabled(True)
 
     def _on_error(self, msg):
+        self._clear_preview()
         self._status.setText(f"Error: {msg}")
         self.btn_generate.setEnabled(True)
+
+    def _clear_preview(self):
+        while self._preview_layout.count():
+            item = self._preview_layout.takeAt(0)
+            w = item.widget()
+            if w:
+                w.deleteLater()
+
+    def _show_loading(self, text):
+        """Replace the preview area with a centered spinner + message so it's
+        obvious the report is being built (not just a small status line)."""
+        self._clear_preview()
+        self._preview_layout.addStretch()
+        spin = Spinner(size=40)
+        self._preview_layout.addWidget(spin, alignment=Qt.AlignmentFlag.AlignCenter)
+        spin.start()
+        lbl = QLabel(text)
+        lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        lbl.setStyleSheet(
+            f"color: {Theme.TEXT_SECONDARY}; font-size: {Theme.FONT_SIZE_BODY}px;"
+            f"background: transparent; padding-top: 14px;")
+        self._preview_layout.addWidget(lbl, alignment=Qt.AlignmentFlag.AlignCenter)
+        self._preview_layout.addStretch()
 
     # ── Preview rendering ──────────────────────────────────────
     def _show_preview(self, pdf_path):
@@ -253,7 +281,7 @@ class ReportPage(BasePage):
             lbl = QLabel()
             lbl.setPixmap(pm)
             lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            lbl.setStyleSheet("background: white; border: 1px solid #2a3555;")
+            lbl.setStyleSheet(f"background: white; border: 1px solid {Theme.BORDER_STRONG};")
             self._preview_layout.addWidget(lbl, alignment=Qt.AlignmentFlag.AlignCenter)
         self._preview_layout.addStretch()
 

@@ -66,7 +66,7 @@ class _Ring(QWidget):
 
         # Tekst u sredini
         p.setPen(QColor(Theme.TEXT_BODY))
-        p.setFont(QFont(Theme.FONT_FAMILY, 11, QFont.Weight.DemiBold))
+        p.setFont(QFont(Theme.FONT_FAMILY_PRIMARY, 11, QFont.Weight.DemiBold))
         p.drawText(rect, Qt.AlignmentFlag.AlignCenter, f"{int(round(self._value))}%")
         p.end()
 
@@ -89,7 +89,7 @@ class Gauge(QWidget):
         self._label = QLabel(label)
         self._label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._label.setStyleSheet(
-            f"color: {Theme.TEXT_SECONDARY}; font-family: '{Theme.FONT_FAMILY}';"
+            f"color: {Theme.TEXT_SECONDARY}; font-family: {Theme.FONT_FAMILY};"
             f"font-size: {Theme.FONT_SIZE_TINY}px; background: transparent;"
         )
         lay.addWidget(self._label)
