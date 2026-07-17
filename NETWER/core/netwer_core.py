@@ -17,12 +17,14 @@ Conventions used throughout:
 
 import os
 import re
+import sys
 import json
 import time
 import socket
 import platform
 import ipaddress
 import subprocess
+from pathlib import Path
 from datetime import datetime
 
 try:
@@ -30,6 +32,11 @@ try:
     PSUTIL_AVAILABLE = True
 except ImportError:
     PSUTIL_AVAILABLE = False
+
+
+# Platform detection: "win32" on Windows, "linux" on Linux, "darwin" on macOS.
+# Used to route adapter/network calls to the right OS-specific implementation.
+used_os = sys.platform
 
 
 # ══════════════════════════════════════════
@@ -1235,12 +1242,98 @@ def reverse_dns(ip):
 # NETWORK ADAPTERS
 # ══════════════════════════════════════════
 
+def list_adapters_linux():
+    """List network adapters on Linux via psutil (name, status, speed, MTU,
+    MAC). Mirrors the shape of the Windows PowerShell path so the Network
+    Information page can render either the same way."""
+    stats = psutil.net_if_stats()
+    adapter_list = []
+
+    for name, stat in stats.items():
+        adapter_dict = dict()
+        adapter_dict["name"] = name
+        adapter_dict["description"] = f"No description for {name} adapter"
+        adapter_dict["status"] = "Up" if stat.isup else "Down"
+        adapter_dict["link_speed"] = stat.speed
+        adapter_dict["mtu"] = stat.mtu
+        adapter_list.append(adapter_dict)
+
+    for interface, addresses in psutil.net_if_addrs().items():
+        for address in addresses:
+            if address.family == psutil.AF_LINK:
+                for adapter in adapter_list:
+                    if adapter["name"] == interface:
+                        adapter["mac"] = address.address
+    return adapter_list
+
+
+def handle_adapter_details_linux(adapter_name):
+    """Full IP configuration for ONE adapter on Linux. Uses psutil for
+    addresses and nmcli for gateway/DNS/DHCP method, and /sys/class/net to
+    tell physical from virtual interfaces."""
+    try:
+        def run_nmcli(field, adapter_name):
+            args = ["nmcli", "-g", field, "device", "show", adapter_name]
+            output_from_command = subprocess.run(
+                args, capture_output=True, text=True).stdout.strip()
+            return output_from_command
+
+        def get_dhcp(adapter_name):
+            # First get the connection type, then retrieve the dhcp method.
+            connection_type = run_nmcli("GENERAL.CONNECTION", adapter_name)
+            args = ["nmcli", "-g", "ipv4.method", "connection", "show",
+                    connection_type]
+            dhcp_output = subprocess.run(
+                args, capture_output=True, text=True).stdout.strip()
+            return dhcp_output
+
+        def get_virtual_type(adapter_name):
+            adapter_path = Path(f"/sys/class/net/{adapter_name}/device")
+            if adapter_path.is_dir():
+                # Physical → return nothing (UI treats empty as physical).
+                return ""
+            else:
+                return "Virtual"
+
+        def get_prefix(subnet_mask):
+            prefix = ipaddress.IPv4Network(
+                f"0.0.0.0/{subnet_mask}"
+            ).prefixlen
+            return prefix
+
+        adapter_list = list_adapters_linux()
+        stats = psutil.net_if_addrs()
+        for name, stat in stats.items():
+            for address in stat:
+                for adapter in adapter_list:
+                    if adapter["name"] == name:
+                        if address.family == socket.AF_INET:
+                            adapter["ipv4"] = str(address.address)
+                            adapter["subnet_mask"] = str(address.netmask)
+                        if address.family == socket.AF_INET6:
+                            adapter["ipv6"] = str(address.address)
+        for adapter in adapter_list:
+            adapter["gateway"] = run_nmcli("IP4.GATEWAY", adapter["name"])
+            adapter["prefix"] = get_prefix(adapter.get("subnet_mask", "0.0.0.0"))
+            adapter["dns"] = run_nmcli("IP4.DNS", adapter["name"])
+            adapter["dhcp"] = get_dhcp(adapter["name"])
+            adapter["virtual"] = get_virtual_type(adapter["name"])
+        for adapter in adapter_list:
+            if adapter["name"] == adapter_name:
+                return adapter
+    except Exception as e:
+        return {"error": str(e)}
+
+
 def list_adapters():
     try:
+        # If it's linux, handle it accordingly, otherwise handle it for windows
+        if used_os == "linux":
+            return list_adapters_linux()
         ps_cmd = "Get-NetAdapter | Select-Object Name,Status,InterfaceDescription,MacAddress | ConvertTo-Json -Depth 2"
         raw = run_powershell(ps_cmd, timeout=8)
         if not raw:
-            return {"error": "No adapters found (Windows-only feature)"}
+            return {"error": "No adapters found (Unsupported OS found)"}
         data = json.loads(raw)
         if isinstance(data, dict):
             data = [data]
@@ -1297,6 +1390,8 @@ $linkSpeed = if ($ad.LinkSpeed) { $ad.LinkSpeed } else { '' }
 } | ConvertTo-Json
 """  # noqa: W605 (regex backslashes are for PowerShell)
         raw = run_powershell(ps_cmd, timeout=10)
+        if used_os == "linux":
+            return handle_adapter_details_linux(adapter_name)
         if not raw or raw.strip() == "{}":
             return {"error": f"Adapter '{adapter_name}' not found"}
         data = json.loads(raw)
