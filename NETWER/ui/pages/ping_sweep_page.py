@@ -25,6 +25,7 @@ from PyQt6.QtWidgets import (
 from app.theme import Theme
 from app.resources import Icons
 from app.activity import activity
+from app.notifications import notifications
 from ui.pages.base_page import BasePage
 from ui.widgets.card import Card
 from ui.widgets.progress_bar import ProgressBar
@@ -57,6 +58,7 @@ class PingSweepPage(BasePage):
 
     # Table column widths (px); Hostname flexes.
     COL_DOT = 30
+    COL_TYPE = 28
     COL_IP = 140
     COL_MAC = 160
     COL_VENDOR = 130
@@ -85,20 +87,25 @@ class PingSweepPage(BasePage):
         self.subnet_input = QLineEdit()
         self.subnet_input.setPlaceholderText("Auto-detect (e.g. 192.168.1.0/24)")
         self.subnet_input.setStyleSheet(
-            f"QLineEdit {{ background: {Theme.BG_CARD}; color: {Theme.TEXT_BODY};"
+            f"QLineEdit {{ background: {Theme.GLASS_INPUT}; color: {Theme.TEXT_BODY};"
             f"border: 1px solid {Theme.BORDER_STRONG}; border-radius: 8px;"
             f"padding: 9px 12px; font-family: {Theme.FONT_MONO};"
             f"font-size: {Theme.FONT_SIZE_BODY}px; }}"
-            f"QLineEdit:focus {{ border-color: {Theme.ACCENT}; }}")
+            f"QLineEdit:focus {{ border-color: {Theme.GLASS_BORDER_HI}; }}")
         self.subnet_input.returnPressed.connect(self._toggle)
         row.addWidget(self.subnet_input, 1)
 
         self.timeout_combo = QComboBox()
         for label, value in TIMEOUT_OPTIONS:
             self.timeout_combo.addItem(label, value)
-        self.timeout_combo.setCurrentIndex(1)   # 150 ms
+        # Default to the timeout configured in Settings (falls back to 150 ms).
+        from app.store import store
+        default_to = store.get_setting("sweep_timeout_ms", 150)
+        idx = next((i for i, (_, v) in enumerate(TIMEOUT_OPTIONS)
+                    if v == default_to), 1)
+        self.timeout_combo.setCurrentIndex(idx)
         self.timeout_combo.setStyleSheet(
-            f"QComboBox {{ background: {Theme.BG_CARD}; color: {Theme.TEXT_SECONDARY};"
+            f"QComboBox {{ background: {Theme.GLASS_INPUT}; color: {Theme.TEXT_SECONDARY};"
             f"border: 1px solid {Theme.BORDER}; border-radius: 8px;"
             f"padding: 9px 12px; font-size: {Theme.FONT_SIZE_SMALL}px; }}"
             f"QComboBox::drop-down {{ border: none; width: 20px; }}"
@@ -179,10 +186,11 @@ class PingSweepPage(BasePage):
         header = QHBoxLayout()
         header.setContentsMargins(0, 0, 0, 6)
         header.setSpacing(0)
-        for text, w in (("", self.COL_DOT), ("IP address", self.COL_IP),
+        for text, w in (("", self.COL_DOT), ("", self.COL_TYPE),
+                        ("IP address", self.COL_IP),
                         ("Hostname", -1), ("MAC", self.COL_MAC),
                         ("Vendor", self.COL_VENDOR), ("RTT", self.COL_RTT),
-                        ("PORTS", 30)):
+                        ("PORTS", 30), ("WAKE", 30)):
             lbl = QLabel(text)
             align = (Qt.AlignmentFlag.AlignRight if text == "RTT"
                      else Qt.AlignmentFlag.AlignLeft)
@@ -253,9 +261,22 @@ class PingSweepPage(BasePage):
         dot_wrap.setStyleSheet("background: transparent;")
         rl.addWidget(dot_wrap)
 
-        # IP
+        # Device-type icon (inferred from vendor / gateway / hostname)
+        dtype = self.core.detect_device_type(
+            vendor=dev.get("vendor", ""), is_gateway=is_gateway,
+            hostname=dev.get("hostname", ""))
+        icon_key = f"dev_{dtype}" if dtype != "generic" else "dev_generic"
+        type_icon = QLabel()
+        type_icon.setFixedWidth(self.COL_TYPE)
+        type_icon.setPixmap(Icons.pixmap(icon_key, 16, Theme.TEXT_SECONDARY))
+        type_icon.setToolTip(dtype.capitalize())
+        type_icon.setStyleSheet("background: transparent;")
+        rl.addWidget(type_icon)
+
+        # IP (selectable so it can be copied)
         ip = QLabel(dev.get("ip", ""))
         ip.setFixedWidth(self.COL_IP)
+        ip.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         ip.setStyleSheet(
             f"color: {Theme.TEXT_BODY}; font-family: {Theme.FONT_MONO};"
             f"font-size: 13px; background: transparent;")
@@ -313,6 +334,26 @@ class PingSweepPage(BasePage):
         scan_btn.clicked.connect(lambda _=False, ip=ip_addr: self._scan_ports(ip))
         rl.addWidget(scan_btn)
 
+        # Wake-on-LAN action (only shown when we know the MAC).
+        mac_addr = (dev.get("mac") or "").strip()
+        wake_btn = QPushButton()
+        wake_btn.setIcon(Icons.get("power", Theme.TEXT_SECONDARY))
+        wake_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        wake_btn.setFixedSize(30, 26)
+        wake_btn.setStyleSheet(
+            "QPushButton { background: transparent; border: none; }"
+            f"QPushButton:hover {{ background: {Theme.BG_ELEVATED};"
+            f"border-radius: 5px; }}"
+            f"QPushButton:disabled {{ }}")
+        if mac_addr:
+            wake_btn.setToolTip(f"Wake this device (send magic packet to {mac_addr})")
+            wake_btn.clicked.connect(
+                lambda _=False, mac=mac_addr, name=name: self._wake(mac, name))
+        else:
+            wake_btn.setToolTip("Wake-on-LAN unavailable (MAC unknown)")
+            wake_btn.setEnabled(False)
+        rl.addWidget(wake_btn)
+
         # Insert before the trailing stretch
         self._rows_layout.insertWidget(self._rows_layout.count() - 1, row)
 
@@ -329,6 +370,25 @@ class PingSweepPage(BasePage):
         """Jump to the Port Scanner pre-targeted at this device's IP."""
         if ip and self._window is not None:
             self._window.scan_ports_for(ip)
+
+    def _wake(self, mac, name):
+        """Send a Wake-on-LAN magic packet to a device by MAC."""
+        subnet = self.subnet_input.text().strip()
+        broadcast = "255.255.255.255"
+        # If we know the subnet, use its directed broadcast (more reliable).
+        prefix = self.core._parse_subnet_prefix(subnet) if subnet else None
+        if prefix:
+            broadcast = f"{prefix}.255"
+        res = self.core.wake_on_lan(mac, broadcast=broadcast)
+        if res.get("ok"):
+            self.progress_label.setText(
+                f"\u26a1 Magic packet sent to {name} ({res['mac']})")
+            activity.add("Wake-on-LAN sent", f"{name} \u00b7 {res['mac']}",
+                         kind="info")
+        else:
+            self.progress_label.setText(
+                f"Wake failed: {res.get('error', 'unknown error')}")
+
 
     def _show_empty(self, text: str):
         """Show a centered placeholder message in the (empty) table body."""
@@ -410,8 +470,37 @@ class PingSweepPage(BasePage):
             activity.add("Ping sweep completed",
                          f"{found} device{'s' if found != 1 else ''} found",
                          kind="success")
+            notifications.notify_scan_done(
+                "Network scan complete",
+                f"{found} device{'s' if found != 1 else ''} found")
+            self._check_new_devices()
         self._worker = None
         self._stop()
+
+    def _check_new_devices(self):
+        """Compare this sweep's devices against the set we've seen before
+        (persisted). Notify for any genuinely new device on the network."""
+        from app.store import store
+        known = set(store.get_setting("known_device_macs", []) or [])
+        new_devices = []
+        current = set()
+        for d in self._devices:
+            mac = (d.get("mac") or "").upper()
+            if not mac:
+                continue
+            current.add(mac)
+            if known and mac not in known:
+                new_devices.append(d)
+        # Only alert once we have a baseline (avoid flooding on first-ever scan).
+        if known:
+            for d in new_devices:
+                name = _device_display_name(d)
+                notifications.notify_new_device(name, d.get("ip", ""))
+                activity.add("New device found",
+                             f"{name} ({d.get('ip','')})", kind="info")
+        # Update the baseline with everything seen so far.
+        store.set_setting("known_device_macs",
+                          sorted(known | current))
 
     # ══════════════════════════════════════════════════════════
     # Stream events

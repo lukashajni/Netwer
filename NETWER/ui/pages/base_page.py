@@ -100,12 +100,32 @@ class BasePage(QWidget):
     def stop_workers(self) -> None:
         """Zaustavi i uredno ugasi sve aktivne workere ove stranice."""
         for worker in list(self._workers):
+            # Disconnect signals FIRST so a result/error queued just before
+            # stop() can't fire back into a widget we're about to delete
+            # (that race segfaults on theme rebuild).
+            for sig in ("result", "error", "done"):
+                s = getattr(worker, sig, None)
+                if s is not None:
+                    try:
+                        s.disconnect()
+                    except Exception:
+                        pass
             worker.stop()
             if worker.isRunning():
                 worker.wait(2000)  # čekaj do 2s da nit izađe čisto
         self._workers.clear()
 
     # ── Lifecycle (podklase nadjačavaju po potrebi) ────────────
+    def preload(self) -> None:
+        """Pokreni jednokratno učitavanje podataka U POZADINI pri pokretanju
+        aplikacije, PRIJE nego korisnik uđe na stranicu. Tako podaci već
+        stoje spremni kad se klikne na stranicu — ne vrti se učitavanje tek
+        na prvi ulazak. Default: ništa (podklase koje imaju spori jednokratni
+        load nadjačaju ovo). Mora biti sigurno pozvati dok stranica nije
+        vidljiva i idempotentno (dvostruki poziv ne smije duplati posao).
+        """
+        pass
+
     def on_enter(self) -> None:
         """Zove se kad korisnik uđe na stranicu. Podklase pokreću
         učitavanje podataka ovdje. Default: ništa."""

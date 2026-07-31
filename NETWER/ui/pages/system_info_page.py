@@ -125,6 +125,12 @@ class SystemInfoPage(BasePage):
     # ══════════════════════════════════════════════════════════
     # Lifecycle
     # ══════════════════════════════════════════════════════════
+    def preload(self):
+        """Učitaj hardverske/OS detalje u pozadini pri pokretanju."""
+        if not self._loaded_once:
+            self._loaded_once = True
+            self._load_details()
+
     def on_enter(self):
         if not self._loaded_once:
             self._loaded_once = True

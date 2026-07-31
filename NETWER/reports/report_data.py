@@ -77,6 +77,16 @@ def collect(core, sections):
         if isinstance(devs, dict) and "devices" in devs:
             data["devices"] = devs["devices"]
 
+    if "port_scan" in sections:
+        # Pull the most recent port scan from the persistent store.
+        try:
+            from app.store import store
+            last = store.get_last_scan("port_scanner")
+            if last and last.get("payload"):
+                data["port_scan"] = last["payload"]
+        except Exception:
+            pass
+
     # Build the summary strip from whatever we have
     _build_summary(core, data, ping_results)
     return data

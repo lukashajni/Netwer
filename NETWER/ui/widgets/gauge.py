@@ -63,11 +63,8 @@ class _Ring(QWidget):
         p.setPen(pen_fg)
         span = int(-self._value / 100.0 * 360 * 16)
         p.drawArc(rect, 90 * 16, span)
-
-        # Tekst u sredini
-        p.setPen(QColor(Theme.TEXT_BODY))
-        p.setFont(QFont(Theme.FONT_FAMILY_PRIMARY, 11, QFont.Weight.DemiBold))
-        p.drawText(rect, Qt.AlignmentFlag.AlignCenter, f"{int(round(self._value))}%")
+        # (Postotak se više NE crta unutar prstena — ispisuje se ispod, kao
+        #  zaseban natpis, po želji korisnika.)
         p.end()
 
 
@@ -82,19 +79,28 @@ class Gauge(QWidget):
         self._ring = _Ring(color)
         lay.addWidget(self._ring, alignment=Qt.AlignmentFlag.AlignCenter)
 
-        # Explicit gap: the layout's AlignCenter packs children together, so
-        # setSpacing() alone doesn't separate the ring from its caption.
-        lay.addSpacing(14)
+        lay.addSpacing(10)
 
+        # Postotak (velik) ISPOD prstena.
+        self._value_lbl = QLabel("0%")
+        self._value_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._value_lbl.setStyleSheet(
+            f"color: {color}; font-family: {Theme.FONT_DATA};"
+            f"font-size: 18px; font-weight: 700; background: transparent;"
+        )
+        lay.addWidget(self._value_lbl)
+
+        # Naziv (CPU / Memory / Disk) ispod postotka.
         self._label = QLabel(label)
         self._label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._label.setStyleSheet(
             f"color: {Theme.TEXT_SECONDARY}; font-family: {Theme.FONT_FAMILY};"
-            f"font-size: {Theme.FONT_SIZE_TINY}px; background: transparent;"
+            f"font-size: {Theme.FONT_SIZE_SMALL}px; background: transparent;"
         )
         lay.addWidget(self._label)
 
     def set_value(self, percent: float, label: str | None = None) -> None:
         self._ring.animate_to(percent)
+        self._value_lbl.setText(f"{int(round(percent))}%")
         if label is not None:
             self._label.setText(label)

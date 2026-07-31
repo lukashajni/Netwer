@@ -5,6 +5,8 @@ Genericki panel-kontejner: naslov s pravom ikonom gore, pa proizvoljan
 sadrzaj ispod (graf, tablica, redovi, gaugevi).
 """
 
+from PyQt6.QtCore import QRectF
+from PyQt6.QtGui import QPainter, QColor, QBrush, QPen, QPainterPath
 from PyQt6.QtWidgets import QFrame, QVBoxLayout, QHBoxLayout, QLabel
 
 from app.theme import Theme
@@ -15,16 +17,17 @@ class Card(QFrame):
     def __init__(self, title: str, icon_name: str = "", parent=None):
         super().__init__(parent)
         self.setObjectName("Card")
+        # Background is painted in paintEvent (not via stylesheet) so it fills
+        # the whole rounded rect UNDER child widgets — a stylesheet background
+        # doesn't paint behind transparent children (gauges, charts), which
+        # left a dark app-coloured band across the card.
         self.setStyleSheet(
-            f"#Card {{ background: {Theme.BG_CARD};"
-            f"border: 1px solid {Theme.BORDER};"
-            f"border-radius: {Theme.RADIUS_CARD}px; }}"
-            f"#Card QLabel {{ background: transparent; border: none; }}"
+            "#Card QLabel { background: transparent; border: none; }"
         )
 
         outer = QVBoxLayout(self)
-        outer.setContentsMargins(14, 12, 14, 14)
-        outer.setSpacing(10)
+        outer.setContentsMargins(18, 16, 18, 18)
+        outer.setSpacing(12)
 
         # Cards used as compact stat tiles pass an empty title — in that case
         # skip the header entirely, otherwise it eats ~30px of height and the
@@ -46,12 +49,27 @@ class Card(QFrame):
             header.addStretch()
             outer.addLayout(header)
         else:
-            outer.setContentsMargins(14, 12, 14, 12)
+            outer.setContentsMargins(18, 16, 18, 16)
             outer.setSpacing(0)
 
         self.content_layout = QVBoxLayout()
         self.content_layout.setSpacing(6)
         outer.addLayout(self.content_layout)
+
+    def paintEvent(self, event):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        r = QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
+        radius = Theme.RADIUS_CARD
+        path = QPainterPath()
+        path.addRoundedRect(r, radius, radius)
+        glass = getattr(Theme, "GLASS_ENABLED", True)
+        fill = Theme.GLASS_CARD if glass else Theme.BG_CARD
+        border = Theme.GLASS_BORDER if glass else Theme.BORDER
+        p.fillPath(path, QBrush(QColor(fill)))
+        p.setPen(QPen(QColor(border), 1))
+        p.drawPath(path)
+        p.end()
 
 
 def kv_row(key: str, value: str, value_color: str = None, mono: bool = False):

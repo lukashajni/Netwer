@@ -61,18 +61,19 @@ class DnsToolsPage(BasePage):
     def _style_tab(self, btn, active):
         if active:
             btn.setStyleSheet(
-                f"QPushButton {{ background: {Theme.ACCENT}; color: white;"
-                f"border: none; border-radius: 8px; padding: 9px 16px;"
-                f"font-size: {Theme.FONT_SIZE_BODY}px; font-weight: 600;"
-                f"text-align: left; }}")
+                f"QPushButton {{ background: {Theme.GRAD_ACCENT}; color: white;"
+                f"border: none; border-radius: {Theme.RADIUS_CONTROL}px;"
+                f"padding: 9px 16px; font-size: {Theme.FONT_SIZE_BODY}px;"
+                f"font-weight: 600; text-align: left; }}")
         else:
             btn.setStyleSheet(
-                f"QPushButton {{ background: {Theme.BG_CARD};"
+                f"QPushButton {{ background: {Theme.GLASS_INPUT};"
                 f"color: {Theme.TEXT_SECONDARY};"
-                f"border: 1px solid {Theme.BORDER}; border-radius: 8px;"
+                f"border: 1px solid {Theme.GLASS_BORDER};"
+                f"border-radius: {Theme.RADIUS_CONTROL}px;"
                 f"padding: 9px 16px; font-size: {Theme.FONT_SIZE_BODY}px;"
                 f"text-align: left; }}"
-                f"QPushButton:hover {{ border-color: {Theme.BORDER_STRONG};"
+                f"QPushButton:hover {{ border-color: {Theme.GLASS_BORDER_HI};"
                 f"color: {Theme.TEXT_BODY}; }}")
 
     # ── Stacked tool panels ────────────────────────────────────

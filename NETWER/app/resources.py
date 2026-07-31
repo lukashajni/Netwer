@@ -63,6 +63,9 @@ class Icons:
         "speedtest": "fa6s.gauge-high",
         "report": "fa6s.file-lines",
         "settings": "fa6s.gear",
+        "moon": "fa6s.moon",
+        "sun": "fa6s.sun",
+        "bell": "fa6s.bell",
         "about": "fa6s.circle-info",
         # Dashboard kartice
         "internet": "fa6s.globe",
@@ -80,12 +83,23 @@ class Icons:
         "error": "fa6s.circle-xmark",
         "globe": "fa6s.globe",
         "copy": "fa6s.copy",
+        "history": "fa6s.clock-rotate-left",
+        "star": "fa6s.star",
+        "power": "fa6s.power-off",
+        "star_filled": "fa6s.star",
         "export": "fa6s.file-export",
         "refresh": "fa6s.rotate",
+        "close": "fa6s.xmark",
+        "notif_success": "fa6s.circle-check",
+        "notif_warning": "fa6s.triangle-exclamation",
+        "notif_error": "fa6s.circle-exclamation",
+        "notif_info": "fa6s.circle-info",
         "save": "fa6s.floppy-disk",
         "github": "fa6b.github",
         "play": "fa6s.play",
         "stop": "fa6s.stop",
+        "route": "fa6s.route",
+        "list": "fa6s.list-ul",
         "terminal": "fa6s.terminal",
         # Device types (for Network Map)
         "dev_pc": "fa6s.desktop",
@@ -102,6 +116,9 @@ class Icons:
         "dev_watch": "mdi.watch",
         "dev_tablet": "fa6s.tablet-screen-button",
         "dev_generic": "fa6s.microchip",
+        # Aliases used by detect_device_type() keys.
+        "dev_computer": "fa6s.desktop",
+        "dev_media": "fa6s.photo-film",
     }
 
     @classmethod

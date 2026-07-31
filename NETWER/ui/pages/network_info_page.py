@@ -108,6 +108,13 @@ class NetworkInfoPage(BasePage):
         return btn
 
     # ── Lifecycle ──────────────────────────────────────────────
+    def preload(self):
+        """Učitaj adaptere i javni IP u pozadini pri pokretanju."""
+        if not self._loaded_once:
+            self._loaded_once = True
+            self._load_adapters()
+            self._load_public_ip()
+
     def on_enter(self):
         if not self._loaded_once:
             self._loaded_once = True

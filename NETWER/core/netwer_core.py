@@ -24,6 +24,7 @@ import socket
 import platform
 import ipaddress
 import subprocess
+import urllib.request
 from pathlib import Path
 from datetime import datetime
 
@@ -758,33 +759,99 @@ def port_service(port):
     return PORT_SERVICES.get(int(port), ("Unknown", "TCP"))
 
 
-def _classify_port(ip, port, timeout):
+def _clean_banner(text):
+    """Strip control/non-printable characters from a raw banner so protocols
+    like Telnet (which send binary IAC negotiation bytes) don't leave garbage
+    on screen. Keeps normal printable ASCII/Latin text, drops the rest."""
+    if not text:
+        return ""
+    # Keep printable chars (space..~) plus common accented letters; drop the
+    # rest (control codes, Telnet IAC 0xFF sequences, replacement chars).
+    cleaned = []
+    for ch in text:
+        o = ord(ch)
+        if 32 <= o <= 126:            # printable ASCII
+            cleaned.append(ch)
+        elif o in (9,):              # tab → space
+            cleaned.append(" ")
+    result = "".join(cleaned).strip()
+    # Collapse runs of spaces left behind by stripped bytes.
+    result = " ".join(result.split())
+    return result
+
+
+def _grab_banner(sock, port, timeout):
+    """Best-effort banner grab on an already-open socket. Returns a short,
+    cleaned version/identification string, or "" if nothing useful comes back.
+
+    For quiet protocols that expect the client to speak first (HTTP) we send a
+    minimal probe; for chatty ones (SSH, FTP, SMTP, POP3, IMAP) we just read
+    what the server volunteers on connect. Telnet and other binary protocols
+    get their control bytes stripped so only readable text remains.
+    """
+    http_ports = (80, 8080, 8000, 8008, 8888, 9090, 5000, 443, 8443)
+    try:
+        sock.settimeout(min(timeout, 1.5))
+        if port in http_ports:
+            try:
+                sock.sendall(b"HEAD / HTTP/1.0\r\n\r\n")
+            except Exception:
+                pass
+        data = sock.recv(256)
+        if not data:
+            return ""
+        text = data.decode("utf-8", errors="replace")
+
+        if port in http_ports:
+            for line in text.splitlines():
+                if line.lower().startswith("server:"):
+                    return _clean_banner(line.split(":", 1)[1])[:60]
+            first = next((l for l in text.splitlines() if l.strip()), "")
+            return _clean_banner(first)[:60]
+
+        # Non-HTTP: return the first line that still has readable content
+        # after cleaning (SSH-2.0-..., "220 FTP ready", etc).
+        for line in text.splitlines():
+            cleaned = _clean_banner(line)
+            if cleaned:
+                return cleaned[:60]
+        return ""
+    except Exception:
+        return ""
+
+
+def _classify_port(ip, port, timeout, grab_banner=True):
     """Probe a single TCP port and classify the result the way a real
     scanner does:
         open     — connection succeeded (service is listening)
         closed   — host actively refused (RST) → port reachable, nothing there
         filtered — no response within timeout (firewall dropping packets)
-    Returns a dict with port, service, protocol, state.
+    When the port is open and grab_banner is set, also try to read a service
+    banner (e.g. "OpenSSH_8.9", "nginx/1.24.0"). Returns a dict with port,
+    service, protocol, state, and banner.
     """
     service, proto = port_service(port)
     state = "filtered"
+    banner = ""
     try:
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         s.settimeout(timeout)
         result = s.connect_ex((ip, int(port)))
-        s.close()
         if result == 0:
             state = "open"
+            if grab_banner:
+                banner = _grab_banner(s, int(port), timeout)
         elif result in (111, 10061):        # ECONNREFUSED (Linux / Windows)
             state = "closed"
         else:
             state = "filtered"              # timeout / unreachable → filtered
+        s.close()
     except socket.timeout:
         state = "filtered"
     except Exception:
         state = "filtered"
     return {"port": int(port), "service": service, "protocol": proto,
-            "state": state}
+            "state": state, "banner": banner}
 
 
 def _parse_port_spec(spec):
@@ -891,6 +958,113 @@ def port_scan_quick_stream(ip):
 
 def port_scan_custom(ip, port):
     return {"port": port, "open": scan_port(ip, port, timeout=1.0)}
+
+
+def wake_on_lan(mac, broadcast="255.255.255.255", port=9):
+    """Send a Wake-on-LAN magic packet to a device by its MAC address.
+
+    The magic packet is 6 bytes of 0xFF followed by the target MAC repeated
+    16 times, broadcast over UDP. The device's NIC (if WoL is enabled in its
+    BIOS/OS) powers the machine on.
+
+    mac        — target MAC ('AA:BB:CC:DD:EE:FF', with : - or none)
+    broadcast  — broadcast address (usually the subnet or 255.255.255.255)
+    port       — UDP port (7 or 9 conventionally)
+
+    Returns {"ok": True} on success or {"error": "..."}.
+    """
+    # Normalize MAC to 12 hex chars.
+    clean = re.sub(r"[^0-9A-Fa-f]", "", mac or "")
+    if len(clean) != 12:
+        return {"error": f"Invalid MAC address: {mac}"}
+    try:
+        mac_bytes = bytes.fromhex(clean)
+        packet = b"\xff" * 6 + mac_bytes * 16
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+        # Send a couple times to the broadcast + limited broadcast for reach.
+        s.sendto(packet, (broadcast, int(port)))
+        try:
+            s.sendto(packet, ("255.255.255.255", int(port)))
+        except Exception:
+            pass
+        s.close()
+        return {"ok": True, "mac": ":".join(
+            clean[i:i+2].upper() for i in range(0, 12, 2))}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+# ── Device type detection ──────────────────────────────────────
+# Infer what a device *is* from its open ports and vendor string. Used by
+# the Ping Sweep (icon + label per device) and reports. Returns one of the
+# type keys below; the UI maps these to icons.
+
+_VENDOR_TYPE_HINTS = {
+    "router": ["mikrotik", "tp-link", "netgear", "asus", "d-link", "ubiquiti",
+               "cisco", "zyxel", "huawei", "linksys", "fritz"],
+    "printer": ["hp", "canon", "epson", "brother", "lexmark", "xerox"],
+    "nas": ["synology", "qnap", "western digital", "wd ", "drobo"],
+    "tv": ["samsung", "lg electronics", "sony", "vizio", "roku", "hisense",
+           "tcl"],
+    "phone": ["apple", "xiaomi", "oneplus", "oppo", "vivo", "realme",
+              "google", "motorola", "nokia"],
+    "camera": ["hikvision", "dahua", "axis", "reolink", "wyze", "amcrest"],
+    "console": ["nintendo", "sony interactive", "microsoft"],
+}
+
+# Strong signals: an open port that almost always identifies a device type.
+_PORT_TYPE_HINTS = {
+    9100: "printer", 631: "printer", 515: "printer",   # printing protocols
+    32400: "media",                                     # Plex
+    554: "camera", 8554: "camera",                      # RTSP
+    5000: "nas", 5001: "nas",                           # Synology DSM
+    445: "computer", 139: "computer", 3389: "computer",  # SMB / RDP
+    62078: "phone",                                     # iPhone sync
+    8009: "tv",                                         # Chromecast
+}
+
+
+def detect_device_type(open_ports=None, vendor="", is_gateway=False,
+                        hostname=""):
+    """Best-effort device classification.
+
+    open_ports — iterable of open port numbers (ints), if a scan was run
+    vendor     — OUI vendor string (e.g. "MikroTik", "Apple")
+    is_gateway — True if this is the default gateway (→ router)
+    hostname   — reverse-DNS hostname, used as a weak hint
+
+    Returns a type key: router, printer, nas, tv, phone, camera, console,
+    media, computer, or generic.
+    """
+    if is_gateway:
+        return "router"
+
+    ports = set(int(p) for p in (open_ports or []))
+    # 1) Strong per-port signals win first.
+    for port, dtype in _PORT_TYPE_HINTS.items():
+        if port in ports:
+            return dtype
+
+    # 2) Vendor hints.
+    v = (vendor or "").lower()
+    for dtype, needles in _VENDOR_TYPE_HINTS.items():
+        if any(n in v for n in needles):
+            return dtype
+
+    # 3) Hostname hints (weakest).
+    h = (hostname or "").lower()
+    for kw, dtype in (("printer", "printer"), ("cam", "camera"),
+                      ("nas", "nas"), ("tv", "tv"), ("phone", "phone"),
+                      ("desktop", "computer"), ("pc", "computer"),
+                      ("laptop", "computer"), ("router", "router")):
+        if kw in h:
+            return dtype
+
+    # 4) Web-only device → probably some appliance/computer.
+    if ports & {80, 443, 8080}:
+        return "computer"
+    return "generic"
 
 
 # ══════════════════════════════════════════
@@ -1170,46 +1344,405 @@ def get_network_map():
 # TRACEROUTE
 # ══════════════════════════════════════════
 
-def traceroute_stream(target, max_hops=30):
+# ══════════════════════════════════════════
+# TRACEROUTE
+# ══════════════════════════════════════════
+
+_HOP_RE = re.compile(r'^\s*(\d{1,2})\s+(.*)$')
+_IP_RE = re.compile(r'(\d{1,3}(?:\.\d{1,3}){3})')
+_MS_RE = re.compile(r'(\d+(?:[.,]\d+)?)\s*ms', re.I)
+_FROM_RE = re.compile(r'(?:reply from|from)\s+(\d{1,3}(?:\.\d{1,3}){3})', re.I)
+_TIME_RE = re.compile(r'time[=<]\s*(\d+(?:[.,]\d+)?)', re.I)
+
+
+def _no_window():
+    """Keep Windows from flashing a console window for each subprocess."""
+    if platform.system() == "Windows":
+        return {"creationflags": 0x08000000}   # CREATE_NO_WINDOW
+    return {}
+
+
+def _parse_hop_line(line):
+    """Parse one traceroute/tracert output line into a hop dict, or None if
+    the line isn't a hop (headers, blank lines, 'Trace complete.').
+
+    Handles both formats:
+      Windows:  '  4    24 ms    23 ms    24 ms  213.242.116.9'
+                '  3     *        *        *     Request timed out.'
+      Linux:    ' 4  213.242.116.9  24.100 ms'
+                ' 3  * * *'
+    """
+    m = _HOP_RE.match(line.rstrip())
+    if not m:
+        return None
+    ttl = int(m.group(1))
+    rest = m.group(2)
+    ip_m = _IP_RE.search(rest)
+    if not ip_m:
+        return {"ttl": ttl, "timeout": True}
+    times = [float(x.replace(",", ".")) for x in _MS_RE.findall(rest)]
+    avg = round(sum(times) / len(times)) if times else None
+    ip = ip_m.group(1)
+    # Hostname: the token before "[ip]" (Windows) or "(ip)" (Linux), when the
+    # tool resolved a name. This is what shows under each hop in the list.
+    hostname = ip
+    hm = re.search(r'([A-Za-z0-9][A-Za-z0-9.\-]*[A-Za-z0-9])\s*[\[(]\s*'
+                   + re.escape(ip), rest)
+    if hm and hm.group(1) != ip:
+        hostname = hm.group(1)
+    return {"ttl": ttl, "ip": ip, "hostname": hostname,
+            "times": times, "avg": avg}
+
+
+def _system_trace(resolved, max_hops):
+    """Yield hop dicts using the OS traceroute/tracert. Yields nothing if the
+    tool is missing or produced no usable hop lines (caller then falls back)."""
+    if platform.system() == "Windows":
+        cmd = ["tracert", "-h", str(max_hops), "-w", "1000", resolved]
+    else:
+        cmd = ["traceroute", "-m", str(max_hops), "-w", "2",
+               "-q", "1", resolved]
+    try:
+        proc = subprocess.Popen(
+            cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+            text=True, errors="replace", **_no_window())
+    except Exception:
+        return
+
+    seen = 0
+    try:
+        for line in proc.stdout:
+            low = line.lower()
+            if "trace complete" in low or "trace aborted" in low:
+                break
+            hop = _parse_hop_line(line)
+            if hop is None or hop["ttl"] <= seen:
+                continue
+            seen = hop["ttl"]
+            yield hop
+            if hop.get("ip") == resolved:
+                break
+    except Exception:
+        pass
+    finally:
+        for meth in ("terminate", "kill"):
+            try:
+                getattr(proc, meth)()
+                break
+            except Exception:
+                pass
+
+
+def _ping_trace(resolved, max_hops):
+    """Fallback traceroute built on plain ping with an increasing TTL.
+
+    Works on any machine that can ping (no admin rights, no raw sockets, no
+    traceroute binary needed) which makes it a dependable backstop when the
+    system tool is missing or blocked.
+    """
+    is_win = platform.system() == "Windows"
+    for ttl in range(1, max_hops + 1):
+        if is_win:
+            cmd = ["ping", "-n", "1", "-i", str(ttl), "-w", "1500", resolved]
+        else:
+            cmd = ["ping", "-c", "1", "-t", str(ttl), "-W", "2", resolved]
+        try:
+            r = subprocess.run(cmd, capture_output=True, text=True,
+                               errors="replace", timeout=8, **_no_window())
+            out = (r.stdout or "") + (r.stderr or "")
+        except Exception:
+            yield {"ttl": ttl, "timeout": True}
+            continue
+
+        m = _FROM_RE.search(out)
+        if not m:
+            yield {"ttl": ttl, "timeout": True}
+            continue
+        ip = m.group(1)
+        t = _TIME_RE.search(out)
+        avg = round(float(t.group(1).replace(",", "."))) if t else None
+        yield {"ttl": ttl, "ip": ip, "hostname": ip,
+               "times": [avg] if avg is not None else [], "avg": avg}
+        if ip == resolved:
+            break
+
+
+def traceroute_stream(target, max_hops=30, auto=False):
+    """Trace the network path to a host, yielding one event per hop.
+
+    Events:
+        {"resolved": ip, "target": name}   once, first
+        {"ttl": n, "ip": .., "hostname": .., "times": [..], "avg": ms}
+        {"ttl": n, "timeout": True}
+        {"done": True, "reached": bool}    once, last
+        {"error": "..."}                   on failure to resolve
+
+    Uses the OS traceroute/tracert, falling back to a ping TTL-walk if that
+    yields nothing. Always stops as soon as the destination answers.
+
+    auto — when True, NETWER decides how far to go: it also gives up early
+    after several hops in a row time out (the destination is unreachable /
+    silently dropping probes), so an "Auto" trace doesn't crawl all the way
+    to the ceiling on a dead route.
+    """
     try:
         resolved = socket.gethostbyname(target)
-        yield {"resolved": resolved, "target": target}
     except Exception:
         yield {"error": f"Could not resolve: {target}"}
         return
+    yield {"resolved": resolved, "target": target}
 
-    for ttl in range(1, max_hops + 1):
-        times, hop_ip = [], None
-        try:
-            if platform.system() == "Windows":
-                cmd = ["tracert", "-h", str(ttl), "-w", "1000", "-d", resolved]
+    produced = 0
+    reached = False
+    consecutive_timeouts = 0
+    AUTO_TIMEOUT_LIMIT = 5   # give up after this many silent hops in Auto mode
+
+    def _walk(source):
+        nonlocal produced, reached, consecutive_timeouts
+        for hop in source:
+            produced += 1
+            if hop.get("timeout"):
+                consecutive_timeouts += 1
             else:
-                cmd = ["traceroute", "-m", str(ttl), "-w", "1", "-q", "1", resolved]
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=6)
-            for line in result.stdout.splitlines():
-                m = re.search(r'(\d+)\s*ms', line)
-                ip_m = re.search(r'(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})', line)
-                if m:
-                    times.append(int(m.group(1)))
-                if ip_m:
-                    hop_ip = ip_m.group(1)
-        except Exception:
-            pass
-
-        if not times or not hop_ip:
-            yield {"ttl": ttl, "timeout": True}
-        else:
-            try:
-                hostname = socket.gethostbyaddr(hop_ip)[0]
-            except Exception:
-                hostname = hop_ip
-            avg = round(sum(times) / len(times))
-            yield {"ttl": ttl, "ip": hop_ip, "hostname": hostname, "times": times, "avg": avg}
-            if hop_ip == resolved:
-                yield {"done": True, "reached": True}
+                consecutive_timeouts = 0
+            yield hop
+            if hop.get("ip") == resolved:
+                reached = True
+                return
+            if auto and consecutive_timeouts >= AUTO_TIMEOUT_LIMIT:
                 return
 
-    yield {"done": True, "reached": False}
+    yield from _walk(_system_trace(resolved, max_hops))
+
+    if produced == 0:
+        # System tool unavailable or silent — use the ping fallback.
+        yield from _walk(_ping_trace(resolved, max_hops))
+
+    yield {"done": True, "reached": reached}
+
+
+# ══════════════════════════════════════════
+# GEOLOCATION (for traceroute-on-map)
+# ══════════════════════════════════════════
+
+_GEO_CACHE = {}   # ip -> {lat, lon, city, country} (session cache)
+_GEO_LAST_ERROR = None   # last geolocation failure reason (for the UI)
+_OFFLINE_GEO = None      # lazily-loaded offline fallback table
+
+
+def _load_offline_geo():
+    global _OFFLINE_GEO
+    if _OFFLINE_GEO is not None:
+        return _OFFLINE_GEO
+    try:
+        base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        path = os.path.join(base, "assets", "geoip_offline.json")
+        with open(path, "r", encoding="utf-8") as f:
+            _OFFLINE_GEO = json.load(f)
+    except Exception:
+        _OFFLINE_GEO = {"known": {}, "octet": {}, "names": {}}
+    return _OFFLINE_GEO
+
+
+def _offline_geolocate(ip):
+    """Approximate location from a bundled table (no network). Returns
+    {lat, lon, city, country} for ANY public IPv4 — falls back to a coarse
+    guess for octets not explicitly mapped, so the map always has a point."""
+    data = _load_offline_geo()
+    known = data.get("known", {})
+    if ip in known:
+        lat, lon, country, city = known[ip]
+        return {"lat": lat, "lon": lon, "city": city, "country": country}
+    try:
+        octets = [int(x) for x in ip.split(".")]
+        first = octets[0]
+    except Exception:
+        return None
+    rule = data.get("octet", {}).get(str(first))
+    if rule:
+        lat, lon, country = rule
+    else:
+        # Unmapped octet — place at the region centroid by first octet.
+        if first < 64:
+            lat, lon, country = 39, -98, "United States"
+        elif first < 128:
+            lat, lon, country = 48, 10, "Europe"
+        elif first < 192:
+            lat, lon, country = 35, 105, "Asia"
+        else:
+            lat, lon, country = 39, -98, "United States"
+    return {"lat": lat, "lon": lon, "city": country, "country": country,
+            "approx": True}
+
+
+def geo_last_error():
+    return _GEO_LAST_ERROR
+
+
+def _is_private_ip(ip):
+    try:
+        return ipaddress.ip_address(ip).is_private
+    except Exception:
+        return False
+
+
+def geolocate_ip(ip, timeout=4):
+    """Return {lat, lon, city, country} for a public IP, or None.
+
+    Tries ip-api.com (HTTP) then a HTTPS fallback (ipapi.co). Results are
+    cached for the session. Private/reserved IPs return None.
+    """
+    if not ip or _is_private_ip(ip):
+        return None
+    if ip in _GEO_CACHE:
+        return _GEO_CACHE[ip]
+
+    # Provider 1: ip-api.com (fast, generous free tier, HTTP).
+    try:
+        url = (f"http://ip-api.com/json/{ip}"
+               "?fields=status,lat,lon,city,country,regionName")
+        req = urllib.request.Request(url, headers={"User-Agent": "NETWER"})
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            data = json.loads(r.read().decode("utf-8", errors="replace"))
+        if data.get("status") == "success" and data.get("lat") is not None:
+            geo = {"lat": data.get("lat"), "lon": data.get("lon"),
+                   "city": data.get("city") or data.get("regionName") or "",
+                   "country": data.get("country") or ""}
+            _GEO_CACHE[ip] = geo
+            return geo
+    except Exception:
+        pass
+
+    # Provider 2: ipapi.co (HTTPS fallback).
+    try:
+        url = f"https://ipapi.co/{ip}/json/"
+        req = urllib.request.Request(url, headers={"User-Agent": "NETWER"})
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            data = json.loads(r.read().decode("utf-8", errors="replace"))
+        if data.get("latitude") is not None and not data.get("error"):
+            geo = {"lat": data.get("latitude"), "lon": data.get("longitude"),
+                   "city": data.get("city") or data.get("region") or "",
+                   "country": data.get("country_name") or ""}
+            _GEO_CACHE[ip] = geo
+            return geo
+    except Exception:
+        pass
+
+    # Offline fallback: approximate region from the bundled table so the map
+    # still works with no internet / when the APIs are blocked.
+    off = _offline_geolocate(ip)
+    if off:
+        _GEO_CACHE[ip] = off
+        return off
+
+    return None
+
+
+def traceroute_geo_stream(target, max_hops=30, home_lat=None, home_lon=None):
+    """Traceroute that yields the same events as traceroute_stream, marking
+    private hops as local (and pinning them to the user's coordinates if
+    known). Public hops are NOT geolocated here — that happens afterwards in
+    geolocate_hops(), in parallel, so a slow or blocked geo provider can't
+    stall the trace itself (one blocking HTTP call per hop used to make a
+    30-hop trace take minutes on a network where the provider is blocked).
+    """
+    for ev in traceroute_stream(target, max_hops=max_hops):
+        if "ip" in ev and not ev.get("timeout"):
+            ip = ev["ip"]
+            if _is_private_ip(ip):
+                ev["local"] = True
+                if home_lat is not None and home_lon is not None:
+                    ev["lat"], ev["lon"] = home_lat, home_lon
+                    ev["city"] = "Local network"
+        yield ev
+
+
+def geolocate_hops(ips, timeout=6, max_workers=8):
+    """Geolocate several IPs at once. Returns {ip: geo_or_None}.
+
+    Tries ip-api.com's batch endpoint first (a single POST for up to 100
+    addresses — far faster and much less likely to hit the per-minute rate
+    limit than one request per hop). Falls back to parallel single lookups
+    if the batch call isn't available.
+    """
+    out = {}
+    todo = []
+    for ip in dict.fromkeys(ips):
+        if not ip or _is_private_ip(ip):
+            continue
+        if ip in _GEO_CACHE:
+            out[ip] = _GEO_CACHE[ip]
+        else:
+            todo.append(ip)
+    if not todo:
+        return out
+
+    # 1) Batch endpoint — one request for everything.
+    try:
+        payload = json.dumps([
+            {"query": ip, "fields": "status,lat,lon,city,country,query"}
+            for ip in todo[:100]
+        ]).encode("utf-8")
+        req = urllib.request.Request(
+            "http://ip-api.com/batch", data=payload,
+            headers={"User-Agent": "NETWER/1.0",
+                     "Content-Type": "application/json"})
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            results = json.loads(r.read().decode("utf-8", errors="replace"))
+        got = False
+        for item in results or []:
+            ip = item.get("query")
+            if not ip:
+                continue
+            if item.get("status") == "success" and item.get("lat") is not None:
+                geo = {"lat": item["lat"], "lon": item["lon"],
+                       "city": item.get("city") or "",
+                       "country": item.get("country") or ""}
+                _GEO_CACHE[ip] = geo
+                out[ip] = geo
+                got = True
+            else:
+                out[ip] = None
+        if got:
+            # Fill any the batch marked as failed with the offline estimate.
+            for ip in todo:
+                if out.get(ip) is None:
+                    off = _offline_geolocate(ip)
+                    if off:
+                        _GEO_CACHE[ip] = off
+                        out[ip] = off
+            return out
+    except Exception:
+        pass
+
+    # 2) Fallback — parallel single lookups (each already falls back offline).
+    from concurrent.futures import ThreadPoolExecutor
+    try:
+        with ThreadPoolExecutor(max_workers=min(max_workers, len(todo))) as ex:
+            for ip, geo in zip(todo, ex.map(
+                    lambda i: geolocate_ip(i, timeout=4), todo)):
+                out[ip] = geo
+    except Exception:
+        for ip in todo:
+            out.setdefault(ip, geolocate_ip(ip))
+    return out
+
+
+def geolocate_me(timeout=3):
+    """Best-effort geolocation of the user's own public IP (for the map's
+    starting point). Returns {lat, lon, city, country} or None."""
+    try:
+        url = ("http://ip-api.com/json/"
+               "?fields=status,lat,lon,city,country,regionName,query")
+        req = urllib.request.Request(url, headers={"User-Agent": "NETWER"})
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            data = json.loads(r.read().decode("utf-8", errors="replace"))
+        if data.get("status") == "success":
+            return {"lat": data.get("lat"), "lon": data.get("lon"),
+                    "city": data.get("city") or "", "country": data.get("country") or ""}
+    except Exception:
+        pass
+    return None
 
 
 # ══════════════════════════════════════════

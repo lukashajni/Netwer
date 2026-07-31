@@ -55,7 +55,7 @@ class ActivityDialog(QDialog):
         close = QPushButton("Close")
         close.setCursor(Qt.CursorShape.PointingHandCursor)
         close.setStyleSheet(
-            f"QPushButton {{ background: {Theme.ACCENT}; color: white; border: none;"
+            f"QPushButton {{ background: {Theme.GRAD_ACCENT}; color: white; border: none;"
             f"border-radius: 6px; padding: 8px 20px;"
             f"font-size: {Theme.FONT_SIZE_SMALL}px; font-weight: 600; }}"
             f"QPushButton:hover {{ background: {Theme.ACCENT_PURPLE}; }}")

@@ -19,8 +19,10 @@ from PyQt6.QtWidgets import (
 from app.theme import Theme
 from app.resources import Icons
 from app.activity import activity
+from app.notifications import notifications
 from ui.pages.base_page import BasePage
 from ui.widgets.card import Card
+from ui.widgets.host_input import HostInput
 from ui.widgets.latency_chart import LatencyChart
 from ui.widgets.terminal_output import TerminalOutput
 from workers import StreamWorker
@@ -57,15 +59,9 @@ class PingPage(BasePage):
         row = QHBoxLayout()
         row.setSpacing(8)
 
-        self.target_input = QLineEdit()
-        self.target_input.setPlaceholderText("IP address or hostname (e.g. 8.8.8.8)")
-        self.target_input.setStyleSheet(
-            f"QLineEdit {{ background: {Theme.BG_CARD}; color: {Theme.TEXT_BODY};"
-            f"border: 1px solid {Theme.BORDER_STRONG}; border-radius: 8px;"
-            f"padding: 9px 12px; font-family: {Theme.FONT_MONO};"
-            f"font-size: {Theme.FONT_SIZE_BODY}px; }}"
-            f"QLineEdit:focus {{ border-color: {Theme.ACCENT}; }}")
-        self.target_input.returnPressed.connect(self._toggle)
+        self.target_input = HostInput(
+            kind="ping", placeholder="IP address or hostname (e.g. 8.8.8.8)")
+        self.target_input.submitted.connect(self._toggle)
         row.addWidget(self.target_input, 1)
 
         self.count_combo = QComboBox()
@@ -73,7 +69,7 @@ class PingPage(BasePage):
             self.count_combo.addItem(label, value)
         self.count_combo.setCurrentIndex(1)   # default: 10 packets
         self.count_combo.setStyleSheet(
-            f"QComboBox {{ background: {Theme.BG_CARD}; color: {Theme.TEXT_BODY};"
+            f"QComboBox {{ background: {Theme.GLASS_INPUT}; color: {Theme.TEXT_BODY};"
             f"border: 1px solid {Theme.BORDER}; border-radius: 8px;"
             f"padding: 9px 12px; font-size: {Theme.FONT_SIZE_SMALL}px; }}"
             f"QComboBox::drop-down {{ border: none; width: 20px; }}"
@@ -191,11 +187,14 @@ class PingPage(BasePage):
         self.chart.reset()
         self.terminal.clear()
         self._reset_stats()
+        self._link_up = None   # reset watch-mode transition tracking
 
         count = self.count_combo.currentData()
         self.terminal.append(f"Pinging {target}…", kind="info")
 
-        w = StreamWorker(self.core.ping_custom_stream, target, count, 500)
+        from app.store import store
+        ping_to = store.get_setting("ping_timeout_ms", 1000)
+        w = StreamWorker(self.core.ping_custom_stream, target, count, ping_to)
         w.result.connect(self._on_reply)
         w.error.connect(lambda e: self.terminal.append(str(e), kind="error"))
         w.done.connect(self._on_finished)
@@ -220,6 +219,7 @@ class PingPage(BasePage):
             avg = self.stat_avg["value"].text()
             activity.add("Ping completed", f"{target} · avg {avg}",
                          kind="success")
+            self.target_input.remember()
         self._worker = None
         self._stop()
 
@@ -232,8 +232,27 @@ class PingPage(BasePage):
 
         target = self.target_input.text().strip()
         ms = d.get("ms")
+        is_up = d.get("status") == "ok"
 
-        if d.get("status") == "ok":
+        # Connection-state alerting (watch mode): announce transitions between
+        # reachable and unreachable so a long-running monitor is useful.
+        prev = getattr(self, "_link_up", None)
+        if prev is not None and prev != is_up:
+            if is_up:
+                self.terminal.append(
+                    f"\u2714 {target} is back UP", f"{ms} ms", kind="ok")
+                activity.add("Host recovered", f"{target} is reachable again",
+                             kind="success")
+            else:
+                self.terminal.append(
+                    f"\u26a0 {target} went DOWN", "no reply", kind="error")
+                activity.add("Host unreachable",
+                             f"{target} stopped responding", kind="error")
+            # Bell notification (respects the "host down" toggle in Settings).
+            notifications.notify_host_down(target, is_up)
+        self._link_up = is_up
+
+        if is_up:
             self.chart.push(ms)
             self.terminal.append(f"Reply from {target}", f"{ms} ms", kind="ok")
             self._set_stat(self.stat_current, f"{ms}", "ms",

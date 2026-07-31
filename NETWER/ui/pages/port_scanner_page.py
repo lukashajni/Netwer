@@ -21,9 +21,11 @@ from PyQt6.QtWidgets import (
 from app.theme import Theme
 from app.resources import Icons
 from app.activity import activity
+from app.notifications import notifications
 from ui.pages.base_page import BasePage
 from ui.widgets.card import Card
 from ui.widgets.progress_bar import ProgressBar
+from ui.widgets.host_input import HostInput
 from workers import StreamWorker
 
 
@@ -78,15 +80,9 @@ class PortScannerPage(BasePage):
         row = QHBoxLayout()
         row.setSpacing(8)
 
-        self.target_input = QLineEdit()
-        self.target_input.setPlaceholderText("Host or IP (e.g. 192.168.1.1)")
-        self.target_input.setStyleSheet(
-            f"QLineEdit {{ background: {Theme.BG_CARD}; color: {Theme.TEXT_BODY};"
-            f"border: 1px solid {Theme.BORDER_STRONG}; border-radius: 8px;"
-            f"padding: 9px 12px; font-family: {Theme.FONT_MONO};"
-            f"font-size: {Theme.FONT_SIZE_BODY}px; }}"
-            f"QLineEdit:focus {{ border-color: {Theme.ACCENT}; }}")
-        self.target_input.returnPressed.connect(self._toggle)
+        self.target_input = HostInput(kind="portscan",
+                                      placeholder="Host or IP (e.g. 192.168.1.1)")
+        self.target_input.submitted.connect(self._toggle)
         row.addWidget(self.target_input, 1)
 
         self.profile_combo = QComboBox()
@@ -100,11 +96,11 @@ class PortScannerPage(BasePage):
         self.custom_input.setPlaceholderText("e.g. 22,80,443,8000-8100")
         self.custom_input.setFixedWidth(200)
         self.custom_input.setStyleSheet(
-            f"QLineEdit {{ background: {Theme.BG_CARD}; color: {Theme.TEXT_BODY};"
+            f"QLineEdit {{ background: {Theme.GLASS_INPUT}; color: {Theme.TEXT_BODY};"
             f"border: 1px solid {Theme.BORDER}; border-radius: 8px;"
             f"padding: 9px 12px; font-family: {Theme.FONT_MONO};"
             f"font-size: {Theme.FONT_SIZE_SMALL}px; }}"
-            f"QLineEdit:focus {{ border-color: {Theme.ACCENT}; }}")
+            f"QLineEdit:focus {{ border-color: {Theme.GLASS_BORDER_HI}; }}")
         self.custom_input.setVisible(False)
         self.custom_input.returnPressed.connect(self._toggle)
         row.addWidget(self.custom_input)
@@ -121,7 +117,7 @@ class PortScannerPage(BasePage):
 
     def _combo_style(self):
         return (
-            f"QComboBox {{ background: {Theme.BG_CARD}; color: {Theme.TEXT_SECONDARY};"
+            f"QComboBox {{ background: {Theme.GLASS_INPUT}; color: {Theme.TEXT_SECONDARY};"
             f"border: 1px solid {Theme.BORDER}; border-radius: 8px;"
             f"padding: 9px 12px; font-size: {Theme.FONT_SIZE_SMALL}px; }}"
             f"QComboBox::drop-down {{ border: none; width: 20px; }}"
@@ -160,6 +156,25 @@ class PortScannerPage(BasePage):
         self.status_label.setStyleSheet(
             f"color: {Theme.TEXT_SECONDARY}; font-size: {Theme.FONT_SIZE_BODY}px;")
         top.addWidget(self.status_label)
+
+        # Device-type badge (icon + label), hidden until a scan identifies one.
+        self.device_badge_wrap = QFrame()
+        self.device_badge_wrap.setStyleSheet(
+            f"background: {Theme.BG_ELEVATED}; border-radius: 6px;")
+        badge_lay = QHBoxLayout(self.device_badge_wrap)
+        badge_lay.setContentsMargins(8, 3, 10, 3)
+        badge_lay.setSpacing(6)
+        self.device_badge_icon = QLabel()
+        badge_lay.addWidget(self.device_badge_icon)
+        self.device_badge = QLabel("")
+        self.device_badge.setStyleSheet(
+            f"color: {Theme.ACCENT}; font-size: {Theme.FONT_SIZE_SMALL}px;"
+            f"font-weight: 600; background: transparent;")
+        badge_lay.addWidget(self.device_badge)
+        self.device_badge_wrap.setVisible(False)
+        top.addSpacing(10)
+        top.addWidget(self.device_badge_wrap)
+
         top.addStretch()
 
         # Count chips
@@ -304,9 +319,20 @@ class PortScannerPage(BasePage):
 
         svc = res.get("service", "Unknown")
         svc_color = Theme.ACCENT if state == "open" else Theme.TEXT_SECONDARY
-        service = QLabel(svc)
-        service.setStyleSheet(
-            f"color: {svc_color}; font-size: 14px; background: transparent;")
+        banner = (res.get("banner") or "").strip()
+        service = QLabel()
+        if banner:
+            # Service name on top, grabbed banner underneath in muted mono.
+            import html as _html
+            safe_banner = _html.escape(banner)
+            service.setText(
+                f"<span style='color:{svc_color}; font-size:14px;'>{svc}</span>"
+                f"<br><span style='color:{Theme.TEXT_MUTED}; font-size:11px;"
+                f"font-family:{Theme.FONT_MONO};'>{safe_banner}</span>")
+        else:
+            service.setText(
+                f"<span style='color:{svc_color}; font-size:14px;'>{svc}</span>")
+        service.setStyleSheet("background: transparent;")
         rl.addWidget(service, 1)
 
         proto = QLabel(res.get("protocol", "TCP"))
@@ -388,12 +414,15 @@ class PortScannerPage(BasePage):
 
         self._clear_rows()
         self.progress.set_color(Theme.ACCENT)
+        self.device_badge_wrap.setVisible(False)
         self.progress.set_fraction(0.02)
         self._update_chips()
         self.status_label.setText(f"Scanning {target}…")
 
         spec = self._current_spec()
-        w = StreamWorker(self.core.port_scan_stream, target, spec)
+        from app.store import store
+        timeout = store.get_setting("portscan_timeout_ms", 600)
+        w = StreamWorker(self.core.port_scan_stream, target, spec, timeout)
         w.result.connect(self._on_event)
         w.error.connect(self._on_error)
         w.done.connect(self._on_finished)
@@ -454,6 +483,13 @@ class PortScannerPage(BasePage):
         if self._running:
             self.progress.set_fraction(1.0)
             n_open = self._counts["open"]
+            open_ports = [r["port"] for r in self._results
+                          if r["state"] == "open"]
+            # Infer what kind of device this is from its open ports.
+            dtype = self.core.detect_device_type(
+                open_ports=open_ports,
+                hostname=self.target_input.text().strip())
+            self._set_device_type(dtype)
             self.status_label.setText(
                 f"Scan complete \u2014 {n_open} open "
                 f"port{'s' if n_open != 1 else ''} found")
@@ -463,8 +499,36 @@ class PortScannerPage(BasePage):
             activity.add("Port scan",
                          f"{self.target_input.text().strip()} \u00b7 "
                          f"{n_open} open", kind="success")
+            notifications.notify_scan_done(
+                "Port scan complete",
+                f"{self.target_input.text().strip()} \u00b7 {n_open} open ports")
+            self.target_input.remember()
+            # Persist for the PDF report's optional port-scan section.
+            from app.store import store
+            store.set_last_scan("port_scanner", {
+                "target": self.target_input.text().strip(),
+                "device_type": dtype,
+                "results": [r for r in self._results if r["state"] == "open"],
+                "counts": dict(self._counts),
+            })
         self._worker = None
         self._stop()
+
+    def _set_device_type(self, dtype):
+        """Show a device-type badge (icon + label) once a scan identifies
+        what kind of host this is."""
+        if not hasattr(self, "device_badge"):
+            return
+        labels = {
+            "router": "Router", "printer": "Printer", "nas": "NAS",
+            "tv": "Smart TV", "phone": "Phone", "camera": "Camera",
+            "console": "Game console", "media": "Media server",
+            "computer": "Computer", "generic": "Device",
+        }
+        icon_key = f"dev_{dtype}" if dtype != "generic" else "dev_generic"
+        self.device_badge_icon.setPixmap(Icons.pixmap(icon_key, 15, Theme.ACCENT))
+        self.device_badge.setText(labels.get(dtype, "Device"))
+        self.device_badge_wrap.setVisible(True)
 
     # ── Export ─────────────────────────────────────────────────
     def _export(self):
@@ -491,14 +555,15 @@ class PortScannerPage(BasePage):
                      f"Open: {self._counts['open']}  "
                      f"Closed: {self._counts['closed']}  "
                      f"Filtered: {self._counts['filtered']}",
-                     "=" * 60, "",
-                     f"{'PORT':<8}{'SERVICE':<24}{'PROTO':<10}{'STATE':<10}",
-                     "-" * 60]
+                     "=" * 78, "",
+                     f"{'PORT':<8}{'SERVICE':<20}{'PROTO':<10}{'STATE':<10}{'BANNER'}",
+                     "-" * 78]
             for r in rows:
+                banner = (r.get("banner") or "").strip()
                 lines.append(
-                    f"{r['port']:<8}{r.get('service','Unknown'):<24}"
-                    f"{r.get('protocol','TCP'):<10}{r['state']:<10}")
-            lines += ["", "=" * 60,
+                    f"{r['port']:<8}{r.get('service','Unknown'):<20}"
+                    f"{r.get('protocol','TCP'):<10}{r['state']:<10}{banner}")
+            lines += ["", "=" * 78,
                       "Generated by NETWER — Network Diagnostic Suite"]
             with open(path, "w", encoding="utf-8") as f:
                 f.write("\n".join(lines))

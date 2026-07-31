@@ -43,11 +43,11 @@ class DnsLookupPage(BasePage):
         self.input = QLineEdit()
         self.input.setPlaceholderText("Domain name (e.g. cloudflare.com)")
         self.input.setStyleSheet(
-            f"QLineEdit {{ background: {Theme.BG_CARD}; color: {Theme.TEXT_BODY};"
+            f"QLineEdit {{ background: {Theme.GLASS_INPUT}; color: {Theme.TEXT_BODY};"
             f"border: 1px solid {Theme.BORDER_STRONG}; border-radius: 8px;"
             f"padding: 9px 12px; font-family: {Theme.FONT_MONO};"
             f"font-size: {Theme.FONT_SIZE_BODY}px; }}"
-            f"QLineEdit:focus {{ border-color: {Theme.ACCENT}; }}")
+            f"QLineEdit:focus {{ border-color: {Theme.GLASS_BORDER_HI}; }}")
         self.input.returnPressed.connect(self._resolve)
         row.addWidget(self.input, 1)
 
@@ -56,7 +56,7 @@ class DnsLookupPage(BasePage):
         self.btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn.setMinimumWidth(120)
         self.btn.setStyleSheet(
-            f"QPushButton {{ background: {Theme.ACCENT}; color: white; border: none;"
+            f"QPushButton {{ background: {Theme.GRAD_ACCENT}; color: white; border: none;"
             f"border-radius: 8px; padding: 9px 20px;"
             f"font-size: {Theme.FONT_SIZE_BODY}px; font-weight: 600; }}"
             f"QPushButton:hover {{ background: {Theme.ACCENT_PURPLE}; }}"

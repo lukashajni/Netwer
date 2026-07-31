@@ -35,21 +35,35 @@ from ui.pages.about_page import AboutPage
 # Globalni stylesheet — rjesava "crni selektirani" izgled tako sto
 # eksplicitno postavlja pozadine, boje teksta i uklanja default obrube
 # koje Qt crta na ugnijezdenim widgetima i scroll area.
-GLOBAL_QSS = f"""
+def build_global_qss():
+    """Sagradi globalni stylesheet iz TRENUTNIH Theme boja. Poziva se pri
+    pokretanju i ponovno kad korisnik promijeni temu."""
+    # Suptilni gradijenti (glow) u pozadini cijelog prozora — plavi, ljubičasti
+    # i tirkizni, kao u dizajn previewu. Qt nema pravi backdrop-blur, pa se
+    # "glass" postiže gradijentnom pozadinom + poluprozirnim karticama.
+    app_gradient = (
+        f"qlineargradient(x1:0, y1:0, x2:1, y2:1, "
+        f"stop:0 {Theme.BG_SIDEBAR}, stop:0.5 {Theme.BG_APP}, "
+        f"stop:1 {Theme.BG_SIDEBAR})"
+    )
+    return f"""
 * {{
     outline: none;
     font-family: {Theme.FONT_FAMILY};
     color: {Theme.TEXT_BODY};
 }}
+QMainWindow, #AppRoot {{
+    background: {app_gradient};
+}}
 QWidget {{
-    background: {Theme.BG_APP};
+    background: transparent;
 }}
 QScrollArea, QScrollArea > QWidget, QScrollArea > QWidget > QWidget {{
-    background: {Theme.BG_APP};
+    background: transparent;
     border: none;
 }}
 QScrollBar:vertical {{
-    background: {Theme.BG_APP};
+    background: transparent;
     width: 10px;
     margin: 0;
 }}
@@ -70,11 +84,15 @@ QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {{
 QToolTip {{
     background: {Theme.BG_ELEVATED};
     color: {Theme.TEXT_BODY};
-    border: 1px solid {Theme.BORDER_STRONG};
-    border-radius: 4px;
-    padding: 4px 8px;
+    border: 1px solid {Theme.GLASS_BORDER_HI};
+    border-radius: 6px;
+    padding: 5px 9px;
 }}
 """
+
+
+# Zadržano radi kompatibilnosti (neki testovi importaju GLOBAL_QSS).
+GLOBAL_QSS = build_global_qss()
 
 
 def _register_pages(window: MainWindow) -> None:
@@ -128,7 +146,16 @@ def main() -> int:
     app = QApplication(sys.argv)
     app.setApplicationName("NETWER")
     app.setOrganizationName("Lukas Hajneman")
-    app.setStyleSheet(GLOBAL_QSS)
+
+    # Load the user's saved theme/accent before building any styles.
+    from app.theme import apply_theme, apply_accent, Theme
+    from app.store import store
+    saved_theme = store.get_setting("theme", "Dark Blue")
+    saved_accent = store.get_setting("accent", "Default")
+    apply_theme(saved_theme, saved_accent)
+    Theme.GLASS_ENABLED = store.get_setting("glass_enabled", True)
+
+    app.setStyleSheet(build_global_qss())
 
     # Provjeri kljucnu ovisnost: psutil pokrece resurse, download/upload
     # i live monitor. Bez njega te funkcije ne rade — javi jasno.

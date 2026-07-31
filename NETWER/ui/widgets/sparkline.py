@@ -24,6 +24,8 @@ class Sparkline(QWidget):
         self._color = color
         self._data = deque(maxlen=max_points)
         self.setFixedHeight(self.HEIGHT)
+        # We paint our own background (the card colour) in paintEvent, so the
+        # dark app background never shows through this child widget.
         self.setStyleSheet("background: transparent;")
 
     def push(self, value: float) -> None:
@@ -35,10 +37,18 @@ class Sparkline(QWidget):
         self.update()
 
     def paintEvent(self, event):
-        if len(self._data) < 2:
-            return
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        # Fill our rect with the current card background first, so this child
+        # never shows the dark app background through it (which appeared as a
+        # band across the card when there was no data yet).
+        glass = getattr(Theme, "GLASS_ENABLED", True)
+        p.fillRect(self.rect(),
+                   QColor(Theme.GLASS_CARD if glass else Theme.BG_CARD))
+
+        if len(self._data) < 2:
+            p.end()
+            return
 
         w = self.width()
         h = self.height()

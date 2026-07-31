@@ -222,6 +222,10 @@ class WiFiInfoPage(BasePage):
     # ══════════════════════════════════════════════════════════
     # Lifecycle
     # ══════════════════════════════════════════════════════════
+    def preload(self):
+        """Učitaj WiFi info jednom u pozadini pri pokretanju."""
+        self._refresh_info()
+
     def on_enter(self):
         self._refresh_info()
         self._refresh_timer.start()

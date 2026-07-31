@@ -102,7 +102,7 @@ class DashboardPage(BasePage):
         self.card_uptime = StatCard("uptime", "System Uptime")
         for c in (self.card_internet, self.card_download, self.card_upload,
                   self.card_loss, self.card_uptime):
-            c.setFixedHeight(120)
+            c.setFixedHeight(180)
             row.addWidget(c)
         self._grid.addLayout(row, 0)
 
@@ -131,12 +131,20 @@ class DashboardPage(BasePage):
         self.adapter_combo.currentIndexChanged.connect(self._on_adapter_changed)
         monitor_card.header_layout.addWidget(self.adapter_combo)
 
-        # Legend row (Download = blue, Upload = purple)
+        # Legend row (Download = blue, Upload = purple) + live peak/avg stats
         legend = QHBoxLayout()
         legend.setSpacing(16)
         legend.addWidget(self._legend_item("Download", Theme.ACCENT))
         legend.addWidget(self._legend_item("Upload", Theme.ACCENT_PURPLE))
         legend.addStretch()
+        # Peak / Avg readouts (updated live; hover the graph for per-point).
+        self.stat_peak = QLabel("Peak \u2014")
+        self.stat_avg = QLabel("Avg \u2014")
+        for lbl in (self.stat_peak, self.stat_avg):
+            lbl.setStyleSheet(
+                f"color: {Theme.TEXT_SECONDARY}; font-size: {Theme.FONT_SIZE_TINY}px;"
+                f"font-family: {Theme.FONT_MONO}; background: transparent;")
+            legend.addWidget(lbl)
         monitor_card.content_layout.addLayout(legend)
 
         self.chart = LiveChart(max_points=60)
@@ -702,6 +710,23 @@ class DashboardPage(BasePage):
         self._monitor_worker = w
         w.start()
 
+    def _update_trend(self, card, attr, value):
+        """Show a small ↑/↓ % badge comparing this sample to the previous one.
+        Skips the badge when there's no meaningful previous value (avoids a
+        misleading huge % on the first reading or after idle)."""
+        prev = getattr(self, attr, None)
+        setattr(self, attr, value)
+        if not prev or prev < 1 or value < 1:
+            card.set_badge("")
+            return
+        pct = round((value - prev) / prev * 100)
+        if pct == 0:
+            card.set_badge("")
+        elif pct > 0:
+            card.set_badge(f"\u2191 {pct}%", positive=True)
+        else:
+            card.set_badge(f"\u2193 {abs(pct)}%", positive=False)
+
     def _on_monitor(self, d: dict):
         # Show which adapter is actually being monitored
         adapter = d.get("adapter", "")
@@ -718,6 +743,20 @@ class DashboardPage(BasePage):
                                        color=Theme.ACCENT_PURPLE, subtitle="Live")
             self.card_download.push_spark(d["dl"])
             self.card_upload.push_spark(d["ul"])
+            # Live trend badge: % change vs the previous sample.
+            self._update_trend(self.card_download, "_prev_dl", d["dl"])
+            self._update_trend(self.card_upload, "_prev_ul", d["ul"])
+
+            # Live peak/avg readouts from the chart's rolling buffer.
+            st = self.chart.stats()
+            dpk, dpk_u = format_speed(st["download"]["max"])
+            upk, upk_u = format_speed(st["upload"]["max"])
+            dav, dav_u = format_speed(st["download"]["avg"])
+            uav, uav_u = format_speed(st["upload"]["avg"])
+            self.stat_peak.setText(
+                f"Peak \u2193{dpk}{dpk_u} \u2191{upk}{upk_u}")
+            self.stat_avg.setText(
+                f"Avg \u2193{dav}{dav_u} \u2191{uav}{uav_u}")
 
     # ── System resources (timer) ───────────────────────────────
     def _refresh_resources(self, initial: bool = False):

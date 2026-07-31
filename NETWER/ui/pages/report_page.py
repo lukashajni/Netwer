@@ -61,6 +61,7 @@ class ReportPage(BasePage):
             "system": "system",
             "devices": "devices",
             "connectivity": "ping",
+            "port_scan": "port_scanner",
         }
         self._checks = {}
         for key in ALL_SECTIONS:
@@ -179,7 +180,7 @@ class ReportPage(BasePage):
 
     def _primary_button_style(self):
         return (
-            f"QPushButton {{ background: {Theme.ACCENT}; color: white;"
+            f"QPushButton {{ background: {Theme.GRAD_ACCENT}; color: white;"
             f"border: none; border-radius: 6px; padding: 9px 14px;"
             f"font-size: {Theme.FONT_SIZE_SMALL}px; font-weight: 600; }}"
             f"QPushButton:hover {{ background: {Theme.ACCENT_PURPLE}; }}"

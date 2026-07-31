@@ -39,12 +39,13 @@ _ASSETS = os.path.join(
 LOGO_WHITE = os.path.join(_ASSETS, "logo", "report_logo_white.png")
 
 # All known sections, in render order
-ALL_SECTIONS = ["network", "system", "devices", "connectivity"]
+ALL_SECTIONS = ["network", "system", "devices", "connectivity", "port_scan"]
 SECTION_LABELS = {
     "network": "Network Configuration",
     "system": "System Information",
     "devices": "Connected Devices",
     "connectivity": "Connectivity Test",
+    "port_scan": "Port Scan",
 }
 
 
@@ -270,6 +271,35 @@ def build_report(path, data: dict, sections=None):
                 rows, success_col=5,
                 col_widths=[35 * mm, 32 * mm, 22 * mm, 22 * mm, 22 * mm, 20 * mm]),
         ]))
+        story.append(Spacer(1, 10))
+
+    # Port Scan (from the last scan run in the Port Scanner)
+    if "port_scan" in sections and data.get("port_scan"):
+        ps = data["port_scan"]
+        results = ps.get("results", [])
+        target = ps.get("target", "")
+        dtype = ps.get("device_type", "")
+        counts = ps.get("counts", {})
+        subtitle = (f"Target {target}"
+                    + (f"  ·  detected as {dtype}" if dtype else "")
+                    + (f"  ·  {counts.get('open', 0)} open, "
+                       f"{counts.get('filtered', 0)} filtered"
+                       if counts else ""))
+        rows = [[str(r.get("port", "")), r.get("service", ""),
+                 r.get("protocol", "TCP"),
+                 (r.get("banner", "") or "")[:40]]
+                for r in results]
+        if rows:
+            story.append(KeepTogether([
+                _section_title("Port Scan"),
+                Paragraph(subtitle, small),
+                Spacer(1, 4),
+                _grid_table(
+                    ["Port", "Service", "Protocol", "Version / Banner"],
+                    rows,
+                    col_widths=[18 * mm, 40 * mm, 24 * mm, 66 * mm]),
+            ]))
+            story.append(Spacer(1, 10))
 
     doc.build(story, onFirstPage=_header_footer, onLaterPages=_header_footer)
     return path

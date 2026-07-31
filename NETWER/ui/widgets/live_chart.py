@@ -23,7 +23,7 @@ import pyqtgraph as pg
 from PyQt6.QtWidgets import QWidget, QVBoxLayout
 
 from app.theme import Theme
-from app.formatting import scale_for_axis
+from app.formatting import scale_for_axis, format_speed as _fmt
 
 
 class LiveChart(QWidget):
@@ -67,7 +67,58 @@ class LiveChart(QWidget):
             fillLevel=0, brush=pg.mkBrush(*Theme.CHART_FILL_UL),
         )
         lay.addWidget(self._plot)
+
+        # Hover crosshair: a vertical line that follows the cursor plus a
+        # small label showing the download/upload value at that sample.
+        self._vline = pg.InfiniteLine(
+            angle=90, movable=False,
+            pen=pg.mkPen(Theme.TEXT_FAINT, width=1,
+                         style=pg.QtCore.Qt.PenStyle.DashLine))
+        self._vline.setVisible(False)
+        self._plot.addItem(self._vline, ignoreBounds=True)
+        self._hover_label = pg.TextItem(anchor=(0, 1), color=Theme.TEXT_BODY)
+        self._hover_label.setVisible(False)
+        self._plot.addItem(self._hover_label, ignoreBounds=True)
+        self._plot.scene().sigMouseMoved.connect(self._on_mouse_moved)
+        self._plot.getViewBox().setMenuEnabled(False)
+
         self._rescale()
+
+    def _on_mouse_moved(self, pos):
+        """Show a crosshair + value readout at the hovered sample."""
+        vb = self._plot.getViewBox()
+        if not self._plot.sceneBoundingRect().contains(pos):
+            self._vline.setVisible(False)
+            self._hover_label.setVisible(False)
+            return
+        mouse_pt = vb.mapSceneToView(pos)
+        idx = int(round(mouse_pt.x()))
+        idx = max(0, min(self._max - 1, idx))
+        dl = list(self._dl)[idx]
+        ul = list(self._ul)[idx]
+        self._vline.setPos(idx)
+        self._vline.setVisible(True)
+        dl_s, dl_u = _fmt(dl)
+        ul_s, ul_u = _fmt(ul)
+        self._hover_label.setHtml(
+            f"<div style='background:{Theme.BG_ELEVATED}; padding:3px 6px;"
+            f"border-radius:4px; font-size:9pt;'>"
+            f"<span style='color:{Theme.CHART_DOWNLOAD};'>\u2193 {dl_s} {dl_u}</span><br>"
+            f"<span style='color:{Theme.CHART_UPLOAD};'>\u2191 {ul_s} {ul_u}</span></div>")
+        self._hover_label.setPos(idx, max(dl, ul) / self._divisor)
+        self._hover_label.setVisible(True)
+
+    def stats(self):
+        """Return live min/max/avg (in Mbps) for download and upload, over
+        the non-zero portion of the buffer (so startup zeros don't skew it)."""
+        def _s(seq):
+            vals = [v for v in seq]
+            nonzero = [v for v in vals if v > 0]
+            if not nonzero:
+                return {"min": 0.0, "max": 0.0, "avg": 0.0, "cur": vals[-1]}
+            return {"min": min(nonzero), "max": max(nonzero),
+                    "avg": sum(nonzero) / len(nonzero), "cur": vals[-1]}
+        return {"download": _s(self._dl), "upload": _s(self._ul)}
 
     def push(self, download: float, upload: float) -> None:
         """Add one sample (values in Mbps) and scroll the chart."""

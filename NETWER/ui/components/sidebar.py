@@ -10,8 +10,8 @@ from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QFrame
 )
 
-from app.theme import Theme
-from app.resources import Icons, logo_pixmap
+from app.theme import Theme, card_bg, card_border
+from app.resources import Icons
 
 
 class NavItem(QFrame):
@@ -60,26 +60,27 @@ class NavItem(QFrame):
     def _refresh_style(self) -> None:
         if self._active:
             self.setStyleSheet(
-                f"QFrame {{ background: {Theme.BG_ELEVATED};"
+                f"QFrame {{ background: {Theme.GRAD_ACCENT_SOFT};"
+                f"border: 1px solid {Theme.GLASS_BORDER_HI};"
                 f"border-radius: {Theme.RADIUS_CONTROL}px; }}"
-                f"QLabel {{ background: transparent; }}"
+                f"QLabel {{ background: transparent; border: none; }}"
             )
             self._icon.setPixmap(Icons.pixmap(self._icon_name, 17, Theme.ACCENT))
             self._title.setStyleSheet(
-                f"color: {Theme.TEXT_BODY}; font-size: {Theme.FONT_SIZE_BODY}px;"
-                f"font-weight: 500; background: transparent;"
+                f"color: {Theme.TEXT_PRIMARY}; font-size: {Theme.FONT_SIZE_BODY}px;"
+                f"font-weight: 600; background: transparent; border: none;"
             )
         else:
             self.setStyleSheet(
-                f"QFrame {{ background: transparent;"
+                f"QFrame {{ background: transparent; border: none;"
                 f"border-radius: {Theme.RADIUS_CONTROL}px; }}"
-                f"QFrame:hover {{ background: {Theme.BG_CARD}; }}"
-                f"QLabel {{ background: transparent; }}"
+                f"QFrame:hover {{ background: {Theme.GLASS_CARD}; }}"
+                f"QLabel {{ background: transparent; border: none; }}"
             )
             self._icon.setPixmap(Icons.pixmap(self._icon_name, 17, Theme.TEXT_SECONDARY))
             self._title.setStyleSheet(
                 f"color: {Theme.TEXT_SECONDARY}; font-size: {Theme.FONT_SIZE_BODY}px;"
-                f"background: transparent;"
+                f"font-weight: 500; background: transparent; border: none;"
             )
 
     def mousePressEvent(self, event):
@@ -93,40 +94,66 @@ class Sidebar(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setFixedWidth(210)
-        self.setStyleSheet(f"background: {Theme.BG_SIDEBAR};")
+        self.setFixedWidth(230)
+        self.setObjectName("Sidebar")
+        self.setStyleSheet(
+            f"#Sidebar {{ background: {card_bg()};"
+            f"border: 1px solid {card_border()};"
+            f"border-radius: {Theme.RADIUS_CARD}px; }}")
         self._items: dict[str, NavItem] = {}
+        self._status_row = None
 
         lay = QVBoxLayout(self)
-        lay.setContentsMargins(0, 18, 0, 12)
+        lay.setContentsMargins(14, 18, 14, 14)
         lay.setSpacing(2)
 
-        self._build_logo(lay)
-        lay.addSpacing(10)
+        # Brand block: gradient logo tile + wordmark, like the preview.
+        self._brand = self._build_brand()
+        lay.addWidget(self._brand)
 
-    def _build_logo(self, lay: QVBoxLayout) -> None:
-        # Pravi NETWER logo (gradijent globus, prozirna pozadina).
+        self._top_spacer = QLabel("")
+        self._top_spacer.setFixedHeight(4)
+        self._top_spacer.setStyleSheet("background: transparent;")
+        lay.addWidget(self._top_spacer)
+
+    def _build_brand(self) -> QWidget:
+        brand = QFrame()
+        brand.setStyleSheet("background: transparent; border: none;")
+        b = QHBoxLayout(brand)
+        b.setContentsMargins(6, 2, 6, 14)
+        b.setSpacing(11)
+        # Gradient logo tile with a globe glyph.
         logo = QLabel()
-        logo.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        logo.setPixmap(logo_pixmap(72))
-        logo.setStyleSheet("background: transparent;")
-        lay.addWidget(logo)
-
+        logo.setFixedSize(34, 34)
+        logo.setObjectName("BrandLogo")
+        logo.setStyleSheet(
+            f"#BrandLogo {{ background: {Theme.GRAD_ACCENT};"
+            f"border-radius: 10px; }}")
+        lg = QVBoxLayout(logo)
+        lg.setContentsMargins(0, 0, 0, 0)
+        gl = QLabel()
+        gl.setPixmap(Icons.pixmap("globe", 18, "#ffffff"))
+        gl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        gl.setStyleSheet("background: transparent;")
+        lg.addWidget(gl)
+        b.addWidget(logo)
+        # Wordmark + sublabel.
+        txtbox = QVBoxLayout()
+        txtbox.setContentsMargins(0, 0, 0, 0)
+        txtbox.setSpacing(0)
         name = QLabel("NETWER")
-        name.setAlignment(Qt.AlignmentFlag.AlignCenter)
         name.setStyleSheet(
-            f"color: {Theme.TEXT_PRIMARY}; font-size: 19px; font-weight: 600;"
-            f"letter-spacing: 4px; background: transparent; padding-top: 6px;"
-        )
-        lay.addWidget(name)
-
-        ver = QLabel("v4.0")
-        ver.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        ver.setStyleSheet(
-            f"color: {Theme.TEXT_FAINT}; font-size: {Theme.FONT_SIZE_TINY}px;"
-            f"background: transparent;"
-        )
-        lay.addWidget(ver)
+            f"color: {Theme.TEXT_PRIMARY}; font-size: 17px; font-weight: 700;"
+            f"letter-spacing: 0.5px; background: transparent;")
+        sub = QLabel("DIAGNOSTICS")
+        sub.setStyleSheet(
+            f"color: {Theme.TEXT_MUTED}; font-size: 9px; font-weight: 600;"
+            f"letter-spacing: 1.5px; background: transparent;")
+        txtbox.addWidget(name)
+        txtbox.addWidget(sub)
+        b.addLayout(txtbox)
+        b.addStretch()
+        return brand
 
     def add_section(self, label: str) -> None:
         """Suptilni naslov sekcije koji grupira stavke ispod sebe
@@ -155,6 +182,9 @@ class Sidebar(QWidget):
         self.layout().addWidget(item)
 
     def add_stretch_and_status(self) -> None:
+        # Idempotent: if a status row already exists, don't add a second one.
+        if getattr(self, "_status_row", None) is not None:
+            return
         self.layout().addStretch()
         status = QFrame()
         status.setStyleSheet("background: transparent;")
@@ -172,6 +202,7 @@ class Sidebar(QWidget):
         s_lay.addWidget(txt)
         s_lay.addStretch()
         self.layout().addWidget(status)
+        self._status_row = status
 
     def _on_item_clicked(self, key: str) -> None:
         self.set_active(key)
@@ -180,3 +211,31 @@ class Sidebar(QWidget):
     def set_active(self, key: str) -> None:
         for k, item in self._items.items():
             item.set_active(k == key)
+
+    def clear_items(self) -> None:
+        """Remove all nav items, sections and the status row so the sidebar
+        can be rebuilt (used on theme change). Keeps the brand + spacer."""
+        lay = self.layout()
+        # Keep the brand (index 0) and top spacer (index 1); remove the rest.
+        while lay.count() > 2:
+            item = lay.takeAt(2)
+            w = item.widget()
+            if w:
+                w.setParent(None)   # detach immediately (not just deleteLater)
+                w.deleteLater()
+        self._items.clear()
+        self._status_row = None
+
+    def refresh_theme(self) -> None:
+        self.setStyleSheet(
+            f"#Sidebar {{ background: {card_bg()};"
+            f"border: 1px solid {card_border()};"
+            f"border-radius: {Theme.RADIUS_CARD}px; }}")
+        # Rebuild the brand block so the logo gradient + wordmark follow the
+        # new theme's accent colours.
+        lay = self.layout()
+        old = self._brand
+        self._brand = self._build_brand()
+        lay.replaceWidget(old, self._brand)
+        old.setParent(None)
+        old.deleteLater()
