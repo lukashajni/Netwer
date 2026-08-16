@@ -63,44 +63,41 @@ class _Ring(QWidget):
         p.setPen(pen_fg)
         span = int(-self._value / 100.0 * 360 * 16)
         p.drawArc(rect, 90 * 16, span)
-        # (Postotak se više NE crta unutar prstena — ispisuje se ispod, kao
-        #  zaseban natpis, po želji korisnika.)
+
+        # Postotak U SREDINI prstena (kompaktno — ne treba mjesta ispod, pa
+        # kartica ne mora biti visoka).
+        p.setPen(QColor(self._color))
+        p.setFont(QFont(Theme.FONT_FAMILY_PRIMARY, 13, QFont.Weight.Bold))
+        p.drawText(rect, Qt.AlignmentFlag.AlignCenter,
+                   f"{int(round(self._value))}%")
         p.end()
 
 
 class Gauge(QWidget):
     def __init__(self, label: str, color: str, parent=None):
         super().__init__(parent)
+        self.setFixedWidth(96)
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
-        lay.setSpacing(0)
-        lay.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        lay.setSpacing(4)
+        lay.setAlignment(Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop)
 
         self._ring = _Ring(color)
-        lay.addWidget(self._ring, alignment=Qt.AlignmentFlag.AlignCenter)
+        lay.addWidget(self._ring, 0, Qt.AlignmentFlag.AlignHCenter)
 
-        lay.addSpacing(10)
-
-        # Postotak (velik) ISPOD prstena.
-        self._value_lbl = QLabel("0%")
-        self._value_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._value_lbl.setStyleSheet(
-            f"color: {color}; font-family: {Theme.FONT_DATA};"
-            f"font-size: 18px; font-weight: 700; background: transparent;"
-        )
-        lay.addWidget(self._value_lbl)
-
-        # Naziv (CPU / Memory / Disk) ispod postotka.
+        # Samo naziv (CPU / Memory / Disk) ISPOD prstena — postotak je unutra.
         self._label = QLabel(label)
+        self._label.setFixedHeight(16)
         self._label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._label.setStyleSheet(
             f"color: {Theme.TEXT_SECONDARY}; font-family: {Theme.FONT_FAMILY};"
             f"font-size: {Theme.FONT_SIZE_SMALL}px; background: transparent;"
         )
-        lay.addWidget(self._label)
+        lay.addWidget(self._label, 0, Qt.AlignmentFlag.AlignHCenter)
+        # 76 (ring) + 4 + 16 (label) = 96 — kompaktno, stane u nisku karticu.
+        self.setFixedHeight(96)
 
     def set_value(self, percent: float, label: str | None = None) -> None:
         self._ring.animate_to(percent)
-        self._value_lbl.setText(f"{int(round(percent))}%")
         if label is not None:
             self._label.setText(label)

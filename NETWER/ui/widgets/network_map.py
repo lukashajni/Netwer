@@ -12,7 +12,7 @@ guaranteed to sit on top of the lines — a line can never visually cross a
 logo, by construction, not by careful coordinate tuning.
 """
 
-from PyQt6.QtCore import Qt, QPoint, QPointF
+from PyQt6.QtCore import Qt, pyqtSignal, QPoint, QPointF
 from PyQt6.QtGui import QPainter, QColor, QPen
 from PyQt6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel
 
@@ -22,6 +22,12 @@ from app.resources import Icons
 
 def guess_device_icon(dev: dict) -> str:
     """Pick an icon name based on hostname/vendor hints."""
+    # A kind determined by fingerprinting (Bonjour name / port signature) is
+    # more reliable than guessing from text, so trust it first.
+    kind = (dev.get("kind") or "").strip()
+    if kind.startswith("dev_"):
+        return kind
+
     text = f"{dev.get('hostname','')} {dev.get('vendor','')}".lower()
 
     def has(*words):
@@ -63,13 +69,33 @@ def guess_device_icon(dev: dict) -> str:
 
 
 def device_display_name(dev: dict) -> str:
-    """Best available name: real hostname, else vendor, else IP."""
+    """Best available name, in order: a name the user gave the device, its real
+    hostname, a real manufacturer, else the IP.
+
+    A randomized/locally-administered MAC has no real manufacturer, so its
+    'vendor' is the placeholder 'Private (randomized)'. That's useful info but
+    a bad *name* — showing it under an icon looks like a glitch. So we only
+    fall back to the vendor when it's an actual manufacturer, otherwise the
+    IP address (which is always meaningful)."""
+    # A name the user typed always wins.
+    try:
+        from core import device_names
+        custom = device_names.get(dev)
+        if custom:
+            return custom
+    except Exception:
+        pass
     hostname = (dev.get("hostname") or "").strip()
     if hostname and hostname.lower() not in ("unknown", "?", ""):
-        return hostname
+        # A hostname that's just the IP repeated isn't a real name.
+        if hostname != dev.get("ip", ""):
+            return hostname
     vendor = (dev.get("vendor") or "").strip()
-    if vendor and vendor.lower() != "unknown":
-        return vendor
+    generic = ("unknown", "private (randomized)", "private", "randomized", "")
+    if vendor and vendor.lower() not in generic:
+        # "Apple (private address)" is useful detail, but as a *name* the
+        # manufacturer alone reads better under an icon.
+        return vendor.replace(" (private address)", "")
     return dev.get("ip", "?")
 
 
@@ -153,11 +179,19 @@ class _LabeledIcon(QWidget):
 
 
 class _DeviceNode(QWidget):
-    """Icon centered above a name + IP, stacked below — used for devices."""
+    """Icon centered above a name + IP, stacked below — used for devices.
 
-    def __init__(self, icon_name, icon_color, name, ip, icon_size=28, parent=None):
+    Clicking one asks the map to open that device's details, so the static map
+    stays as useful as the radar."""
+
+    def __init__(self, icon_name, icon_color, name, ip, icon_size=28,
+                 device=None, on_click=None, parent=None):
         super().__init__(parent)
         self.setStyleSheet("background: transparent;")
+        self._device = device
+        self._on_click = on_click
+        if on_click is not None:
+            self.setCursor(Qt.CursorShape.PointingHandCursor)
         lay = QVBoxLayout(self)
         lay.setContentsMargins(4, 0, 4, 0)
         lay.setSpacing(4)
@@ -186,7 +220,16 @@ class _DeviceNode(QWidget):
         lay.addWidget(ip_lbl)
 
 
+    def mousePressEvent(self, event):
+        if (event.button() == Qt.MouseButton.LeftButton
+                and self._on_click and self._device):
+            self._on_click(self._device)
+
+
 class NetworkMap(QWidget):
+    #: Emitted with the device dict when a device node is clicked.
+    node_clicked = pyqtSignal(dict)
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setStyleSheet("background: transparent;")
@@ -231,7 +274,10 @@ class NetworkMap(QWidget):
         self._internet_node.set_colors(icol, icol)
 
         # Router node: name above IP, to the right of the icon
-        self._router_node.set_title(self._router_vendor or "Router")
+        rv = (self._router_vendor or "").strip()
+        if not rv or rv.lower() in ("unknown", "private (randomized)"):
+            rv = "Router"
+        self._router_node.set_title(rv)
         self._router_node.set_subtitle(self._gateway)
 
         # Rebuild the device row
@@ -244,10 +290,22 @@ class NetworkMap(QWidget):
         if self._devices:
             self._devices_layout.addStretch(1)
             for dev in self._devices:
-                name = device_display_name(dev)[:14]
+                ip = dev.get("ip", "")
+                name = device_display_name(dev)
+                # If the only thing we have is the IP, show a friendly generic
+                # name instead (so the title isn't identical to the subtitle
+                # IP below it). 'Private (randomized)' MACs are usually phones.
+                if name == ip or not name or name == "?":
+                    vendor = (dev.get("vendor") or "").lower()
+                    if "private" in vendor or "random" in vendor:
+                        name = "Device (private)"
+                    else:
+                        name = "Device"
+                name = name[:16]
                 icon_name = guess_device_icon(dev)
-                node = _DeviceNode(icon_name, Theme.TEXT_SECONDARY, name,
-                                   dev.get("ip", ""))
+                node = _DeviceNode(icon_name, Theme.TEXT_SECONDARY, name, ip,
+                                   device=dev,
+                                   on_click=self.node_clicked.emit)
                 self._devices_layout.addWidget(node)
                 self._devices_layout.addStretch(1)
 

@@ -114,7 +114,7 @@ class AboutPage(BasePage):
         panel = QFrame()
         panel.setObjectName("BrandPanel")
         panel.setStyleSheet(
-            f"#BrandPanel {{ background: {Theme.BG_SIDEBAR};"
+            f"#BrandPanel {{ background: {Theme.BG_CARD};"
             f"border: none; border-top-left-radius: {Theme.RADIUS_CARD}px; }}"
             f"#BrandPanel QLabel {{ background: transparent; }}"
         )

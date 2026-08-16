@@ -41,15 +41,10 @@ TIMEOUT_OPTIONS = [
 
 
 def _device_display_name(dev: dict) -> str:
-    """Best available name: real hostname, else vendor, else IP — mirrors the
-    dashboard's Top Devices so we never show a bare 'Unknown'."""
-    hostname = (dev.get("hostname") or "").strip()
-    if hostname and hostname.lower() not in ("unknown", "?", ""):
-        return hostname
-    vendor = (dev.get("vendor") or "").strip()
-    if vendor and vendor.lower() != "unknown":
-        return vendor
-    return dev.get("ip", "") or "\u2014"
+    """Delegates to the canonical implementation (ui.widgets.network_map) so a
+    custom name the user set shows up here too."""
+    from ui.widgets.network_map import device_display_name as _n
+    return _n(dev)
 
 
 class PingSweepPage(BasePage):
@@ -386,8 +381,10 @@ class PingSweepPage(BasePage):
             activity.add("Wake-on-LAN sent", f"{name} \u00b7 {res['mac']}",
                          kind="info")
         else:
-            self.progress_label.setText(
-                f"Wake failed: {res.get('error', 'unknown error')}")
+            from core.netwer_core import friendly_error
+            reason = friendly_error(res.get("error", "")) if res.get("error") \
+                else "This device can't be woken (no usable MAC address)."
+            self.progress_label.setText(f"Couldn't wake the device — {reason}")
 
 
     def _show_empty(self, text: str):
@@ -457,7 +454,7 @@ class PingSweepPage(BasePage):
         self.btn_export.setEnabled(len(self._devices) > 0)
 
     def _on_error(self, msg: str):
-        self.progress_label.setText(str(msg))
+        self.progress_label.setText(self.core.friendly_error(msg))
 
     def _on_finished(self):
         if self._running:
@@ -544,16 +541,51 @@ class PingSweepPage(BasePage):
     # ══════════════════════════════════════════════════════════
     # Export
     # ══════════════════════════════════════════════════════════
+    def _export_csv(self, path):
+        """Write the discovered devices as a spreadsheet-friendly CSV."""
+        import csv
+        try:
+            with open(path, "w", newline="", encoding="utf-8-sig") as f:
+                w = csv.writer(f)
+                w.writerow(["IP", "Name", "Hostname", "MAC", "Vendor",
+                            "RTT (ms)", "Gateway"])
+                for d in self._devices:
+                    rtt = d.get("rtt_ms")
+                    w.writerow([
+                        d.get("ip", ""),
+                        _device_display_name(d),
+                        d.get("hostname", "") or "",
+                        d.get("mac", "") or "",
+                        d.get("vendor", "") or "",
+                        "" if rtt is None else rtt,
+                        "yes" if d.get("is_gateway") else "",
+                    ])
+            self.progress_label.setText(f"Exported \u2713  {path}")
+            activity.add("Ping sweep exported", os.path.basename(path),
+                         kind="success")
+        except Exception as e:
+            self.progress_label.setText(
+                f"Export failed: {self.core.friendly_error(e)}")
+
     def _export(self):
         if not self._devices:
             return
         from PyQt6.QtWidgets import QFileDialog
         default = os.path.join(
             os.path.join(os.path.expanduser("~"), "Desktop"),
-            f"NETWER_Sweep_{datetime.now():%Y%m%d_%H%M}.txt")
-        path, _ = QFileDialog.getSaveFileName(
-            self, "Export Ping Sweep", default, "Text files (*.txt)")
+            f"NETWER_Sweep_{datetime.now():%Y%m%d_%H%M}.csv")
+        path, chosen = QFileDialog.getSaveFileName(
+            self, "Export Ping Sweep", default,
+            "CSV spreadsheet (*.csv);;Text report (*.txt)")
         if not path:
+            return
+        # Pick the format from the extension, falling back to the filter.
+        ext = os.path.splitext(path)[1].lower()
+        if not ext:
+            ext = ".txt" if "txt" in (chosen or "").lower() else ".csv"
+            path += ext
+        if ext == ".csv":
+            self._export_csv(path)
             return
         try:
             lines = []

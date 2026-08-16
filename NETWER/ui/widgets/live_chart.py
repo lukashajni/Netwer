@@ -22,7 +22,7 @@ from collections import deque
 import pyqtgraph as pg
 from PyQt6.QtWidgets import QWidget, QVBoxLayout
 
-from app.theme import Theme
+from app.theme import Theme, card_bg
 from app.formatting import scale_for_axis, format_speed as _fmt
 
 
@@ -42,7 +42,9 @@ class LiveChart(QWidget):
 
         pg.setConfigOptions(antialias=True)
         self._plot = pg.PlotWidget()
-        self._plot.setBackground(Theme.BG_CARD)
+        # Match the card exactly (glass or flat) so the plot doesn't
+        # show up as a slightly different rectangle inside the card.
+        self._plot.setBackground(card_bg())
         self._plot.showGrid(x=False, y=True, alpha=0.15)
         self._plot.setMouseEnabled(x=False, y=False)
         self._plot.hideButtons()

@@ -64,6 +64,8 @@ class MainWindow(QMainWindow):
         self.topbar.toggle_notifications.connect(self._toggle_notifications)
         self.topbar.theme_selected.connect(self._change_theme)
         self.topbar.search_submitted.connect(self._on_search)
+        self.topbar.suggestion_chosen.connect(self.open_suggestion)
+        self.topbar.suggestion_provider = self.search_suggestions
         right_col.addWidget(self.topbar)
 
         # Content row: the page stack, plus the sliding panels on the right.
@@ -328,6 +330,8 @@ class MainWindow(QMainWindow):
         "system": "system", "hardware": "system", "cpu": "system",
         "os": "system", "ram": "system",
         "ping": "ping", "latency": "ping",
+        "health": "health", "diagnose": "health", "diagnosis": "health",
+        "problem": "health", "slow": "health", "fix": "health",
         "sweep": "ping_sweep", "discover": "ping_sweep", "devices": "ping_sweep",
         "port": "port_scanner", "scan": "port_scanner", "ports": "port_scanner",
         "dns": "dns_tools", "trace": "dns_tools", "traceroute": "dns_tools",
@@ -344,6 +348,7 @@ class MainWindow(QMainWindow):
         "wifi information": "wifi", "wifi info": "wifi",
         "system information": "system", "system info": "system",
         "ping": "ping",
+        "network health": "health", "diagnose my network": "health",
         "ping sweep": "ping_sweep",
         "port scanner": "port_scanner",
         "dns tools": "dns_tools", "dns": "dns_tools",
@@ -354,15 +359,165 @@ class MainWindow(QMainWindow):
         "about": "about",
     }
 
+    #: Everything the search box can offer, with the words that should match
+    #: it. Order here is the order suggestions appear when scores are equal.
+    SEARCH_ITEMS = [
+        ("dashboard", "Dashboard", "Overview of your network",
+         ["dashboard", "home", "overview", "start"]),
+        ("health", "Network Health", "Diagnose problems in plain language",
+         ["health", "diagnose", "diagnosis", "problem", "slow", "fix",
+          "why", "broken", "troubleshoot"]),
+        ("network", "Network Information", "IP, MAC, adapter details",
+         ["network", "information", "adapter", "ip", "mac", "subnet",
+          "gateway", "dhcp", "mtu"]),
+        ("wifi", "WiFi Information", "Signal, SSID, channel",
+         ["wifi", "wireless", "signal", "ssid", "channel", "band"]),
+        ("system", "System Information", "Hardware and OS",
+         ["system", "hardware", "cpu", "memory", "ram", "disk", "os"]),
+        ("ping", "Ping", "Test connectivity to a host",
+         ["ping", "latency", "rtt", "connectivity", "reachable"]),
+        ("ping_sweep", "Ping Sweep", "Discover devices on your network",
+         ["sweep", "discover", "devices", "scan network", "hosts"]),
+        ("port_scanner", "Port Scanner", "Open and filtered ports",
+         ["port", "ports", "scanner", "open ports", "service"]),
+        ("dns_tools", "DNS Tools", "DNS, reverse DNS, traceroute",
+         ["dns", "traceroute", "tracert", "trace", "route", "lookup",
+          "reverse", "resolve", "nslookup", "hops"]),
+        ("speedtest", "Speed Test", "Measure bandwidth",
+         ["speed", "speedtest", "bandwidth", "download", "upload", "mbps"]),
+        ("report", "Save Report", "Export a PDF report",
+         ["report", "save", "export", "pdf", "document"]),
+        ("about", "About", "About NETWER",
+         ["about", "version", "info", "credits", "licence", "license"]),
+    ]
+
+    def search_suggestions(self, query: str, limit: int = 7):
+        """Rank matches for what's been typed so far — used by the dropdown.
+
+        Returns a list of dicts: {kind: 'page'|'device', key, title, subtitle}.
+        Scoring favours titles that start with the query, then keyword prefix
+        matches, then anything containing it, so typing 'tr' surfaces
+        Traceroute rather than something that merely contains 't','r'."""
+        q = " ".join((query or "").strip().lower().split())
+        if not q:
+            return []
+
+        scored = []
+        for key, title, subtitle, keywords in self.SEARCH_ITEMS:
+            best = None
+            tl = title.lower()
+            if tl.startswith(q):
+                best = 0
+            elif any(k.startswith(q) for k in keywords):
+                best = 1
+            elif q in tl:
+                best = 2
+            elif any(q in k for k in keywords):
+                best = 3
+            else:
+                # last resort: every word of the query appears somewhere
+                hay = tl + " " + " ".join(keywords) + " " + subtitle.lower()
+                if all(w in hay for w in q.split()):
+                    best = 4
+            if best is not None:
+                scored.append((best, len(title), {
+                    "kind": "page", "key": key,
+                    "title": title, "subtitle": subtitle}))
+
+        scored.sort(key=lambda t: (t[0], t[1]))
+        results = [s[2] for s in scored[:limit]]
+
+        # Devices found by the last scan, so you can jump straight to one.
+        dash = self._pages.get("dashboard")
+        devices = getattr(dash, "_all_devices", None) or []
+        if devices and len(results) < limit:
+            from ui.widgets.network_map import device_display_name
+            for dev in devices:
+                name = device_display_name(dev)
+                hay = " ".join([
+                    name, dev.get("hostname") or "", dev.get("vendor") or "",
+                    dev.get("ip") or "", dev.get("mac") or "",
+                ]).lower()
+                if q in hay:
+                    results.append({
+                        "kind": "device", "key": dev.get("ip", ""),
+                        "title": name,
+                        "subtitle": dev.get("ip", ""), "device": dev})
+                if len(results) >= limit:
+                    break
+        return results
+
+    def open_suggestion(self, item: dict) -> None:
+        """Act on a suggestion the user picked from the dropdown."""
+        if not item:
+            return
+        if item.get("kind") == "device":
+            dash = self._pages.get("dashboard")
+            self.sidebar.set_active("dashboard")
+            self._navigate("dashboard")
+            if hasattr(dash, "_open_device_details"):
+                dash._open_device_details(item["device"])
+            return
+        key = item.get("key")
+        if key in self._pages:
+            self.sidebar.set_active(key)
+            self._navigate(key)
+
+    def _find_device(self, q: str):
+        """Look for a discovered device matching the query — an IP address, or
+        part of its name/hostname/vendor/MAC. Returns the device dict or None."""
+        import re
+        dash = self._pages.get("dashboard")
+        devices = getattr(dash, "_all_devices", None) or []
+        if not devices:
+            return None
+        from ui.widgets.network_map import device_display_name
+
+        # Exact IP wins.
+        if re.fullmatch(r"\d{1,3}(\.\d{1,3}){3}", q):
+            for d in devices:
+                if d.get("ip") == q:
+                    return d
+            return None
+        # Last octet on its own (".45" or "45") when it's unambiguous.
+        if re.fullmatch(r"\.?\d{1,3}", q):
+            octet = q.lstrip(".")
+            hits = [d for d in devices
+                    if d.get("ip", "").split(".")[-1] == octet]
+            if len(hits) == 1:
+                return hits[0]
+        # Name / hostname / vendor / MAC substring.
+        for d in devices:
+            haystack = " ".join([
+                device_display_name(d), d.get("hostname") or "",
+                d.get("vendor") or "", d.get("mac") or "", d.get("ip") or "",
+            ]).lower()
+            if q in haystack:
+                return d
+        return None
+
     def _on_search(self, query: str) -> None:
         """Jump to the tool that best matches the typed query. Tolerant of
         case, extra spaces, plurals and small typos, and matches multi-word
-        names ('speed test' → Speed Test) as well as single keywords."""
+        names ('speed test' → Speed Test) as well as single keywords. Also
+        finds discovered devices by IP or name."""
         import difflib
         raw = query.strip().lower()
         q = " ".join(raw.split())          # collapse whitespace
         if not q:
             return
+
+        # A device match takes priority only when the query is clearly not a
+        # tool name — otherwise "ping" would open a device called "ping".
+        if q not in self.PAGE_TITLES and q not in self.SEARCH_MAP:
+            dev = self._find_device(q)
+            if dev is not None:
+                dash = self._pages.get("dashboard")
+                self.sidebar.set_active("dashboard")
+                self._navigate("dashboard")
+                if hasattr(dash, "_open_device_details"):
+                    dash._open_device_details(dev)
+                return
 
         target = None
         # 1) exact full page title ("speed test", "network information", ...)

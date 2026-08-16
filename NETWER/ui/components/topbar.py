@@ -12,14 +12,56 @@ Signals:
     theme_selected(str)  — a theme name was picked from the switcher
 """
 
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import Qt, pyqtSignal, QRectF, QStringListModel
 from PyQt6.QtWidgets import (
-    QWidget, QHBoxLayout, QLabel, QPushButton, QMenu, QLineEdit
+    QWidget, QHBoxLayout, QLabel, QPushButton, QMenu, QLineEdit, QFrame,
+    QCompleter
 )
-from PyQt6.QtGui import QAction
+from PyQt6.QtGui import QAction, QPainter, QColor, QRadialGradient, QBrush
 
 from app.theme import Theme, THEMES, current_theme_name, is_dark, card_bg, card_border
 from app.resources import Icons
+
+
+class _GlowDot(QWidget):
+    """A small status dot with a soft glow/halo around it, like the preview.
+
+    The glow is a radial gradient painted behind a solid dot — no OS shadow,
+    so it renders identically on every platform."""
+
+    def __init__(self, color: str, size: int = 16, parent=None):
+        super().__init__(parent)
+        self._color = QColor(color)
+        self.setFixedSize(size, size)
+
+    def set_color(self, color: str):
+        self._color = QColor(color)
+        self.update()
+
+    def paintEvent(self, event):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        w = self.width()
+        cx = cy = w / 2
+        # Soft halo
+        halo = QRadialGradient(cx, cy, w / 2)
+        g = QColor(self._color)
+        g.setAlpha(150)
+        halo.setColorAt(0.0, g)
+        mid = QColor(self._color)
+        mid.setAlpha(60)
+        halo.setColorAt(0.5, mid)
+        edge = QColor(self._color)
+        edge.setAlpha(0)
+        halo.setColorAt(1.0, edge)
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(QBrush(halo))
+        p.drawEllipse(QRectF(0, 0, w, w))
+        # Solid core dot
+        p.setBrush(self._color)
+        r = w * 0.28
+        p.drawEllipse(QRectF(cx - r, cy - r, r * 2, r * 2))
+        p.end()
 
 
 class TopBar(QWidget):
@@ -27,6 +69,7 @@ class TopBar(QWidget):
     toggle_settings = pyqtSignal()
     theme_selected = pyqtSignal(str)
     search_submitted = pyqtSignal(str)
+    suggestion_chosen = pyqtSignal(dict)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -47,10 +90,36 @@ class TopBar(QWidget):
             "Search devices, run a trace, jump to a tool…")
         self._search.setClearButtonEnabled(True)
         self._search.returnPressed.connect(self._on_search_submit)
+        self._search.textEdited.connect(self._on_search_typed)
         lay.addWidget(self._search, 1)
 
-        # Status pill — "All systems operational".
-        self._status_pill = QLabel("  \u25CF  All systems operational  ")
+        # Live suggestions. Qt's own QCompleter owns the popup, its lifetime
+        # and the keyboard handling — a hand-rolled Qt.Popup list parented to
+        # the top bar was unstable: it grabs mouse/keyboard input and can
+        # outlive its parent when pages are rebuilt.
+        self._suggest_model = QStringListModel([])
+        self._completer = QCompleter(self._suggest_model, self._search)
+        self._completer.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
+        self._completer.setCompletionMode(
+            QCompleter.CompletionMode.UnfilteredPopupCompletion)
+        self._completer.activated[str].connect(self._on_suggestion_activated)
+        self._search.setCompleter(self._completer)
+        self._style_completer_popup()
+        #: popup label -> the suggestion dict behind it
+        self._suggest_index = {}
+        #: callable set by MainWindow: (text) -> list of suggestion dicts
+        self.suggestion_provider = None
+
+        # Status pill — a glowing dot + "All systems operational".
+        self._status_pill = QFrame()
+        self._status_pill.setObjectName("StatusPill")
+        sp = QHBoxLayout(self._status_pill)
+        sp.setContentsMargins(13, 6, 14, 6)
+        sp.setSpacing(8)
+        self._status_dot = _GlowDot(Theme.SUCCESS)
+        sp.addWidget(self._status_dot, 0, Qt.AlignmentFlag.AlignVCenter)
+        self._status_text = QLabel("All systems operational")
+        sp.addWidget(self._status_text)
         lay.addWidget(self._status_pill)
 
         # Theme switcher
@@ -74,7 +143,59 @@ class TopBar(QWidget):
         lay.addWidget(self._gear)
 
     # ── Search ─────────────────────────────────────────────────
+    def _style_completer_popup(self):
+        popup = self._completer.popup()
+        if popup is None:
+            return
+        popup.setStyleSheet(
+            f"QListView {{ background: {Theme.BG_SIDEBAR};"
+            f"border: 1px solid {Theme.GLASS_BORDER_HI};"
+            f"border-radius: {Theme.RADIUS_CONTROL}px;"
+            f"padding: 5px; outline: none;"
+            f"color: {Theme.TEXT_BODY}; font-size: 13px; }}"
+            f"QListView::item {{ padding: 7px 9px; border-radius: 8px; }}"
+            f"QListView::item:selected {{ background: {Theme.GLASS_CARD};"
+            f"color: {Theme.TEXT_PRIMARY}; }}")
+
+    def _on_search_typed(self, text):
+        """Refresh the suggestion list as the user types."""
+        if not self.suggestion_provider:
+            return
+        try:
+            items = self.suggestion_provider(text) or []
+        except Exception:
+            items = []
+
+        labels, index = [], {}
+        for it in items:
+            label = it["title"]
+            if it.get("subtitle"):
+                label = it["title"] + "  \u2014  " + it["subtitle"]
+            if label in index:            # keep labels unique
+                label = label + " (" + str(it.get("key", "")) + ")"
+            labels.append(label)
+            index[label] = it
+        self._suggest_index = index
+        self._suggest_model.setStringList(labels)
+        if labels:
+            self._completer.complete()
+        else:
+            popup = self._completer.popup()
+            if popup is not None:
+                popup.hide()
+
+    def _on_suggestion_activated(self, label):
+        item = self._suggest_index.get(label)
+        self._search.clear()
+        self._suggest_model.setStringList([])
+        self._suggest_index = {}
+        if item:
+            self.suggestion_chosen.emit(item)
+
     def _on_search_submit(self):
+        popup = self._completer.popup()
+        if popup is not None and popup.isVisible():
+            return   # Enter is choosing a suggestion; QCompleter handles it
         text = self._search.text().strip()
         if text:
             self.search_submitted.emit(text)
@@ -119,10 +240,13 @@ class TopBar(QWidget):
             f"font-size: {Theme.FONT_SIZE_SMALL}px; }}"
             f"QLineEdit:focus {{ border-color: {Theme.GLASS_BORDER_HI}; }}")
         self._status_pill.setStyleSheet(
-            f"color: {Theme.SUCCESS}; background: {Theme.GLASS_INPUT};"
+            f"#StatusPill {{ background: {Theme.GLASS_INPUT};"
             f"border: 1px solid {card_border()};"
-            f"border-radius: {Theme.RADIUS_CONTROL}px;"
+            f"border-radius: {Theme.RADIUS_CONTROL}px; }}")
+        self._status_text.setStyleSheet(
+            f"color: {Theme.SUCCESS}; background: transparent;"
             f"font-size: {Theme.FONT_SIZE_SMALL}px; font-weight: 500;")
+        self._status_dot.set_color(Theme.SUCCESS)
 
         icon = "moon" if is_dark() else "sun"
         accent = Theme.ACCENT_PURPLE if is_dark() else Theme.WARNING

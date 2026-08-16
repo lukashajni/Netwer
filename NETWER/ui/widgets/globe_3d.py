@@ -185,8 +185,11 @@ class Globe3D(QWidget):
 
             view = QQuickWidget()
             view.setResizeMode(QQuickWidget.ResizeMode.SizeRootObjectToView)
-            # Transparent background so the model sits on the card, not in a box
-            view.setClearColor(Qt.GlobalColor.transparent)
+            # Clear to the surrounding card colour (not transparent): a
+            # translucent 3D viewport renders as a black box on some drivers,
+            # and this way the globe always sits flush on the panel.
+            from PyQt6.QtGui import QColor
+            view.setClearColor(QColor(Theme.BG_CARD))
             view.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
             view.setAttribute(Qt.WidgetAttribute.WA_AlwaysStackOnTop)
             view.setStyleSheet("background: transparent;")
@@ -194,9 +197,38 @@ class Globe3D(QWidget):
 
             if view.status() != QQuickWidget.Status.Ready:
                 return None
+
+            # `Ready` only means the QML parsed. Qt Quick 3D additionally needs
+            # an RHI-based scene graph (a real 3D graphics API). On software
+            # rendering — old GPUs, some VMs, remote desktop — View3D silently
+            # draws nothing, which left an empty box instead of the logo. So
+            # check the actual graphics API and fall back if it can't do 3D.
+            if not self._scene_graph_supports_3d(view):
+                return None
             return view
         except Exception:
             return None
+
+    @staticmethod
+    def _scene_graph_supports_3d(view) -> bool:
+        """True only when the scene graph is backed by a real 3D API."""
+        try:
+            from PyQt6.QtQuick import QSGRendererInterface
+            win = view.quickWindow()
+            if win is None:
+                return False
+            rif = win.rendererInterface()
+            if rif is None:
+                return False
+            api = rif.graphicsApi()
+            unsupported = {
+                QSGRendererInterface.GraphicsApi.Software,
+                QSGRendererInterface.GraphicsApi.Unknown,
+            }
+            return api not in unsupported
+        except Exception:
+            # If we can't tell, prefer the safe 2D logo over an empty box.
+            return False
 
     def _build_fallback(self, size):
         lbl = QLabel()

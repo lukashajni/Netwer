@@ -126,7 +126,7 @@ class NetworkInfoPage(BasePage):
         self._status.setText("Loading adapters…")
         w = OneshotWorker(self.core.list_adapters)
         w.result.connect(self._on_adapters)
-        w.error.connect(lambda e: self._status.setText(f"Error: {e}"))
+        w.error.connect(lambda e: self._status.setText(self.core.friendly_error(e)))
         self.register_worker(w)
         w.start()
 
@@ -217,7 +217,8 @@ class NetworkInfoPage(BasePage):
 
     def _show_error(self, msg):
         self.info_table.clear()
-        self.info_table.add_row("Error", str(msg), value_color=Theme.DANGER)
+        self.info_table.add_row(
+            "Error", self.core.friendly_error(msg), value_color=Theme.DANGER)
 
     # ── Actions ────────────────────────────────────────────────
     def _refresh_current(self):

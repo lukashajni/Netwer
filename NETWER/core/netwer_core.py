@@ -40,6 +40,42 @@ except ImportError:
 used_os = sys.platform
 
 
+def _no_window():
+    """Keep Windows from flashing a console window for each subprocess."""
+    if platform.system() == "Windows":
+        return {"creationflags": 0x08000000}   # CREATE_NO_WINDOW
+    return {}
+
+
+def friendly_error(exc):
+    """Turn a raw exception (or message) into a short, human message suitable
+    for showing in the app — never the raw 'Command [...] timed out' text that
+    looks like a console dump."""
+    msg = str(exc) if not isinstance(exc, str) else exc
+    low = msg.lower()
+    if "timed out" in low or "timeout" in low:
+        return ("This took too long to respond. It usually works on the next "
+                "try — check that you're connected and try again.")
+    if "powershell" in low or "get-net" in low:
+        return ("Couldn't read your network adapter details. Try running the "
+                "scan again.")
+    if "no active network" in low or "no network" in low:
+        return "No active network connection was found."
+    if "wireless interface" in low or "no wifi" in low:
+        return "No Wi-Fi adapter was found, or Wi-Fi is turned off."
+    if "permission" in low or "access is denied" in low or "denied" in low:
+        return ("This action needs administrator rights. Try running NETWER "
+                "as administrator.")
+    if "invalid mac" in low:
+        return "This device doesn't have a MAC address we can use for this."
+    # Fallback: a trimmed, non-technical version.
+    clean = msg.strip()
+    if len(clean) > 140:
+        clean = clean[:137] + "…"
+    return clean or "Something went wrong. Please try again."
+
+
+
 # ══════════════════════════════════════════
 # HELPERS
 # ══════════════════════════════════════════
@@ -113,10 +149,81 @@ def run_powershell(command, timeout=10):
     if platform.system() != "Windows":
         return ""
     result = subprocess.run(
-        ["powershell", "-NoProfile", "-Command", command],
-        capture_output=True, text=True, timeout=timeout
+        ["powershell", "-NoProfile", "-NonInteractive", "-Command", command],
+        capture_output=True, text=True, timeout=timeout, **_no_window()
     )
     return result.stdout.strip()
+
+
+def _windows_ipconfig_config():
+    """Fast native adapter config via `ipconfig /all` — no PowerShell, so it
+    returns instantly and works reliably on Wi-Fi where the Get-Net* cmdlets
+    are slow to cold-start (they were timing out at 8-12s). Parses the FIRST
+    adapter block that has an IPv4 address and a default gateway (the active
+    connection, Wi-Fi or Ethernet). Returns a cfg dict or None."""
+    try:
+        out = subprocess.run(["ipconfig", "/all"], capture_output=True,
+                             text=True, timeout=6, **_no_window()).stdout
+    except Exception:
+        return None
+    if not out:
+        return None
+
+    # Split into "Adapter ...:" blocks. Each block is a header line (no leading
+    # whitespace, ends with ':') followed by indented "Key . . . : value" lines.
+    blocks = re.split(r'\n(?=[^\s].*:\s*\n)', out)
+    best = None
+    for block in blocks:
+        def field(*labels):
+            for lab in labels:
+                m = re.search(r'^\s*' + lab + r'[ .]*:\s*(.+)$',
+                              block, re.MULTILINE)
+                if m:
+                    return m.group(1).strip()
+            return ""
+        # IPv4 (Windows appends "(Preferred)"/"(Povlašteno)")
+        ipv4 = field(r'IPv4 Address', r'IPv4 adresa', r'IP Address')
+        ipv4 = re.sub(r'\(.*?\)', '', ipv4).strip()
+        if not re.match(r'^\d{1,3}(\.\d{1,3}){3}$', ipv4 or ""):
+            continue
+        gateway = field(r'Default Gateway', r'Zadani pristupnik',
+                        r'Zadani gateway')
+        gw_ip = ""
+        gm = re.search(r'\d{1,3}(\.\d{1,3}){3}', gateway or "")
+        if gm:
+            gw_ip = gm.group(0)
+        mask = field(r'Subnet Mask', r'Maska podmreže')
+        mac = field(r'Physical Address', r'Fizička adresa')
+        mac = mac.replace("-", ":").upper() if mac else ""
+        dns = field(r'DNS Servers', r'DNS poslužitelji')
+        dns_ip = ""
+        dm = re.search(r'\d{1,3}(\.\d{1,3}){3}', dns or "")
+        if dm:
+            dns_ip = dm.group(0)
+        # Adapter name from the block header, e.g.
+        # "Wireless LAN adapter Wi-Fi:" -> "Wi-Fi"
+        header = block.strip().splitlines()[0] if block.strip() else ""
+        alias = re.sub(r'^.*adapter\s+', '', header, flags=re.I).rstrip(":").strip()
+        prefix = _mask_to_prefix(mask) if mask else 24
+
+        cfg = {"ip": ipv4, "prefix": prefix, "gateway": gw_ip or "N/A",
+               "dns": dns_ip or "N/A", "mac": mac or "N/A",
+               "adapter": alias or "Network"}
+        # Prefer an adapter that actually has a gateway (the internet-facing
+        # one). Keep the first IPv4 block as a fallback.
+        if gw_ip:
+            return cfg
+        if best is None:
+            best = cfg
+    return best
+
+
+def _mask_to_prefix(mask):
+    """'255.255.255.0' -> 24. Returns 24 on anything unparseable."""
+    try:
+        return sum(bin(int(o)).count("1") for o in mask.split("."))
+    except Exception:
+        return 24
 
 
 # ══════════════════════════════════════════
@@ -134,6 +241,10 @@ OUI_TABLE = {
     "001E58": "Synology", "0011D8": "Synology", "001132": "Synology",
     "B0A4E8": "MikroTik", "4C5E0C": "MikroTik", "6C3B6B": "MikroTik", "DC2C6E": "MikroTik",
     "00163C": "TP-Link", "1C61B4": "TP-Link", "50C7BF": "TP-Link", "F4F26D": "TP-Link",
+    "6C4CBC": "TP-Link", "6C4CBB": "TP-Link", "AC84C6": "TP-Link", "5091E3": "TP-Link",
+    "9C5322": "TP-Link", "EC086B": "TP-Link", "60A4B7": "TP-Link",
+    "C46E1F": "TP-Link", "A42BB0": "TP-Link", "003192": "TP-Link", "B0BE76": "TP-Link",
+    "10FEED": "TP-Link", "54AF97": "TP-Link", "98DAC4": "TP-Link", "E848B8": "TP-Link",
     "001D7E": "Cisco", "0050F2": "Microsoft", "7C1E52": "Microsoft",
     "DCA632": "Apple", "A85C2C": "Apple", "F0DBE2": "Apple", "BC9264": "Apple",
     "001CB3": "Apple", "3C0754": "Apple", "88665A": "Apple",
@@ -165,22 +276,48 @@ def lookup_vendor(mac_address, allow_online=False):
         return "Unknown"
     prefix = cleaned[:6]
 
-    # 1) Local table
+    # A user-taught vendor always wins — even over the randomized-MAC label,
+    # since the user explicitly corrected it.
+    try:
+        from core import vendor_learning
+        taught = vendor_learning.lookup(prefix)
+    except Exception:
+        taught = None
+    if taught:
+        return taught
+
+    # Locally-administered / randomized MAC (2nd nibble is 2, 6, A or E).
+    # Modern phones/laptops randomize their MAC for privacy, so there's no
+    # real manufacturer to look up — label it honestly instead of "Unknown".
+    try:
+        second_nibble = int(cleaned[1], 16)
+        if second_nibble & 0x2:
+            return "Private (randomized)"
+    except ValueError:
+        pass
+
+    # 1) Local built-in table
     vendor = OUI_TABLE.get(prefix)
     if vendor:
         return vendor
 
-    # 2) Cache from earlier online lookups
+    # 2) (Learned DB already checked above.) Cache from earlier online lookups.
     if prefix in _ONLINE_VENDOR_CACHE:
         return _ONLINE_VENDOR_CACHE[prefix]
 
-    # 3) Online lookup (opt-in, worker only)
+    # 4) Online lookup (opt-in, worker only)
     if allow_online:
         try:
             from core.oui_extended import online_vendor_lookup
             name = online_vendor_lookup(mac_address)
             if name:
                 _ONLINE_VENDOR_CACHE[prefix] = name
+                # Persist it so next time we know it even offline.
+                try:
+                    from core import vendor_learning
+                    vendor_learning.remember(prefix, name)
+                except Exception:
+                    pass
                 return name
         except Exception:
             pass
@@ -190,14 +327,35 @@ def lookup_vendor(mac_address, allow_online=False):
     return "Unknown"
 
 
+def teach_vendor(mac_address, vendor):
+    """Teach NETWER the vendor for a device's MAC (user correction). Persisted
+    across sessions and preferred over online guesses."""
+    try:
+        from core import vendor_learning
+        return vendor_learning.teach(mac_address, vendor)
+    except Exception:
+        return False
+
+
 # ══════════════════════════════════════════
 # NETWORK CONFIG (Ethernet Info source of truth)
 # ══════════════════════════════════════════
 
 def get_network_config():
-    """Returns the active adapter's IP config as a dict, or {"error": ...}."""
+    """Returns the active adapter's IP config as a dict, or {"error": ...}.
+
+    On Windows we try the fast native `ipconfig /all` first (instant, works
+    on Wi-Fi), and only fall back to the slower Get-Net* PowerShell cmdlets
+    if that didn't yield a usable result. This fixes the Network Map / Top
+    Devices panels timing out on Wi-Fi connections."""
     try:
         if platform.system() == "Windows":
+            # 1) Fast path: ipconfig /all
+            fast = _windows_ipconfig_config()
+            if fast and fast.get("ip") and fast["ip"] != "N/A":
+                return fast
+
+            # 2) Fallback: PowerShell Get-NetIPConfiguration
             ps_cmd = r"""
 $c = Get-NetIPConfiguration | Where-Object { $_.IPv4Address -ne $null -and $_.NetAdapter.Status -eq 'Up' } | Select-Object -First 1
 if (-not $c) { Write-Output '{}'; exit }
@@ -1226,14 +1384,15 @@ def ping_sweep_stream(timeout_ms=150, subnet=None):
             hostname = socket.gethostbyaddr(ip)[0]
         except Exception:
             hostname = "Unknown"
-        mac = _get_mac_for_ip(ip, own_ip=own_ip, own_mac=own_mac)
-        vendor = lookup_vendor(mac, allow_online=True) if mac else "Unknown"
+        # MAC is filled in AFTER the sweep from the ARP table (populated by
+        # these very pings). Resolving it here per-host is unreliable — the
+        # OS often hasn't written the ARP entry yet, giving "Unknown".
         return {
             "online": True,
             "ip": ip,
             "hostname": hostname,
-            "mac": mac or "Unknown",
-            "vendor": vendor,
+            "mac": "Unknown",
+            "vendor": "Unknown",
             "is_gateway": (ip == gateway),
             "is_self": (own_ip and ip == own_ip),
             "rtt_ms": ms,
@@ -1242,6 +1401,7 @@ def ping_sweep_stream(timeout_ms=150, subnet=None):
     found = 0
     scanned = 0
     seen_ips = set()
+    pending = []          # hosts awaiting MAC/vendor from the ARP table
     # 64 workers scan the whole /24 in a few seconds
     with concurrent.futures.ThreadPoolExecutor(max_workers=64) as pool:
         futures = {pool.submit(probe, i): i for i in range(1, 255)}
@@ -1256,7 +1416,42 @@ def ping_sweep_stream(timeout_ms=150, subnet=None):
             if host:
                 found += 1
                 seen_ips.add(host["ip"])
-                yield host
+                pending.append(host)
+
+    # Now the ARP table is populated by the sweep — read it ONCE and fill in
+    # every host's MAC/vendor. Give the OS a brief moment to flush entries,
+    # then read; retry once if some are still missing.
+    time.sleep(0.3)
+    arp = _read_arp_table()
+    missing = [h for h in pending
+               if h["ip"] not in arp and not h["is_self"]]
+    if missing:
+        # Nudge stragglers into the ARP cache and re-read once.
+        for h in missing:
+            try:
+                ping_host(h["ip"], 100)
+            except Exception:
+                pass
+        time.sleep(0.3)
+        arp = _read_arp_table() or arp
+
+    for host in pending:
+        ip = host["ip"]
+        if host["is_self"] and own_mac:
+            host["mac"] = own_mac
+        elif ip in arp:
+            host["mac"] = arp[ip]
+        if host["mac"] and host["mac"] != "Unknown":
+            host["vendor"] = lookup_vendor(host["mac"], allow_online=True)
+
+    # Devices with a randomized MAC (every modern iPhone/Android) can't be
+    # named from the OUI table, so ask them directly: Bonjour reverse lookup
+    # first, then Apple port signatures. Done in parallel so it costs about a
+    # second for the whole network, and only for the unidentified ones.
+    _fingerprint_unknown_devices(pending)
+
+    for host in pending:
+        yield host
 
     # Second pass: the ping sweep populates the OS ARP table as a side
     # effect. Devices that block ping (typical Windows firewall default)
@@ -1289,6 +1484,65 @@ def ping_sweep_stream(timeout_ms=150, subnet=None):
         }
 
     yield {"done": True, "found": found, "scanned": 254}
+
+
+def _needs_fingerprint(host: dict) -> bool:
+    """True when we couldn't name the device from its MAC — i.e. a randomized
+    address or an OUI we don't know, and no useful hostname either."""
+    if host.get("is_self") or host.get("is_gateway"):
+        return False
+    vendor = (host.get("vendor") or "").strip().lower()
+    if vendor and vendor not in ("unknown", "private (randomized)", "private",
+                                 "randomized"):
+        return False
+    hostname = (host.get("hostname") or "").strip()
+    if hostname and hostname.lower() != "unknown" and hostname != host.get("ip"):
+        return False
+    return True
+
+
+def _fingerprint_unknown_devices(hosts, max_workers=16):
+    """Fill in hostname/vendor/kind for unidentified devices, in parallel.
+
+    Best-effort: anything that stays silent is left exactly as it was."""
+    import concurrent.futures
+    try:
+        from core import device_fingerprint
+    except Exception:
+        return
+
+    targets = [h for h in hosts if _needs_fingerprint(h)]
+    if not targets:
+        return
+
+    def work(host):
+        try:
+            return host, device_fingerprint.identify(
+                host.get("ip", ""), host.get("hostname", ""),
+                host.get("vendor", ""))
+        except Exception:
+            return host, {}
+
+    workers = min(max_workers, len(targets))
+    try:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
+            for host, found in pool.map(work, targets):
+                if not found:
+                    continue
+                name = found.get("hostname")
+                if name:
+                    host["hostname"] = name
+                vendor = found.get("vendor")
+                if vendor:
+                    # Keep the privacy note visible, but say who made it.
+                    was_private = "private" in (host.get("vendor") or "").lower()
+                    host["vendor"] = (f"{vendor} (private address)"
+                                      if was_private else vendor)
+                kind = found.get("kind")
+                if kind:
+                    host["kind"] = kind
+    except Exception:
+        pass
 
 
 def get_top_devices(limit=10):
@@ -1353,13 +1607,6 @@ _IP_RE = re.compile(r'(\d{1,3}(?:\.\d{1,3}){3})')
 _MS_RE = re.compile(r'(\d+(?:[.,]\d+)?)\s*ms', re.I)
 _FROM_RE = re.compile(r'(?:reply from|from)\s+(\d{1,3}(?:\.\d{1,3}){3})', re.I)
 _TIME_RE = re.compile(r'time[=<]\s*(\d+(?:[.,]\d+)?)', re.I)
-
-
-def _no_window():
-    """Keep Windows from flashing a console window for each subprocess."""
-    if platform.system() == "Windows":
-        return {"creationflags": 0x08000000}   # CREATE_NO_WINDOW
-    return {}
 
 
 def _parse_hop_line(line):
@@ -1864,7 +2111,7 @@ def list_adapters():
         if used_os == "linux":
             return list_adapters_linux()
         ps_cmd = "Get-NetAdapter | Select-Object Name,Status,InterfaceDescription,MacAddress | ConvertTo-Json -Depth 2"
-        raw = run_powershell(ps_cmd, timeout=8)
+        raw = run_powershell(ps_cmd, timeout=20)
         if not raw:
             return {"error": "No adapters found (Unsupported OS found)"}
         data = json.loads(raw)
@@ -1877,6 +2124,105 @@ def list_adapters():
         ]
     except Exception as e:
         return {"error": str(e)}
+
+
+def _windows_adapter_details_native(adapter_name):
+    """Fast native adapter details via `ipconfig /all` (+ `netsh wlan` for the
+    Wi-Fi link rate). Used to fill in Description / DHCP / Link Speed when the
+    Get-Net* PowerShell path is slow or times out — which is exactly what left
+    those fields blank in the PDF report on Wi-Fi."""
+    out = {}
+    try:
+        raw = subprocess.run(["ipconfig", "/all"], capture_output=True,
+                             text=True, timeout=6, **_no_window()).stdout or ""
+    except Exception:
+        return out
+    if not raw:
+        return out
+
+    blocks = re.split(r'\n(?=[^\s].*:\s*\n)', raw)
+    want = (adapter_name or "").strip().lower()
+    for block in blocks:
+        header = block.strip().splitlines()[0] if block.strip() else ""
+        alias = re.sub(r'^.*adapter\s+', '', header, flags=re.I).rstrip(":").strip()
+        if want and alias.lower() != want:
+            continue
+
+        def field(*labels):
+            for lab in labels:
+                m = re.search(r'^\s*' + lab + r'[ .]*:\s*(.+)$', block,
+                              re.MULTILINE)
+                if m:
+                    return m.group(1).strip()
+            return ""
+
+        desc = field(r'Description', r'Opis')
+        if desc:
+            out["description"] = desc
+        dhcp = field(r'DHCP Enabled', r'DHCP omogućen', r'DHCP omogucen')
+        if dhcp:
+            out["dhcp"] = ("Enabled" if dhcp.strip().lower().startswith(("yes", "da"))
+                           else "Static/Manual")
+        mac = field(r'Physical Address', r'Fizička adresa')
+        if mac:
+            out["mac"] = mac.replace("-", ":").upper()
+
+        # Addressing — these were still blank on the Network Information page
+        # whenever the PowerShell path timed out, so read them here too.
+        ipv4 = re.sub(r'\(.*?\)', '', field(r'IPv4 Address', r'IPv4 adresa',
+                                            r'IP Address')).strip()
+        if re.fullmatch(r'\d{1,3}(\.\d{1,3}){3}', ipv4 or ""):
+            out["ipv4"] = ipv4
+        mask = field(r'Subnet Mask', r'Maska podmreže')
+        if mask:
+            out["subnet_mask"] = mask
+            out["prefix"] = _mask_to_prefix(mask)
+        gw = field(r'Default Gateway', r'Zadani pristupnik')
+        gm = re.search(r'\d{1,3}(\.\d{1,3}){3}', gw or "")
+        if gm:
+            out["gateway"] = gm.group(0)
+        # DNS servers can span several indented continuation lines.
+        dm = re.search(r'^\s*DNS Servers[ .]*:\s*(.+(?:\n\s{6,}\S+)*)',
+                       block, re.MULTILINE)
+        if dm:
+            servers = re.findall(r'\d{1,3}(?:\.\d{1,3}){3}', dm.group(1))
+            if servers:
+                out["dns"] = ", ".join(servers)
+        # "Media State . . . : Media disconnected" means the adapter is down.
+        media = field(r'Media State', r'Stanje medija')
+        if media:
+            out["status"] = ("Disconnected" if "disconnect" in media.lower()
+                             else "Up")
+        elif out.get("ipv4"):
+            out["status"] = "Up"
+        break
+
+    # MTU isn't in ipconfig — netsh knows it.
+    try:
+        mt = subprocess.run(
+            ["netsh", "interface", "ipv4", "show", "subinterfaces"],
+            capture_output=True, text=True, timeout=6, **_no_window()).stdout or ""
+        for line in mt.splitlines():
+            parts = line.split()
+            if len(parts) >= 5 and parts[0].isdigit():
+                if " ".join(parts[4:]).strip().lower() == (adapter_name or "").lower():
+                    out["mtu"] = parts[0]
+                    break
+    except Exception:
+        pass
+
+    # Link speed: ipconfig doesn't report it. For Wi-Fi, netsh does.
+    try:
+        wl = subprocess.run(["netsh", "wlan", "show", "interfaces"],
+                            capture_output=True, text=True, timeout=6,
+                            **_no_window()).stdout or ""
+        m = re.search(r'^\s*Receive rate \(Mbps\)[ .]*:\s*(.+)$', wl,
+                      re.MULTILINE)
+        if m:
+            out["link_speed"] = f"{m.group(1).strip()} Mbps"
+    except Exception:
+        pass
+    return out
 
 
 def get_adapter_details(adapter_name):
@@ -1933,7 +2279,7 @@ $linkSpeed = if ($ad.LinkSpeed) { $ad.LinkSpeed } else { '' }
         prefix = data.get("prefix", 0)
         mask = _prefix_to_mask(prefix) if prefix else ""
 
-        return {
+        result = {
             "name": data.get("name", adapter_name),
             "description": data.get("description", ""),
             "status": data.get("status", ""),
@@ -1949,8 +2295,22 @@ $linkSpeed = if ($ad.LinkSpeed) { $ad.LinkSpeed } else { '' }
             "mtu": data.get("mtu", ""),
             "virtual": data.get("virtual", False),
         }
-    except Exception as e:
-        return {"error": str(e)}
+        # Backfill anything PowerShell left blank from the fast native source.
+        native = _windows_adapter_details_native(adapter_name)
+        for key in ("description", "dhcp", "link_speed", "mac", "ipv4",
+                    "subnet_mask", "gateway", "dns", "status", "mtu",
+                    "prefix"):
+            if not result.get(key) and native.get(key):
+                result[key] = native[key]
+        return result
+    except Exception:
+        # PowerShell failed or timed out (common on Wi-Fi) — return whatever
+        # the native path can tell us instead of an error with empty fields.
+        native = _windows_adapter_details_native(adapter_name)
+        if native:
+            native.setdefault("name", adapter_name)
+            return native
+        return {"error": "Could not read adapter details"}
 
 
 def _prefix_to_mask(prefix):

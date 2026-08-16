@@ -21,8 +21,15 @@ class StatCard(QFrame):
         "internet": ("#123528", "#33d6a6"),
         "download": ("#152340", "#5b8cff"),
         "upload":   ("#231c40", "#8b6dff"),
-        "packet":   ("#332916", "#f5b545"),
+        # The card is built with icon_name="packet_loss", so the key has to
+        # match exactly — the old "packet" key never hit and the tile silently
+        # fell back to the default blue.
+        # Packet loss is GREEN while healthy; the dashboard recolours the tile
+        # to amber/red only when loss actually rises.
+        "packet_loss": ("#123528", "#33d6a6"),
+        "packet":   ("#123528", "#33d6a6"),
         "uptime":   ("#332916", "#f5b545"),
+        "devices":  ("#332916", "#f5b545"),
     }
 
     def __init__(self, icon_name: str, label: str, spark_color: str = None,
@@ -52,6 +59,7 @@ class StatCard(QFrame):
         self._icon.setObjectName("StatTile")
         self._icon.setStyleSheet(
             f"#StatTile {{ background: {tile_bg}; border-radius: 10px; }}")
+        self._icon_name = icon_name
         self._icon.setPixmap(Icons.pixmap(icon_name, 17, tile_fg))
         self._icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
         top.addWidget(self._icon)
@@ -114,6 +122,13 @@ class StatCard(QFrame):
         self._badge.setStyleSheet(
             f"color: {fg}; background: {bg}; border-radius: 7px;"
             f"font-size: 11px; font-weight: 600;")
+
+    def set_tile_tint(self, bg: str, fg: str) -> None:
+        """Recolour the icon tile at runtime (e.g. packet loss going from a
+        healthy green to amber/red as it climbs)."""
+        self._icon.setStyleSheet(
+            f"#StatTile {{ background: {bg}; border-radius: 10px; }}")
+        self._icon.setPixmap(Icons.pixmap(self._icon_name, 17, fg))
 
     def set_value(self, value: str, unit: str = "", color: str | None = None,
                   subtitle: str = "") -> None:

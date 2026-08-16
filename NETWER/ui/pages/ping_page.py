@@ -196,7 +196,9 @@ class PingPage(BasePage):
         ping_to = store.get_setting("ping_timeout_ms", 1000)
         w = StreamWorker(self.core.ping_custom_stream, target, count, ping_to)
         w.result.connect(self._on_reply)
-        w.error.connect(lambda e: self.terminal.append(str(e), kind="error"))
+        w.error.connect(
+            lambda e: self.terminal.append(
+                self.core.friendly_error(e), kind="error"))
         w.done.connect(self._on_finished)
         self.register_worker(w)
         self._worker = w

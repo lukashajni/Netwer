@@ -182,27 +182,13 @@ class Sidebar(QWidget):
         self.layout().addWidget(item)
 
     def add_stretch_and_status(self) -> None:
-        # Idempotent: if a status row already exists, don't add a second one.
+        # The "All systems operational" status now lives ONLY in the top bar
+        # (top-right). Here we just push the nav items up with a stretch, so
+        # the status pill isn't duplicated at the bottom of the sidebar.
         if getattr(self, "_status_row", None) is not None:
             return
         self.layout().addStretch()
-        status = QFrame()
-        status.setStyleSheet("background: transparent;")
-        s_lay = QHBoxLayout(status)
-        s_lay.setContentsMargins(16, 4, 12, 4)
-        s_lay.setSpacing(8)
-        dot = QLabel("\u25CF")
-        dot.setStyleSheet(f"color: {Theme.SUCCESS}; font-size: 9px; background: transparent;")
-        s_lay.addWidget(dot)
-        txt = QLabel("All systems operational")
-        txt.setStyleSheet(
-            f"color: {Theme.SUCCESS}; font-size: {Theme.FONT_SIZE_TINY}px;"
-            f"background: transparent;"
-        )
-        s_lay.addWidget(txt)
-        s_lay.addStretch()
-        self.layout().addWidget(status)
-        self._status_row = status
+        self._status_row = True   # marker so we don't add the stretch twice
 
     def _on_item_clicked(self, key: str) -> None:
         self.set_active(key)

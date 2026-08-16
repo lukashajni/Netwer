@@ -22,6 +22,7 @@ from ui.main_window import MainWindow
 from ui.pages.dashboard_page import DashboardPage
 from ui.pages.network_info_page import NetworkInfoPage
 from ui.pages.wifi_info_page import WiFiInfoPage
+from ui.pages.health_page import HealthPage
 from ui.pages.ping_page import PingPage
 from ui.pages.ping_sweep_page import PingSweepPage
 from ui.pages.port_scanner_page import PortScannerPage
@@ -98,6 +99,7 @@ GLOBAL_QSS = build_global_qss()
 def _register_pages(window: MainWindow) -> None:
     """Registriraj sve stranice. Zasad samo Dashboard; ostale dolaze
     jedna po jedna. Prvi argument je nas naziv ikone iz Icons registra."""
+    window.register_section("Overview")
     window.register_page(
         "dashboard", "dashboard", DashboardPage(netwer_core), subtitle="Dashboard"
     )
@@ -109,6 +111,11 @@ def _register_pages(window: MainWindow) -> None:
     )
     window.register_page(
         "system", "system", SystemInfoPage(netwer_core), subtitle="Hardware & OS"
+    )
+    window.register_section("Diagnostics")
+    window.register_page(
+        "health", "resources", HealthPage(netwer_core),
+        subtitle="Diagnose problems"
     )
     window.register_page(
         "ping", "ping", PingPage(netwer_core), subtitle="Test Connectivity"
@@ -129,6 +136,7 @@ def _register_pages(window: MainWindow) -> None:
         "speedtest", "speedtest", SpeedTestPage(netwer_core),
         subtitle="Bandwidth Test"
     )
+    window.register_section("More")
     window.register_page(
         "report", "report", ReportPage(netwer_core), subtitle="Export PDF"
     )

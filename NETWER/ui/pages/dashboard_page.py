@@ -46,11 +46,8 @@ class DashboardPage(BasePage):
         self._resource_timer.timeout.connect(self._refresh_resources)
         self._resource_worker = None
 
-        # Uptime: track boot moment, tick every second so it updates live.
+        # (System-uptime card was replaced by a live "Devices online" count.)
         self._boot_epoch = None
-        self._uptime_timer = QTimer(self)
-        self._uptime_timer.setInterval(1000)
-        self._uptime_timer.timeout.connect(self._tick_uptime)
 
         # Ping refresh: re-check connectivity every 5s so the ping/loss
         # sparklines keep moving (not just one reading at startup).
@@ -71,9 +68,14 @@ class DashboardPage(BasePage):
         self._loaded_once = False
         self._pending = set()
 
-        # Content (scrollable)
+        # Content — no scrolling: the dashboard is sized to fit the window and
+        # the layout stretches to fill it, so the vertical scrollbar is off.
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
+        scroll.setVerticalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         inner = QWidget()
         self._grid = QVBoxLayout(inner)
         self._grid.setContentsMargins(0, 0, 0, 0)
@@ -84,10 +86,9 @@ class DashboardPage(BasePage):
         self._build_stat_cards()
         self._build_middle_row()
         self._build_bottom_row()
-        # Spotify-style: cards keep a sensible fixed size; extra vertical
-        # space when maximized goes into this trailing stretch instead of
-        # ballooning the cards.
-        self._grid.addStretch(1)
+        # Fullscreen fix: no trailing stretch and no fixed height on the middle
+        # row, so the content grows to fill the window when maximized/fullscreen
+        # instead of leaving a big empty band at the bottom.
 
     # ══════════════════════════════════════════════════════════
     # UI CONSTRUCTION
@@ -99,9 +100,9 @@ class DashboardPage(BasePage):
         self.card_download = StatCard("download", "Download Speed", spark_color=Theme.ACCENT)
         self.card_upload = StatCard("upload", "Upload Speed", spark_color=Theme.ACCENT_PURPLE)
         self.card_loss = StatCard("packet_loss", "Packet Loss", spark_color=Theme.SUCCESS)
-        self.card_uptime = StatCard("uptime", "System Uptime")
+        self.card_devices = StatCard("devices", "Devices online")
         for c in (self.card_internet, self.card_download, self.card_upload,
-                  self.card_loss, self.card_uptime):
+                  self.card_loss, self.card_devices):
             c.setFixedHeight(180)
             row.addWidget(c)
         self._grid.addLayout(row, 0)
@@ -110,10 +111,10 @@ class DashboardPage(BasePage):
         row = QHBoxLayout()
         row.setSpacing(Theme.GAP)
 
-        MIDDLE_HEIGHT = 340  # fixed height so left and right columns align
+        MIDDLE_HEIGHT = 340  # minimum height so left and right columns align
 
         monitor_card = Card("Live Network Monitor", "monitor")
-        monitor_card.setFixedHeight(MIDDLE_HEIGHT)
+        monitor_card.setMinimumHeight(MIDDLE_HEIGHT)  # grows in fullscreen
         # Adapter selector in the card header (right side)
         from PyQt6.QtWidgets import QComboBox
         self.adapter_combo = QComboBox()
@@ -175,13 +176,18 @@ class DashboardPage(BasePage):
         wifi_body = QHBoxLayout()
         wifi_body.setSpacing(14)
         wifi_left = QVBoxLayout()
-        wifi_left.setSpacing(6)
+        wifi_left.setSpacing(0)   # stretch springs handle spacing in fullscreen
         wifi_left.addStretch()
         self._wifi_values = {}
-        for key in ("Connection", "SSID", "Signal", "Channel"):
+        wifi_keys = ("Connection", "SSID", "Signal", "Channel")
+        for i, key in enumerate(wifi_keys):
             container, val_lbl = kv_row(key, "\u2014", mono=(key == "Signal"))
             self._wifi_values[key] = val_lbl
             wifi_left.addWidget(container)
+            # Even vertical spring between rows (not after the last one), so the
+            # rows spread out to fill the card when the window is maximized.
+            if i < len(wifi_keys) - 1:
+                wifi_left.addStretch(1)
         wifi_left.addStretch()
         wifi_body.addLayout(wifi_left, 1)
         from ui.widgets.wifi_signal import WiFiSignal
@@ -220,11 +226,28 @@ class DashboardPage(BasePage):
 
         BOTTOM_HEIGHT = 300
 
-        # Network Map (moved here from the middle column; more room)
+        # Static network map on the dashboard: Internet -> Router -> devices,
+        # each labelled, so you can read the network at a glance. The animated
+        # radar lives in the full-screen Expand view.
         from ui.widgets.network_map import NetworkMap
         self.map_card = Card("Network Map", "network")
         self.map_card.setFixedHeight(BOTTOM_HEIGHT)
+        # "Expand" opens the full-screen topology view.
+        self.btn_expand_map = QPushButton("  Expand")
+        self.btn_expand_map.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_expand_map.setIcon(Icons.get("network", Theme.ACCENT))
+        self.btn_expand_map.setStyleSheet(
+            f"QPushButton {{ background: {Theme.GLASS_INPUT};"
+            f"color: {Theme.TEXT_SECONDARY};"
+            f"border: 1px solid {Theme.GLASS_BORDER};"
+            f"border-radius: {Theme.RADIUS_CONTROL}px;"
+            f"padding: 5px 12px; font-size: 12px; }}"
+            f"QPushButton:hover {{ border-color: {Theme.GLASS_BORDER_HI};"
+            f"color: {Theme.TEXT_PRIMARY}; }}")
+        self.btn_expand_map.clicked.connect(self._open_topology)
+        self.map_card.header_layout.addWidget(self.btn_expand_map)
         self.network_map = NetworkMap()
+        self.network_map.node_clicked.connect(self._open_device_details)
         self.map_card.content_layout.addWidget(self.network_map)
         row.addWidget(self.map_card, 2)
 
@@ -325,12 +348,9 @@ class DashboardPage(BasePage):
             self._info_timer.start()
             self._refresh_resources()
             self._refresh_info()
-            if self._boot_epoch is not None:
-                self._uptime_timer.start()
 
     def on_leave(self):
         self._resource_timer.stop()
-        self._uptime_timer.stop()
         self._ping_timer.stop()
         self._info_timer.stop()
         self._monitor_worker = None
@@ -347,7 +367,7 @@ class DashboardPage(BasePage):
         # Loading waits ONLY on fast tasks. Network scan (get_top_devices)
         # takes 10-30s scanning 254 addresses — we DON'T block on it. It
         # fills in the background after the app is revealed.
-        self._pending = {"internet", "uptime", "summary", "wifi", "resources"}
+        self._pending = {"internet", "sysinfo", "summary", "wifi", "resources"}
 
         self._load_internet_status()
         self._load_uptime()
@@ -372,8 +392,6 @@ class DashboardPage(BasePage):
         self._resource_timer.start()
         self._ping_timer.start()
         self._info_timer.start()
-        if self._boot_epoch is not None:
-            self._uptime_timer.start()
 
     def _show_all_activity(self):
         """Open the full activity history in a dialog."""
@@ -423,6 +441,7 @@ class DashboardPage(BasePage):
         self._internet_online = bool(reachable)
         if not reachable:
             self.card_internet.set_value("Offline", color=Theme.DANGER)
+            self.card_loss.set_tile_tint("#351a24", "#ff6b8a")
             self.card_loss.set_value("100", "%", color=Theme.DANGER, subtitle="No response")
             self.card_loss.push_spark(100)
             return
@@ -430,9 +449,15 @@ class DashboardPage(BasePage):
         avg_loss = round(sum(r["loss"] for r in reachable) / len(reachable), 1)
         self.card_internet.set_value("Connected", color=Theme.SUCCESS,
                                      subtitle=f"Ping: {avg_ping} ms")
-        loss_color = Theme.SUCCESS if avg_loss < 1 else Theme.WARNING
+        if avg_loss < 1:
+            loss_color, tile, note = Theme.SUCCESS, ("#123528", "#33d6a6"), "Excellent"
+        elif avg_loss < 5:
+            loss_color, tile, note = Theme.WARNING, ("#332916", "#f5b545"), "Fair"
+        else:
+            loss_color, tile, note = Theme.DANGER, ("#351a24", "#ff6b8a"), "Poor"
+        self.card_loss.set_tile_tint(*tile)
         self.card_loss.set_value(f"{avg_loss}", "%", color=loss_color,
-                                 subtitle="Excellent" if avg_loss < 1 else "Fair")
+                                 subtitle=note)
         # Feed sparklines: ping trend on the internet card, loss on its card
         self.card_internet.push_spark(avg_ping)
         self.card_loss.push_spark(avg_loss)
@@ -441,28 +466,21 @@ class DashboardPage(BasePage):
         w = OneshotWorker(self.core.get_system_info)
         w.result.connect(self._on_sysinfo)
         w.error.connect(lambda e: None)
-        w.done.connect(lambda: self._task_done("uptime"))
+        w.done.connect(lambda: self._task_done("sysinfo"))
         self.register_worker(w)
         w.start()
 
     def _on_sysinfo(self, data: dict):
-        # Compute boot epoch from reported uptime so we can tick locally.
+        # System info is still fetched (used elsewhere); the uptime card was
+        # replaced by the live "Devices online" count, so there's nothing to
+        # tick here anymore.
         d = data.get("days", 0)
         h = data.get("hours", 0)
         m = data.get("minutes", 0)
-        uptime_seconds = d * 86400 + h * 3600 + m * 60
-        self._boot_epoch = time.time() - uptime_seconds
-        self._tick_uptime()
+        self._boot_epoch = time.time() - (d * 86400 + h * 3600 + m * 60)
 
     def _tick_uptime(self):
-        if self._boot_epoch is None:
-            return
-        elapsed = int(time.time() - self._boot_epoch)
-        days = elapsed // 86400
-        hours = (elapsed % 86400) // 3600
-        minutes = (elapsed % 3600) // 60
-        self.card_uptime.set_value(f"{days}d {hours}h {minutes}m",
-                                   color=Theme.WARNING, subtitle="Since last boot")
+        pass
 
     def _load_summary(self):
         w = OneshotWorker(self.core.get_ethernet_info)
@@ -575,13 +593,17 @@ class DashboardPage(BasePage):
         self._devices_placeholder.show()
         w = OneshotWorker(self.core.get_top_devices, 12)
         w.result.connect(self._on_devices)
-        w.error.connect(lambda e: self._on_scan_error())
+        w.error.connect(lambda e: self._on_scan_error(e))
         w.done.connect(self._on_scan_done)
         self.register_worker(w)
         w.start()
 
-    def _on_scan_error(self):
-        self._devices_placeholder.setText("Scan unavailable")
+    def _on_scan_error(self, err=None):
+        from core.netwer_core import friendly_error
+        msg = friendly_error(err) if err else "Couldn't scan the network right now."
+        self._devices_placeholder.setText(msg)
+        self._devices_placeholder.setWordWrap(True)
+        self._devices_placeholder.show()
 
     def _on_scan_done(self):
         self._devices_scanning = False
@@ -590,7 +612,12 @@ class DashboardPage(BasePage):
 
     def _on_devices(self, data: dict):
         devices = data.get("devices", [])
+        # Update the "Devices online" stat card with the live count (orange).
+        self.card_devices.set_value(str(len(devices)), color=Theme.WARNING,
+                                    subtitle="On your network")
         if not devices:
+            self.card_devices.set_value("0", color=Theme.TEXT_MUTED,
+                                        subtitle="On your network")
             self._devices_placeholder.setText("No devices found")
             self._devices_placeholder.show()
             return
@@ -604,6 +631,27 @@ class DashboardPage(BasePage):
                      f"{len(devices)} devices found", kind="success")
         self._all_devices = devices
         self._maybe_update_map()
+
+    def _open_topology(self):
+        """Open the full-screen topology view with the current scan data."""
+        from ui.components.topology_dialog import TopologyDialog
+        gateway = getattr(self, "_gateway", "") or ""
+        devices = getattr(self, "_all_devices", None) or []
+        router_vendor = ""
+        for d in devices:
+            if d.get("ip") == gateway:
+                router_vendor = d.get("vendor", "") or ""
+                break
+        dlg = TopologyDialog(self.core, gateway, devices, router_vendor,
+                             online=getattr(self, "_internet_online", True),
+                             parent=self)
+        dlg.exec()
+
+    def _open_device_details(self, device: dict):
+        """Open the details popup for a clicked radar node (ports, MAC, etc.)."""
+        from ui.components.device_details_dialog import DeviceDetailsDialog
+        dlg = DeviceDetailsDialog(self.core, device, self)
+        dlg.exec()
 
     def _maybe_update_map(self):
         """Update the topology map once we have both gateway and devices."""
@@ -621,16 +669,10 @@ class DashboardPage(BasePage):
 
     @staticmethod
     def device_display_name(dev: dict) -> str:
-        """Best available name for a device: real hostname, else the vendor
-        (e.g. 'LG Electronics'), else the IP. Avoids showing 'Unknown' when
-        we actually know the manufacturer."""
-        hostname = (dev.get("hostname") or "").strip()
-        if hostname and hostname.lower() not in ("unknown", "?", ""):
-            return hostname
-        vendor = (dev.get("vendor") or "").strip()
-        if vendor and vendor.lower() != "unknown":
-            return vendor
-        return dev.get("ip", "?")
+        """Delegates to the one canonical implementation so custom names,
+        hostname and vendor rules stay identical everywhere."""
+        from ui.widgets.network_map import device_display_name as _n
+        return _n(dev)
 
     def _device_row(self, dev: dict) -> QWidget:
         w = QWidget()
