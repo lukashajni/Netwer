@@ -82,6 +82,14 @@ class Theme:
     PAD = 16
     GAP = 14
 
+    # ── UI density / rezolucija ────────────────────────────────
+    #: Trenutni profil gustoće sučelja ("compact" / "standard" / "large"),
+    #: biran u Settings prema rezoluciji ekrana. Mijenja veličinu sidebara,
+    #: topbara, razmaka i fontova — vidi apply_ui_scale().
+    UI_SCALE = "standard"
+    SIDEBAR_WIDTH = 230
+    TOPBAR_HEIGHT = 60
+
     # ── Glass / gradijent tokeni ───────────────────────────────
     # Qt kompozitira poluprozirne (rgba) stylesheet pozadine preko VLASTITE
     # neprozirne podloge widgeta (tamna), pa prave rgba kartice ispadnu kao
@@ -240,6 +248,45 @@ def current_accent_name():
 
 def is_dark():
     return THEMES.get(_current_theme, {}).get("mode", "dark") == "dark"
+
+
+# ══════════════════════════════════════════
+# UI DENSITY / RESOLUTION PROFILES
+# ══════════════════════════════════════════
+#: Sidebar width, top bar height, spacing, corner radii and font sizes for
+#: each density. "standard" matches the original hand-tuned defaults, so
+#: switching back to it is always exact, never a drift from repeated scaling.
+UI_SCALE_PROFILES = {
+    "compact": {
+        "SIDEBAR_WIDTH": 200, "TOPBAR_HEIGHT": 54,
+        "GAP": 11, "PAD": 13, "RADIUS_CARD": 13, "RADIUS_CONTROL": 9,
+        "FONT_SIZE_TITLE": 21, "FONT_SIZE_HEADING": 14,
+        "FONT_SIZE_BODY": 12, "FONT_SIZE_SMALL": 11, "FONT_SIZE_TINY": 10,
+    },
+    "standard": {
+        "SIDEBAR_WIDTH": 230, "TOPBAR_HEIGHT": 60,
+        "GAP": 14, "PAD": 16, "RADIUS_CARD": 16, "RADIUS_CONTROL": 11,
+        "FONT_SIZE_TITLE": 24, "FONT_SIZE_HEADING": 15,
+        "FONT_SIZE_BODY": 13, "FONT_SIZE_SMALL": 12, "FONT_SIZE_TINY": 11,
+    },
+    "large": {
+        "SIDEBAR_WIDTH": 254, "TOPBAR_HEIGHT": 66,
+        "GAP": 16, "PAD": 18, "RADIUS_CARD": 18, "RADIUS_CONTROL": 12,
+        "FONT_SIZE_TITLE": 27, "FONT_SIZE_HEADING": 17,
+        "FONT_SIZE_BODY": 14, "FONT_SIZE_SMALL": 13, "FONT_SIZE_TINY": 12,
+    },
+}
+
+
+def apply_ui_scale(profile: str) -> None:
+    """Switch the sidebar/topbar size, spacing and font sizes to a density
+    profile. Like apply_theme(), this only mutates Theme.* — the caller (main
+    window) still has to rebuild the UI (_reskin_all) for widgets built
+    earlier to pick the new values up."""
+    values = UI_SCALE_PROFILES.get(profile, UI_SCALE_PROFILES["standard"])
+    Theme.UI_SCALE = profile if profile in UI_SCALE_PROFILES else "standard"
+    for key, value in values.items():
+        setattr(Theme, key, value)
 
 
 def card_bg():

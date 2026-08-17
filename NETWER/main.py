@@ -156,12 +156,24 @@ def main() -> int:
     app.setOrganizationName("Lukas Hajneman")
 
     # Load the user's saved theme/accent before building any styles.
-    from app.theme import apply_theme, apply_accent, Theme
+    from app.theme import apply_theme, apply_accent, apply_ui_scale, Theme
     from app.store import store
+    from app import display as display_res
     saved_theme = store.get_setting("theme", "Dark Blue")
     saved_accent = store.get_setting("accent", "Default")
     apply_theme(saved_theme, saved_accent)
     Theme.GLASS_ENABLED = store.get_setting("glass_enabled", True)
+
+    # Pick the UI density (sidebar/topbar/font sizes) that matches the saved
+    # resolution before anything is built, so the very first frame is already
+    # correct instead of flashing "standard" then rebuilding.
+    saved_resolution = store.get_setting("resolution", "auto")
+    screen = app.primaryScreen()
+    screen_geo = screen.availableGeometry() if screen else None
+    screen_w = screen_geo.width() if screen_geo else 1920
+    screen_h = screen_geo.height() if screen_geo else 1080
+    res_w, _res_h = display_res.resolve(saved_resolution, screen_w, screen_h)
+    apply_ui_scale(display_res.profile_for(res_w))
 
     app.setStyleSheet(build_global_qss())
 
@@ -199,6 +211,7 @@ def main() -> int:
     app.setFont(font)
 
     window = MainWindow(netwer_core)
+    window.apply_resolution(saved_resolution, persist=False)
     _register_pages(window)
     window.start("dashboard")
     window.show()

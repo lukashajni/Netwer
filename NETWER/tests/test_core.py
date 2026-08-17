@@ -947,5 +947,42 @@ class TestSearchDropdownStability(unittest.TestCase):
         self._tb._on_suggestion_activated("no such entry")
 
 
+class TestDisplayProfiles(unittest.TestCase):
+    def test_profile_thresholds(self):
+        from app import display as d
+        self.assertEqual(d.profile_for(1366), "compact")
+        self.assertEqual(d.profile_for(1920), "standard")
+        self.assertEqual(d.profile_for(2560), "large")
+
+    def test_resolve_preset_vs_auto(self):
+        from app import display as d
+        self.assertEqual(d.resolve("1366x768", 1920, 1080), (1366, 768))
+        self.assertEqual(d.resolve("auto", 1920, 1080), (1920, 1080))
+        self.assertEqual(d.resolve("bogus-key", 1920, 1080), (1920, 1080))
+
+    def test_window_geometry_never_exceeds_screen(self):
+        from app import display as d
+        for w, h in [(1280, 720), (1366, 768), (1920, 1080), (3840, 2160)]:
+            ww, wh, mw, mh = d.window_geometry(w, h)
+            self.assertLessEqual(ww, w)
+            self.assertLessEqual(wh, h)
+            self.assertLessEqual(mw, ww)
+            self.assertLessEqual(mh, wh)
+
+    def test_apply_ui_scale_round_trip(self):
+        from app.theme import Theme, apply_ui_scale
+        apply_ui_scale("compact")
+        self.assertEqual(Theme.SIDEBAR_WIDTH, 200)
+        apply_ui_scale("standard")
+        self.assertEqual(Theme.SIDEBAR_WIDTH, 230)
+        self.assertEqual(Theme.TOPBAR_HEIGHT, 60)
+
+    def test_apply_ui_scale_unknown_falls_back_to_standard(self):
+        from app.theme import Theme, apply_ui_scale
+        apply_ui_scale("nonsense")
+        self.assertEqual(Theme.UI_SCALE, "standard")
+        self.assertEqual(Theme.SIDEBAR_WIDTH, 230)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

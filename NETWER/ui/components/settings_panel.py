@@ -23,6 +23,7 @@ class SettingsPanel(QWidget):
     theme_changed = pyqtSignal(str)      # theme name
     accent_changed = pyqtSignal(str)     # accent name
     glass_toggled = pyqtSignal(bool)     # glass effect on/off
+    resolution_changed = pyqtSignal(str)         # resolution key, e.g. "auto"
     schedule_toggled = pyqtSignal(bool)          # background scanning on/off
     schedule_interval_changed = pyqtSignal(int)  # interval in minutes
     closed = pyqtSignal()
@@ -95,6 +96,23 @@ class SettingsPanel(QWidget):
             "Glass effect (blur-style cards)",
             store.get_setting("glass_enabled", True),
             lambda v: self.glass_toggled.emit(v))
+
+        # ── Display ────────────────────────────────────────────
+        # Lets the window size and UI density (sidebar/topbar/fonts) match a
+        # target screen — auto-detects by default, or can be pinned to a
+        # specific resolution when preparing a demo for a projector or a
+        # particular monitor.
+        self._section("Display")
+        from app import display as display_res
+        self._resolution_labels = list(display_res.RESOLUTIONS.values())
+        self._resolution_keys = list(display_res.RESOLUTIONS.keys())
+        current_res_key = store.get_setting("resolution", "auto")
+        current_res_label = display_res.RESOLUTIONS.get(
+            current_res_key, display_res.RESOLUTIONS["auto"])
+        self.resolution_combo = self._combo(
+            "Resolution", self._resolution_labels, current_res_label,
+            self._on_resolution)
+        self.resolution_combo.setFixedWidth(190)
 
         # ── Scanning ───────────────────────────────────────────
         self._section("Scanning")
@@ -212,6 +230,13 @@ class SettingsPanel(QWidget):
 
     def _on_accent(self, name):
         self.accent_changed.emit(name)
+
+    def _on_resolution(self, label):
+        try:
+            idx = self._resolution_labels.index(label)
+        except ValueError:
+            return
+        self.resolution_changed.emit(self._resolution_keys[idx])
 
     def _clear_data(self):
         store.clear_recent_hosts()

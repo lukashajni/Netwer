@@ -94,7 +94,7 @@ class Sidebar(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setFixedWidth(230)
+        self.setFixedWidth(Theme.SIDEBAR_WIDTH)
         self.setObjectName("Sidebar")
         self.setStyleSheet(
             f"#Sidebar {{ background: {card_bg()};"
@@ -213,6 +213,7 @@ class Sidebar(QWidget):
         self._status_row = None
 
     def refresh_theme(self) -> None:
+        self.setFixedWidth(Theme.SIDEBAR_WIDTH)
         self.setStyleSheet(
             f"#Sidebar {{ background: {card_bg()};"
             f"border: 1px solid {card_border()};"

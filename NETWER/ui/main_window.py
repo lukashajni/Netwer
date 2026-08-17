@@ -84,6 +84,7 @@ class MainWindow(QMainWindow):
         self.settings_panel.theme_changed.connect(self._change_theme)
         self.settings_panel.accent_changed.connect(self._change_accent)
         self.settings_panel.glass_toggled.connect(self._change_glass)
+        self.settings_panel.resolution_changed.connect(self._change_resolution)
         self.settings_panel.setMaximumWidth(0)
         root.addWidget(self.settings_panel)
 
@@ -173,6 +174,38 @@ class MainWindow(QMainWindow):
         Theme.GLASS_ENABLED = bool(enabled)
         store.set_setting("glass_enabled", bool(enabled))
         self._reskin_all()
+
+    def apply_resolution(self, key: str, persist: bool = True) -> None:
+        """Size and centre the window for a target resolution, and switch the
+        UI density (sidebar/topbar/fonts) to match it. 'auto' uses whatever
+        screen the window is actually on; a specific key (e.g. '1366x768')
+        pins it to that size regardless — useful for testing a target display
+        or preparing a demo ahead of time."""
+        from app import display, theme as theme_mod
+        from PyQt6.QtWidgets import QApplication
+
+        screen = self.screen() or QApplication.primaryScreen()
+        geo = screen.availableGeometry() if screen else None
+        screen_w = geo.width() if geo else 1920
+        screen_h = geo.height() if geo else 1080
+
+        width, height = display.resolve(key, screen_w, screen_h)
+        theme_mod.apply_ui_scale(display.profile_for(width))
+
+        win_w, win_h, min_w, min_h = display.window_geometry(width, height)
+        self.setMinimumSize(min_w, min_h)
+        self.resize(win_w, win_h)
+        if geo is not None:
+            x = geo.x() + max(0, (geo.width() - win_w) // 2)
+            y = geo.y() + max(0, (geo.height() - win_h) // 2)
+            self.move(x, y)
+
+        if persist:
+            store.set_setting("resolution", key)
+        self._reskin_all()
+
+    def _change_resolution(self, key: str):
+        self.apply_resolution(key)
 
     def _reskin_all(self):
         """Re-apply the global stylesheet and rebuild pages so every widget

@@ -73,7 +73,7 @@ class TopBar(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setFixedHeight(60)
+        self.setFixedHeight(Theme.TOPBAR_HEIGHT)
         self._unread = 0
         self._build()
         self.refresh_theme()
@@ -228,6 +228,7 @@ class TopBar(QWidget):
     # ── Theme application ──────────────────────────────────────
     def refresh_theme(self):
         """Re-skin the bar to the current theme (called after a theme change)."""
+        self.setFixedHeight(Theme.TOPBAR_HEIGHT)
         self.setObjectName("TopBar")
         self.setStyleSheet(
             f"#TopBar {{ background: {card_bg()};"
