@@ -984,5 +984,51 @@ class TestDisplayProfiles(unittest.TestCase):
         self.assertEqual(Theme.SIDEBAR_WIDTH, 230)
 
 
+class TestStartupSidebarBuild(unittest.TestCase):
+    """Regression test: apply_resolution() used to trigger a full page
+    rebuild even before pages were registered, so main.py's normal startup
+    sequence (apply_resolution -> _register_pages) built the sidebar twice."""
+
+    @classmethod
+    def setUpClass(cls):
+        import os
+        os.environ["QT_QPA_PLATFORM"] = "offscreen"
+        from PyQt6.QtWidgets import QApplication
+        cls._app = QApplication.instance() or QApplication([])
+
+    def test_startup_sequence_does_not_duplicate_sidebar(self):
+        from PyQt6.QtWidgets import QLabel
+        from core import netwer_core
+        import main as app_main
+        from ui.main_window import MainWindow
+
+        w = MainWindow(netwer_core)
+        w.apply_resolution("auto", persist=False)   # runs BEFORE pages exist
+        app_main._register_pages(w)
+        w.start("dashboard")
+
+        titles = [lbl.text() for lbl in w.sidebar.findChildren(QLabel)
+                  if lbl.text() == "Ping Sweep"]
+        self.assertEqual(len(titles), 1)
+
+    def test_live_resolution_change_does_not_accumulate(self):
+        from PyQt6.QtWidgets import QLabel
+        from core import netwer_core
+        import main as app_main
+        from ui.main_window import MainWindow
+
+        w = MainWindow(netwer_core)
+        w.apply_resolution("auto", persist=False)
+        app_main._register_pages(w)
+        w.start("dashboard")
+
+        for key in ("1366x768", "1920x1080", "2560x1440"):
+            w.apply_resolution(key)
+
+        titles = [lbl.text() for lbl in w.sidebar.findChildren(QLabel)
+                  if lbl.text() == "Port Scanner"]
+        self.assertEqual(len(titles), 1)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

@@ -202,7 +202,14 @@ class MainWindow(QMainWindow):
 
         if persist:
             store.set_setting("resolution", key)
-        self._reskin_all()
+        # Only trigger a full rebuild when there's something already built to
+        # rebuild. At startup this is called BEFORE _register_pages(), so
+        # self._pages is still empty — the caller is about to build pages
+        # fresh anyway, and they'll already pick up the Theme values we just
+        # set above. Rebuilding here too used to register every page twice,
+        # which duplicated every sidebar entry.
+        if self._pages:
+            self._reskin_all()
 
     def _change_resolution(self, key: str):
         self.apply_resolution(key)
