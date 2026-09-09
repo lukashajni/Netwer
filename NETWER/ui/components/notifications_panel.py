@@ -130,7 +130,7 @@ class NotificationsPanel(QWidget):
         row = QFrame()
         row.setStyleSheet(
             f"QFrame {{ background: {Theme.BG_CARD};"
-            f"border: 1px solid {Theme.BORDER}; border-radius: 8px; }}")
+            f"border-radius: 8px}}")
         rl = QHBoxLayout(row)
         rl.setContentsMargins(12, 10, 12, 10)
         rl.setSpacing(10)
