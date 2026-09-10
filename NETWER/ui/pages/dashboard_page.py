@@ -296,7 +296,7 @@ class DashboardPage(BasePage):
 
         from ui.widgets.recent_activity import RecentActivity
         self.activity_card = Card("Recent Activity", "check")
-        self.activity_card.setFixedHeight(150)
+        self.activity_card.setFixedHeight(130)
 
         self.btn_view_all = QPushButton("View All")
         self.btn_view_all.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -313,7 +313,7 @@ class DashboardPage(BasePage):
         right_col.addWidget(self.activity_card)
 
         self.resources_card = Card("System Resources", "resources")
-        self.resources_card.setFixedHeight(BOTTOM_HEIGHT - 150 - Theme.GAP)
+        self.resources_card.setFixedHeight(BOTTOM_HEIGHT - 130 - Theme.GAP)
         gauges = QHBoxLayout()
         gauges.setSpacing(0)
         gauges.setContentsMargins(8, 0, 8, 0)
