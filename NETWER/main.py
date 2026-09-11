@@ -1,14 +1,6 @@
 """
-NETWER — Ulazna tocka aplikacije.
+NETWER — Main point of aplication.
 
-Pokreni s:  python main.py
-
-Ovdje se:
-  1. kreira QApplication
-  2. postavi globalni stil (font + reset Qt defaulta koji kvare tamnu temu)
-  3. instancira backend (netwer_core)
-  4. sklopi MainWindow i registriraju stranice
-  5. pokrene event loop
 """
 
 import sys

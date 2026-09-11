@@ -70,6 +70,7 @@ class BasePage(QWidget):
         title.setStyleSheet(
             f"color: {Theme.TEXT_PRIMARY}; font-family: {Theme.FONT_FAMILY};"
             f"font-size: {Theme.FONT_SIZE_TITLE}px; font-weight: 600;"
+            f"background: transparent;"
         )
         self._root.addWidget(title)
 
@@ -78,6 +79,7 @@ class BasePage(QWidget):
             sub.setStyleSheet(
                 f"color: {Theme.TEXT_MUTED}; font-family: {Theme.FONT_FAMILY};"
                 f"font-size: {Theme.FONT_SIZE_SMALL}px;"
+                f"background: transparent;"
             )
             self._root.addWidget(sub)
 
