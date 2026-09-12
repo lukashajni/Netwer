@@ -22,3 +22,7 @@ Thumbs.db
 *.pdf
 reports_output/
 *.log
+
+# NETWER runtime data (persistent store, generated icon cache)
+netwer_data.json
+netwer_icons/
