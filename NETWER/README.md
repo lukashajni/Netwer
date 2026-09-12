@@ -4,8 +4,6 @@
 
 # Netwer - Network Diagnostic Suite
 
----
-
 Everything you need to diagnose your home or local network — in one desktop application.
 
 ![Python](https://img.shields.io/badge/python-3.13-blue?logo=python\&logoColor=white)
@@ -20,8 +18,6 @@ Everything you need to diagnose your home or local network — in one desktop ap
 
 ## About the Project
 
----
-
 NETWER is a free desktop application for network monitoring and diagnostics, built with **Python 3.13** and a modern **PyQt6** interface.
 
 It is designed as an all-in-one alternative to tools like **GlassWire**, **Fing**, and parts of **Wireshark's** functionality — without subscriptions, advertisements, or unnecessary complexity.
@@ -32,8 +28,6 @@ It explains network issues in plain English instead of showing only latency numb
 
 
 ## Features
-
----
 
 ### Live Network Monitoring
 
@@ -71,8 +65,6 @@ It explains network issues in plain English instead of showing only latency numb
 
 ## Screenshots
 
----
-
 ### Dashboard
 
 *Everything important in one place.*
@@ -97,11 +89,7 @@ It explains network issues in plain English instead of showing only latency numb
   <img src="docs/screenshots/monitor.png" width="720" alt="Network Radar"/>
 </p>
 
----
-
 ## Technologies
-
----
 
 | Layer                 | Technology               |
 | --------------------- | ------------------------ |
@@ -116,11 +104,7 @@ It explains network issues in plain English instead of showing only latency numb
 | Background Workers    | `QThread`                |
 | Testing               | `unittest`               |
 
----
-
 ## Installation
-
----
 
 ```bash
 git clone https://github.com/lukashajni/Netwer.git
@@ -135,8 +119,6 @@ python main.py
 > Some features (network adapter details, Wi-Fi information, ARP table, and diagnostics) rely on Windows utilities such as `ipconfig`, `netsh`, and `arp`, making Windows the recommended platform.
 
 ## Project Structure
-
----
 
 ```text
 NETWER/
@@ -167,8 +149,6 @@ NETWER/
 
 ## Testing
 
----
-
 Run the automated test suite:
 
 ```bash
@@ -184,9 +164,8 @@ python -m unittest tests.test_core -v
 * UI stability.
 
 Tests can run independently without launching the full application.
-## Roadmap
 
----
+## Roadmap
 
 * [ ] Windows `.exe` installer (PyInstaller).
 * [ ] Background monitoring with System Tray support and historical statistics.
@@ -197,8 +176,6 @@ Tests can run independently without launching the full application.
 
 ## Contributing
 
----
-
 Pull requests are welcome.
 
 For major changes, please open an Issue first so we can discuss the proposed direction before implementation.
@@ -206,17 +183,11 @@ For major changes, please open an Issue first so we can discuss the proposed dir
 
 ## License
 
----
-
 This project is licensed under the **MIT License**. See the `LICENSE` file for details.
 
 
 ## Netwer Team
 
----
-
-**Lukas Hajneman**
-**Jan Sven Bukovski**
+**Lukas Hajneman |**
+**Jan Sven Bukovski |**
 **Erik Celjak**
-
-GitHub: https://github.com/lukashajni
