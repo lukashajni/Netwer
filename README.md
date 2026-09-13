@@ -4,11 +4,9 @@
 
 # Netwer - Network Diagnostic Suite
 
-Everything you need to diagnose your home or local network — in one desktop application.
-
 ![Python](https://img.shields.io/badge/python-3.13-blue?logo=python\&logoColor=white)
 ![PyQt6](https://img.shields.io/badge/PyQt-6-41cd52?logo=qt\&logoColor=white)
-![Platform](https://img.shields.io/badge/platform-Windows-0078D6?logo=windows\&logoColor=white)
+![Platform](https://img.shields.io/badge/platform-Windows-0078D6?logo=Windows\&logoColor=white)
 ![Platform](https://img.shields.io/badge/platform-Linux-ffc000?logo=linux\&logoColor=white)
 ![Tests](https://img.shields.io/badge/tests-114%20passing-33d6a6)
 ![License](https://img.shields.io/badge/license-MIT-lightgrey)
@@ -114,7 +112,7 @@ pip install -r requirements.txt
 python main.py
 ```
 
-> Developed and tested on **Windows 11**.
+> Developed and tested on **Windows 11** and **Pop!_OS**.
 >
 > Some features (network adapter details, Wi-Fi information, ARP table, and diagnostics) rely on Windows utilities such as `ipconfig`, `netsh`, and `arp`, making Windows the recommended platform.
 
