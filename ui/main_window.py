@@ -47,12 +47,12 @@ class MainWindow(QMainWindow):
         outer.setContentsMargins(20, 20, 20, 20)
         outer.setSpacing(18)
 
-        # ── Left: floating sidebar panel (owns the NETWER logo) ──
+        # Left: floating sidebar panel - NETWER logo
         self.sidebar = Sidebar()
         self.sidebar.navigate.connect(self._navigate)
         outer.addWidget(self.sidebar)
 
-        # ── Right: a column with the search top bar, then content ──
+        # Right: a column with the search top bar, then content
         right = QWidget()
         right_col = QVBoxLayout(right)
         right_col.setContentsMargins(0, 0, 0, 0)
@@ -68,7 +68,7 @@ class MainWindow(QMainWindow):
         self.topbar.suggestion_provider = self.search_suggestions
         right_col.addWidget(self.topbar)
 
-        # Content row: the page stack, plus the sliding panels on the right.
+        # Content row: the page stack, + the sliding panels on the right.
         row = QWidget()
         root = QHBoxLayout(row)
         root.setContentsMargins(0, 0, 0, 0)
@@ -120,7 +120,7 @@ class MainWindow(QMainWindow):
         self._overlay.hide()
         self._loading_active = False
 
-    # ── Sliding panels ─────────────────────────────────────────
+    # -- Sliding panels --
     def _toggle_settings(self):
         self._show_panel(None if self._open_panel == "settings" else "settings")
 
@@ -155,7 +155,7 @@ class MainWindow(QMainWindow):
         else:
             self.scheduler.stop()
 
-    # ── Theme switching ────────────────────────────────────────
+    # -- Theme switching --
     def _change_theme(self, theme_name):
         from app.theme import current_accent_name
         # Apply the theme, then re-apply the current accent on top so a
@@ -170,7 +170,7 @@ class MainWindow(QMainWindow):
         self._reskin_all()
 
     def _change_glass(self, enabled):
-        """Toggle the glass (translucent-card) look on or off."""
+        # Toggle the glass (translucent-card) look on or off.
         Theme.GLASS_ENABLED = bool(enabled)
         store.set_setting("glass_enabled", bool(enabled))
         self._reskin_all()
@@ -179,8 +179,7 @@ class MainWindow(QMainWindow):
         """Size and centre the window for a target resolution, and switch the
         UI density (sidebar/topbar/fonts) to match it. 'auto' uses whatever
         screen the window is actually on; a specific key (e.g. '1366x768')
-        pins it to that size regardless — useful for testing a target display
-        or preparing a demo ahead of time."""
+        pins it to that size regardless"""
         from app import display, theme as theme_mod
         from PyQt6.QtWidgets import QApplication
 
@@ -202,12 +201,12 @@ class MainWindow(QMainWindow):
 
         if persist:
             store.set_setting("resolution", key)
-        # Only trigger a full rebuild when there's something already built to
-        # rebuild. At startup this is called BEFORE _register_pages(), so
-        # self._pages is still empty — the caller is about to build pages
-        # fresh anyway, and they'll already pick up the Theme values we just
-        # set above. Rebuilding here too used to register every page twice,
-        # which duplicated every sidebar entry.
+        """ Only trigger a full rebuild when there's something already built to
+        rebuild. At startup this is called BEFORE _register_pages(), so
+        self._pages is still empty - the caller is about to build pages
+        fresh anyway, and they'll already pick up the Theme values we just
+        set above. Rebuilding here too used to register every page twice,
+        which duplicated every sidebar entry. """
         if self._pages:
             self._reskin_all()
 
@@ -228,12 +227,12 @@ class MainWindow(QMainWindow):
         self._rebuild_pages()
 
     def _rebuild_pages(self):
-        """Recreate every page so inline stylesheets reflect the new theme."""
+        # Recreate every page so inline stylesheets reflect the new theme.
         import main as app_main
         current = self._current_key
-        # Stop workers on EVERY page (not just the current one) before tearing
-        # down — a live background thread calling back into a deleted widget
-        # segfaults. on_leave() cancels each page's registered workers.
+        """ Stop workers on EVERY page (not just the current one) before tearing
+        down - a live background thread calling back into a deleted widget
+        segfaults. on_leave() cancels each page's registered workers. """
         for page in self._pages.values():
             try:
                 page.on_leave()
@@ -258,19 +257,19 @@ class MainWindow(QMainWindow):
         app_main._register_pages(self)
         if current:
             self.start(current)
-        # Re-warm the other pages in the background (rebuild reset their
-        # one-time load flags, so their cached data was thrown away).
+        """Re-warm the other pages in the background (rebuild reset their
+        one-time load flags, so their cached data was thrown away). """
         from PyQt6.QtCore import QTimer
         QTimer.singleShot(400, self._preload_pages)
 
-    # ── Loading overlay covers the whole window ────────────────
+    # -- Loading overlay covers the whole window --
     def resizeEvent(self, event):
         super().resizeEvent(event)
         if self._overlay is not None:
             self._overlay.setGeometry(self.rect())
 
     def begin_loading(self) -> None:
-        """Show the full-window loading screen."""
+        # Show the full-window loading screen.
         self._loading_active = True
         self._overlay.setGeometry(self.rect())
         self._overlay.show_loading()
@@ -279,14 +278,14 @@ class MainWindow(QMainWindow):
         self._overlay.set_progress(text)
 
     def end_loading(self) -> None:
-        """Fade out the loading screen, revealing the populated app."""
+        # Fade out the loading screen, revealing the populated app.
         if not self._loading_active:
             return
         self._loading_active = False
         self._overlay.finish()
-        # Once the app is visible, warm up the other pages in the background
-        # so their data is already there when the user clicks them (no
-        # "loading…" on first visit). Only on real startup, not theme rebuilds.
+        """ Once the app is visible, warm up the other pages in the background
+        so their data is already there when the user clicks them (no
+        "loading…" on first visit). Only on real startup, not theme rebuilds. """
         if not getattr(self, "_preloaded", False):
             self._preloaded = True
             from PyQt6.QtCore import QTimer
@@ -312,7 +311,7 @@ class MainWindow(QMainWindow):
         except Exception:
             pass
 
-    # ── Page registration ──────────────────────────────────────
+    # -- Page registration --
     def register_page(self, key: str, icon_name: str, page: BasePage,
                       subtitle: str = "") -> None:
         self._pages[key] = page
@@ -322,7 +321,7 @@ class MainWindow(QMainWindow):
         page.set_window(self)
 
     def register_section(self, label: str) -> None:
-        """Dodaj naslov sekcije u sidebar prije sljedećih stranica."""
+        # Add the section's title in the side bar before the following pages 
         self.sidebar.add_section(label)
 
     def finalize_sidebar(self) -> None:
@@ -331,8 +330,8 @@ class MainWindow(QMainWindow):
 
     def _register_shortcuts(self) -> None:
         """Global keyboard shortcuts:
-          Ctrl+1..9  → jump to the Nth registered page
-          Esc        → tell the current page to stop its running task
+          Ctrl+1..9 - jump to the Nth registered page
+          Esc - tell the current page to stop its running task
         """
         from PyQt6.QtGui import QShortcut, QKeySequence
         keys = list(self._pages.keys())
@@ -343,7 +342,7 @@ class MainWindow(QMainWindow):
         esc.activated.connect(self._stop_current)
 
     def _stop_current(self) -> None:
-        """Esc → ask the current page to stop any running scan/ping."""
+        # Esc - ask the current page to stop any running scan/ping. 
         page = self._pages.get(self._current_key)
         if page is None:
             return
@@ -360,8 +359,8 @@ class MainWindow(QMainWindow):
         self.sidebar.set_active(first_key)
         self._navigate(first_key)
 
-    # ── Search ─────────────────────────────────────────────────
-    #: Keywords (lowercase) → page key. First match wins.
+    # -- Search --
+    #: Keywords (lowercase) - page key. First match wins.
     SEARCH_MAP = {
         "dashboard": "dashboard", "home": "dashboard", "overview": "dashboard",
         "network": "network", "ip": "network", "mac": "network",
@@ -381,7 +380,7 @@ class MainWindow(QMainWindow):
         "about": "about", "version": "about", "info": "about",
     }
 
-    #: Full page titles (lowercase) → key, so typing the visible name works.
+    #: Full page titles (lowercase) - key, so typing the visible name works.
     PAGE_TITLES = {
         "dashboard": "dashboard",
         "network information": "network", "network info": "network",
@@ -399,8 +398,8 @@ class MainWindow(QMainWindow):
         "about": "about",
     }
 
-    #: Everything the search box can offer, with the words that should match
-    #: it. Order here is the order suggestions appear when scores are equal.
+    """ Everything the search box can offer, with the words that should match
+    it. Order here is the order suggestions appear when scores are equal. """
     SEARCH_ITEMS = [
         ("dashboard", "Dashboard", "Overview of your network",
          ["dashboard", "home", "overview", "start"]),
@@ -432,9 +431,9 @@ class MainWindow(QMainWindow):
     ]
 
     def search_suggestions(self, query: str, limit: int = 7):
-        """Rank matches for what's been typed so far — used by the dropdown.
+        """Rank matches for what's been typed so far, this is used by the dropdown.
 
-        Returns a list of dicts: {kind: 'page'|'device', key, title, subtitle}.
+        Returns a list of dicts: {kind: 'page' or 'device', key, title, subtitle}.
         Scoring favours titles that start with the query, then keyword prefix
         matches, then anything containing it, so typing 'tr' surfaces
         Traceroute rather than something that merely contains 't','r'."""
@@ -488,7 +487,7 @@ class MainWindow(QMainWindow):
         return results
 
     def open_suggestion(self, item: dict) -> None:
-        """Act on a suggestion the user picked from the dropdown."""
+        # Act on a suggestion the user picked from the dropdown. 
         if not item:
             return
         if item.get("kind") == "device":
@@ -504,7 +503,7 @@ class MainWindow(QMainWindow):
             self._navigate(key)
 
     def _find_device(self, q: str):
-        """Look for a discovered device matching the query — an IP address, or
+        """Look for a discovered device matching the query - an IP address, or
         part of its name/hostname/vendor/MAC. Returns the device dict or None."""
         import re
         dash = self._pages.get("dashboard")
@@ -539,7 +538,7 @@ class MainWindow(QMainWindow):
     def _on_search(self, query: str) -> None:
         """Jump to the tool that best matches the typed query. Tolerant of
         case, extra spaces, plurals and small typos, and matches multi-word
-        names ('speed test' → Speed Test) as well as single keywords. Also
+        names ('speed test' - Speed Test) as well as single keywords. Also
         finds discovered devices by IP or name."""
         import difflib
         raw = query.strip().lower()
@@ -548,7 +547,7 @@ class MainWindow(QMainWindow):
             return
 
         # A device match takes priority only when the query is clearly not a
-        # tool name — otherwise "ping" would open a device called "ping".
+        # tool name - otherwise "ping" would open a device called "ping".
         if q not in self.PAGE_TITLES and q not in self.SEARCH_MAP:
             dev = self._find_device(q)
             if dev is not None:
@@ -566,10 +565,10 @@ class MainWindow(QMainWindow):
         if not target:
             target = self.SEARCH_MAP.get(q)
         # 3) any word of the query is a keyword (handles "run a ping", "show
-        #    wifi signal") — first strong hit wins.
+        #    wifi signal") - first strong hit wins.
         if not target:
             for word in q.split():
-                word = word.rstrip("s")   # crude plural strip: ports→port
+                word = word.rstrip("s")   # crude plural strip: ports -> port
                 if word in self.SEARCH_MAP:
                     target = self.SEARCH_MAP[word]
                     break
@@ -587,7 +586,7 @@ class MainWindow(QMainWindow):
             candidates = list(self.PAGE_TITLES.keys()) + list(self.SEARCH_MAP.keys())
             close = difflib.get_close_matches(q, candidates, n=1, cutoff=0.7)
             if not close and " " not in q:
-                # try the last word alone (e.g. "the ping tool" → "ping")
+                # try the last word alone (e.g. "the ping tool" - "ping")
                 close = difflib.get_close_matches(
                     q.split()[-1], candidates, n=1, cutoff=0.75)
             if close:
@@ -601,7 +600,7 @@ class MainWindow(QMainWindow):
             notifications.push(
                 "Search", f"No tool matches \u201c{query}\u201d.", kind="info")
 
-    # ── Navigation ─────────────────────────────────────────────
+    # -- Navigation --
     def _navigate(self, key: str) -> None:
         if key not in self._pages or key == self._current_key:
             return

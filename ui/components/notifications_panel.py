@@ -44,7 +44,7 @@ class NotificationsPanel(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        # Start collapsed; main_window animates maximumWidth 0 <-> WIDTH.
+        # Start collapsed, main_window animates maximumWidth 0 <-> WIDTH.
         self.setMinimumWidth(0)
         self.setMaximumWidth(0)
         self._build()
@@ -103,7 +103,7 @@ class NotificationsPanel(QWidget):
         outer.addWidget(scroll, 1)
 
     def refresh_list(self):
-        # Clear
+        # Clear the list
         while self._list.count():
             item = self._list.takeAt(0)
             w = item.widget()

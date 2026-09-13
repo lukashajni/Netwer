@@ -1,8 +1,8 @@
 """
-NETWER — Sidebar navigacija.
+NETWER — Sidebar navigation.
 
-Lijeva navigacijska traka: logo, popis stranica (s pravim ikonama),
-statusni indikator na dnu. Emitira navigate(key) na odabir stranice.
+Left navigation track: logo, list of pages (with real icons),
+status indicator on the bottom. Emits nvaigate(key) upon page selection.
 """
 
 from PyQt6.QtCore import Qt, pyqtSignal
@@ -15,7 +15,7 @@ from app.resources import Icons
 
 
 class NavItem(QFrame):
-    """Jedna klikabilna stavka navigacije. Klik emitira clicked(key)."""
+    # One clickable navigation item. A click emits 'clicked(key)'.
     clicked = pyqtSignal(str)
 
     def __init__(self, key: str, icon_name: str, title: str,
@@ -89,7 +89,7 @@ class NavItem(QFrame):
 
 
 class Sidebar(QWidget):
-    """Cijela lijeva navigacija. Emitira navigate(key)."""
+    # The whole left navigation bar. Emits 'navigate(key)'
     navigate = pyqtSignal(str)
 
     def __init__(self, parent=None):
@@ -107,7 +107,7 @@ class Sidebar(QWidget):
         lay.setContentsMargins(14, 18, 14, 14)
         lay.setSpacing(2)
 
-        # Brand block: gradient logo tile + wordmark, like the preview.
+        # Brand block: gradient logo tile + wordmark.
         self._brand = self._build_brand()
         lay.addWidget(self._brand)
 
@@ -156,9 +156,9 @@ class Sidebar(QWidget):
         return brand
 
     def add_section(self, label: str) -> None:
-        """Suptilni naslov sekcije koji grupira stavke ispod sebe
-        (npr. 'Tools' iznad DNS/Reverse DNS/Traceroute). Prazan label
-        ubaci samo mali razmak kao vizualni odjeljivač."""
+        """Subtle title of the section which groups items below it
+        (e.g 'Tools' above DNS/Reverse DNS/Traceroute). The empty label
+        adds a bit of padding which serves as a visual separator. """
         if not label:
             spacer = QLabel("")
             spacer.setFixedHeight(10)
@@ -178,7 +178,7 @@ class Sidebar(QWidget):
         item = NavItem(key, icon_name, title, subtitle)
         item.clicked.connect(self._on_item_clicked)
         self._items[key] = item
-        # Ubaci prije zavrsnog stretcha (ako postoji jos nije dodan)
+        # Add before the final stretch (if it exists, it means that it hasn't been added yet)
         self.layout().addWidget(item)
 
     def add_stretch_and_status(self) -> None:

@@ -1,7 +1,7 @@
 """Full-screen network topology view.
 
 Opens from the Network Radar card on the dashboard. Gives the whole local
-network room to breathe: a large live radar on the left, and a panel on the
+network room to breathe - a large live radar on the left, and a panel on the
 right listing every discovered device with its vendor, IP and response time.
 Clicking a device (in the radar or the list) opens the per-device details with
 its open ports.
@@ -33,7 +33,7 @@ except Exception:                                    # pragma: no cover
 
 
 class _DeviceRow(QFrame):
-    """One clickable device entry in the side panel."""
+    # One clickable device entry in the side panel.
 
     def __init__(self, dev, on_click, parent=None):
         super().__init__(parent)
@@ -129,7 +129,7 @@ class TopologyDialog(QDialog):
         body = QHBoxLayout()
         body.setSpacing(16)
 
-        # ── Left: the big radar ──
+        # -- Left: the big radar --
         radar_card = QFrame()
         radar_card.setObjectName("RadarCard")
         radar_card.setStyleSheet(
@@ -147,11 +147,11 @@ class TopologyDialog(QDialog):
         rl.addLayout(self._build_legend())
         body.addWidget(radar_card, 3)
 
-        # ── Right: device list ──
+        # -- Right: device list --
         body.addWidget(self._build_device_panel(), 1)
         root.addLayout(body, 1)
 
-        # ── Footer ──
+        # -- Footer --
         foot = QHBoxLayout()
         hint = QLabel("Click any device \u2014 in the radar or the list \u2014 "
                       "to see its details and open ports.")
@@ -170,7 +170,7 @@ class TopologyDialog(QDialog):
 
         self.resize(1180, 760)
 
-    # ── Pieces ──
+    # -- Pieces --
     def _build_header(self, gateway, online):
         head = QHBoxLayout()
         head.setSpacing(12)
@@ -297,7 +297,7 @@ class TopologyDialog(QDialog):
         pl.addWidget(area, 1)
         return panel
 
-    # ── Actions ──
+    # -- Actions --
     def _open_details(self, device: dict):
         from ui.components.device_details_dialog import DeviceDetailsDialog
         DeviceDetailsDialog(self._core, device, self).exec()

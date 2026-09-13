@@ -26,7 +26,7 @@ from app.resources import Icons
 class _GlowDot(QWidget):
     """A small status dot with a soft glow/halo around it, like the preview.
 
-    The glow is a radial gradient painted behind a solid dot — no OS shadow,
+    The glow is a radial gradient painted behind a solid dot - no OS shadow,
     so it renders identically on every platform."""
 
     def __init__(self, color: str, size: int = 16, parent=None):
@@ -83,7 +83,7 @@ class TopBar(QWidget):
         lay.setContentsMargins(16, 10, 14, 10)
         lay.setSpacing(12)
 
-        # Search field (visual, like the preview) — a read-only prompt that
+        # Search field (visual, like the preview) - a read-only prompt that
         # focuses the global search. Fills the available width.
         self._search = QLineEdit()
         self._search.setPlaceholderText(
@@ -94,7 +94,7 @@ class TopBar(QWidget):
         lay.addWidget(self._search, 1)
 
         # Live suggestions. Qt's own QCompleter owns the popup, its lifetime
-        # and the keyboard handling — a hand-rolled Qt.Popup list parented to
+        # and the keyboard handling - a hand-rolled Qt.Popup list parented to
         # the top bar was unstable: it grabs mouse/keyboard input and can
         # outlive its parent when pages are rebuilt.
         self._suggest_model = QStringListModel([])
@@ -105,12 +105,12 @@ class TopBar(QWidget):
         self._completer.activated[str].connect(self._on_suggestion_activated)
         self._search.setCompleter(self._completer)
         self._style_completer_popup()
-        #: popup label -> the suggestion dict behind it
+        # popup label -> the suggestion dict behind it
         self._suggest_index = {}
-        #: callable set by MainWindow: (text) -> list of suggestion dicts
+        # callable set by MainWindow: (text) -> list of suggestion dicts
         self.suggestion_provider = None
 
-        # Status pill — a glowing dot + "All systems operational".
+        # Status pill - a glowing dot + "All systems operational".
         self._status_pill = QFrame()
         self._status_pill.setObjectName("StatusPill")
         sp = QHBoxLayout(self._status_pill)
@@ -142,7 +142,7 @@ class TopBar(QWidget):
         self._gear.clicked.connect(self.toggle_settings.emit)
         lay.addWidget(self._gear)
 
-    # ── Search ─────────────────────────────────────────────────
+    # -- Search --
     def _style_completer_popup(self):
         popup = self._completer.popup()
         if popup is None:
@@ -158,7 +158,7 @@ class TopBar(QWidget):
             f"color: {Theme.TEXT_PRIMARY}; }}")
 
     def _on_search_typed(self, text):
-        """Refresh the suggestion list as the user types."""
+        # Refresh the suggestion list as the user types.
         if not self.suggestion_provider:
             return
         try:
@@ -195,13 +195,13 @@ class TopBar(QWidget):
     def _on_search_submit(self):
         popup = self._completer.popup()
         if popup is not None and popup.isVisible():
-            return   # Enter is choosing a suggestion; QCompleter handles it
+            return   # Enter is choosing a suggestion, QCompleter handles it
         text = self._search.text().strip()
         if text:
             self.search_submitted.emit(text)
             self._search.clear()
 
-    # ── Theme menu ─────────────────────────────────────────────
+    # -- Theme menu --
     def _show_theme_menu(self):
         menu = QMenu(self)
         menu.setStyleSheet(
@@ -220,12 +220,12 @@ class TopBar(QWidget):
         menu.exec(self._theme_btn.mapToGlobal(
             self._theme_btn.rect().bottomLeft()))
 
-    # ── Notifications badge ────────────────────────────────────
+    # -- Notifications badge --
     def set_unread(self, count: int):
         self._unread = count
         self._render_bell()
 
-    # ── Theme application ──────────────────────────────────────
+    # -- Theme application --
     def refresh_theme(self):
         """Re-skin the bar to the current theme (called after a theme change)."""
         self.setFixedHeight(Theme.TOPBAR_HEIGHT)

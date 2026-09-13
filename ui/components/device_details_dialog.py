@@ -48,7 +48,7 @@ class DeviceDetailsDialog(QDialog):
         root.setContentsMargins(22, 20, 22, 20)
         root.setSpacing(14)
 
-        # ── Header: icon + name + IP ──
+        # -- Header: icon + name + IP --
         head = QHBoxLayout()
         head.setSpacing(12)
         icon = QLabel()
@@ -78,7 +78,7 @@ class DeviceDetailsDialog(QDialog):
         head.addStretch()
         root.addLayout(head)
 
-        # ── Facts grid ──
+        # -- Facts grid --
         facts = QFrame()
         facts.setObjectName("Facts")
         facts.setStyleSheet(
@@ -108,8 +108,8 @@ class DeviceDetailsDialog(QDialog):
             vl.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
             fg.addWidget(kl, i, 0)
             if k == "Name":
-                # Let the user give the device a friendly name; it's stored by
-                # MAC and used everywhere the device appears.
+                """ Let the user give the device a friendly name, it's stored by
+                MAC and used everywhere the device appears. """
                 self._name_lbl = vl
                 nrow = QHBoxLayout()
                 nrow.setContentsMargins(0, 0, 0, 0)
@@ -129,9 +129,9 @@ class DeviceDetailsDialog(QDialog):
                 nrow.addStretch()
                 fg.addLayout(nrow, i, 1)
             elif k == "Vendor":
-                # The vendor is a guess (OUI table / online lookup), so let the
-                # user correct it — NETWER remembers the correction for this
-                # manufacturer prefix from then on.
+                """ The vendor is a guess (OUI table / online lookup), so let the
+                user correct it - NETWER remembers the correction for this
+                manufacturer prefix from then on. """
                 self._vendor_lbl = vl
                 vrow = QHBoxLayout()
                 vrow.setContentsMargins(0, 0, 0, 0)
@@ -163,7 +163,7 @@ class DeviceDetailsDialog(QDialog):
         self._learn_hint.hide()
         root.addWidget(self._learn_hint)
 
-        # ── Ports section ──
+        # -- Ports section --
         ports_head = QHBoxLayout()
         pt = QLabel("Open ports")
         pt.setStyleSheet(
@@ -195,7 +195,7 @@ class DeviceDetailsDialog(QDialog):
         self._ports_area.setWidget(self._ports_inner)
         root.addWidget(self._ports_area)
 
-        # ── Buttons ──
+        # -- Buttons --
         btns = QHBoxLayout()
         btns.addStretch()
         close = QPushButton("Close")
@@ -210,7 +210,7 @@ class DeviceDetailsDialog(QDialog):
 
         self._start_scan()
 
-    # ── Custom device name ──
+    # -- Custom device name --
     def _edit_name(self):
         if getattr(self, "_name_edit", None) is not None:
             return
@@ -268,11 +268,11 @@ class DeviceDetailsDialog(QDialog):
             f"Saved \u2014 this device is now called \u201c{new}\u201d."
             if new else "Custom name cleared.")
 
-    # ── Vendor correction (feeds the self-learning DB) ──
+    # -- Vendor correction (feeds the self-learning DB) --
     def _edit_vendor(self):
         """Swap the vendor label for an inline editor. Saving teaches NETWER
         this manufacturer for the device's OUI, so every device sharing that
-        prefix is named correctly from now on — including offline."""
+        prefix is named correctly from now on - including offline."""
         mac = self._dev.get("mac") or ""
         if len(mac.replace(":", "").replace("-", "")) < 6:
             self._vendor_lbl.setText("No MAC \u2014 can't be taught")
@@ -360,7 +360,7 @@ class DeviceDetailsDialog(QDialog):
         if res.get("state") == "open" and "port" in res:
             self._add_open_port(res)
         if "scanned" in res and "total" in res:
-            pass  # could show progress; kept minimal
+            pass  # could show progress, kept minimal
 
     def _add_open_port(self, res):
         if self._ports_empty is not None:

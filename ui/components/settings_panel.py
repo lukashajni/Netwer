@@ -83,7 +83,7 @@ class SettingsPanel(QWidget):
         scroll.setWidget(body)
         outer.addWidget(scroll, 1)
 
-        # ── Appearance ─────────────────────────────────────────
+        # -- Appearance --
         self._section("Appearance")
         self.theme_combo = self._combo(
             "Theme", list(THEMES.keys()), current_theme_name(),
@@ -97,9 +97,9 @@ class SettingsPanel(QWidget):
             store.get_setting("glass_enabled", True),
             lambda v: self.glass_toggled.emit(v))
 
-        # ── Display ────────────────────────────────────────────
+        # -- Display --
         # Lets the window size and UI density (sidebar/topbar/fonts) match a
-        # target screen — auto-detects by default, or can be pinned to a
+        # target screen - auto-detects by default, or can be pinned to a
         # specific resolution when preparing a demo for a projector or a
         # particular monitor.
         self._section("Display")
@@ -114,7 +114,7 @@ class SettingsPanel(QWidget):
             self._on_resolution)
         self.resolution_combo.setFixedWidth(190)
 
-        # ── Scanning ───────────────────────────────────────────
+        # -- Scanning --
         self._section("Scanning")
         self.ping_to = self._combo(
             "Ping timeout", ["500 ms", "1000 ms", "2000 ms"],
@@ -129,7 +129,7 @@ class SettingsPanel(QWidget):
             f"{store.get_setting('portscan_timeout_ms', 600)} ms",
             lambda v: store.set_setting("portscan_timeout_ms", int(v.split()[0])))
 
-        # ── Notifications ──────────────────────────────────────
+        # -- Notifications --
         self._section("Notifications")
         self.notif_down = self._check(
             "Alert when a host goes down",
@@ -144,7 +144,7 @@ class SettingsPanel(QWidget):
             store.get_setting("notify_new_device", True),
             lambda v: store.set_setting("notify_new_device", v))
 
-        # ── Monitoring ─────────────────────────────────────────
+        # -- Monitoring --
         self._section("Monitoring")
         self.schedule_on = self._check(
             "Scan network in the background",
@@ -156,14 +156,14 @@ class SettingsPanel(QWidget):
             f"{store.get_setting('schedule_interval_min', 10)} min",
             lambda v: self.schedule_interval_changed.emit(int(v.split()[0])))
 
-        # ── Behaviour ──────────────────────────────────────────
+        # -- Behaviour --
         self._section("Behaviour")
         self.remember = self._check(
             "Remember recent hosts",
             store.get_setting("remember_hosts", True),
             lambda v: store.set_setting("remember_hosts", v))
 
-        # ── Data ───────────────────────────────────────────────
+        # -- Data --
         self._section("Data")
         clear_btn = QPushButton("  Clear host history and favorites")
         clear_btn.setIcon(Icons.get("history", Theme.TEXT_SECONDARY))
@@ -183,7 +183,7 @@ class SettingsPanel(QWidget):
 
         self._body.addStretch()
 
-    # ── Builders ───────────────────────────────────────────────
+    # -- Builders --
     def _section(self, label):
         lbl = QLabel(label.upper())
         lbl.setObjectName("SettingsSection")
@@ -224,7 +224,7 @@ class SettingsPanel(QWidget):
         self._body.addWidget(cb)
         return cb
 
-    # ── Actions ────────────────────────────────────────────────
+    # -- Actions --
     def _on_theme(self, name):
         self.theme_changed.emit(name)
 
@@ -248,7 +248,7 @@ class SettingsPanel(QWidget):
         store.reset_settings()
         self._reset_btn.setText("  Reset \u2713 (restart to apply all)")
 
-    # ── Styling ────────────────────────────────────────────────
+    # -- Styling --
     def _combo_style(self):
         return (
             f"QComboBox {{ background: {Theme.BG_ELEVATED}; color: {Theme.TEXT_BODY};"
