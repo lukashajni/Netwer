@@ -1,7 +1,4 @@
-"""
-NETWER — Main point of aplication.
-
-"""
+"""NETWER — Main application entry point."""
 
 import sys
 
@@ -24,16 +21,8 @@ from ui.pages.system_info_page import SystemInfoPage
 from ui.pages.report_page import ReportPage
 from ui.pages.about_page import AboutPage
 
-
-# Globalni stylesheet — rjesava "crni selektirani" izgled tako sto
-# eksplicitno postavlja pozadine, boje teksta i uklanja default obrube
-# koje Qt crta na ugnijezdenim widgetima i scroll area.
 def build_global_qss():
-    """Sagradi globalni stylesheet iz TRENUTNIH Theme boja. Poziva se pri
-    pokretanju i ponovno kad korisnik promijeni temu."""
-    # Suptilni gradijenti (glow) u pozadini cijelog prozora — plavi, ljubičasti
-    # i tirkizni, kao u dizajn previewu. Qt nema pravi backdrop-blur, pa se
-    # "glass" postiže gradijentnom pozadinom + poluprozirnim karticama.
+    # Base application background gradient
     app_gradient = (
         f"qlineargradient(x1:0, y1:0, x2:1, y2:1, "
         f"stop:0 {Theme.BG_SIDEBAR}, stop:0.5 {Theme.BG_APP}, "
@@ -62,7 +51,7 @@ QScrollBar:vertical {{
 }}
 QScrollBar::handle:vertical {{
     background: {Theme.BORDER_STRONG};
-    border-radius: 5px;
+    border-radius: 5px; 
     min-height: 30px;
 }}
 QScrollBar::handle:vertical:hover {{
@@ -83,14 +72,11 @@ QToolTip {{
 }}
 """
 
-
-# Zadržano radi kompatibilnosti (neki testovi importaju GLOBAL_QSS).
 GLOBAL_QSS = build_global_qss()
 
 
 def _register_pages(window: MainWindow) -> None:
-    """Registriraj sve stranice. Zasad samo Dashboard; ostale dolaze
-    jedna po jedna. Prvi argument je nas naziv ikone iz Icons registra."""
+    # Navigation hierarchy setup
     window.register_section("Overview")
     window.register_page(
         "dashboard", "dashboard", DashboardPage(netwer_core), subtitle="Dashboard"
@@ -104,6 +90,7 @@ def _register_pages(window: MainWindow) -> None:
     window.register_page(
         "system", "system", SystemInfoPage(netwer_core), subtitle="Hardware & OS"
     )
+
     window.register_section("Diagnostics")
     window.register_page(
         "health", "resources", HealthPage(netwer_core),
@@ -128,6 +115,7 @@ def _register_pages(window: MainWindow) -> None:
         "speedtest", "speedtest", SpeedTestPage(netwer_core),
         subtitle="Bandwidth Test"
     )
+
     window.register_section("More")
     window.register_page(
         "report", "report", ReportPage(netwer_core), subtitle="Export PDF"
@@ -135,9 +123,6 @@ def _register_pages(window: MainWindow) -> None:
     window.register_page(
         "about", "about", AboutPage(netwer_core), subtitle="About NETWER"
     )
-    # Sljedece: wifi, system, ping, ping_stability, ping_sweep,
-    # port_scanner, dns, reverse_dns, traceroute, monitor, speedtest,
-    # report, settings, about
 
     window.finalize_sidebar()
 
@@ -147,7 +132,7 @@ def main() -> int:
     app.setApplicationName("NETWER")
     app.setOrganizationName("Lukas Hajneman")
 
-    # Load the user's saved theme/accent before building any styles.
+    # Load theme settings before rendering UI elements
     from app.theme import apply_theme, apply_accent, apply_ui_scale, Theme
     from app.store import store
     from app import display as display_res
@@ -156,9 +141,7 @@ def main() -> int:
     apply_theme(saved_theme, saved_accent)
     Theme.GLASS_ENABLED = store.get_setting("glass_enabled", True)
 
-    # Pick the UI density (sidebar/topbar/font sizes) that matches the saved
-    # resolution before anything is built, so the very first frame is already
-    # correct instead of flashing "standard" then rebuilding.
+    # Scale UI based on resolution to avoid layout flicker on launch
     saved_resolution = store.get_setting("resolution", "auto")
     screen = app.primaryScreen()
     screen_geo = screen.availableGeometry() if screen else None
@@ -169,8 +152,7 @@ def main() -> int:
 
     app.setStyleSheet(build_global_qss())
 
-    # Provjeri kljucnu ovisnost: psutil pokrece resurse, download/upload
-    # i live monitor. Bez njega te funkcije ne rade — javi jasno.
+    # Warn if optional monitoring dependencies are missing
     try:
         import psutil  # noqa: F401
     except ImportError:
@@ -186,10 +168,7 @@ def main() -> int:
         )
         box.exec()
 
-    # Font stack: Segoe UI Variable (Win11) -> Segoe UI (Win10) -> sans.
-    # Registriramo fallback lanac tako da Qt zna čime zamijeniti primarni
-    # font ako ga OS nema (npr. Windows 10, Linux). Bez ovoga bi na tim
-    # sustavima tekst pao na ružni Qt default i vidljivost bi patila.
+    # Font fallbacks and rendering tweaks
     QFont.insertSubstitutions(Theme.FONT_FAMILY_PRIMARY, [
         "Segoe UI Variable", "Segoe UI", "Inter", "Helvetica Neue",
         "Arial", "sans-serif",
@@ -202,6 +181,7 @@ def main() -> int:
     font.setStyleStrategy(QFont.StyleStrategy.PreferAntialias)
     app.setFont(font)
 
+    # Initialize main UI window
     window = MainWindow(netwer_core)
     window.apply_resolution(saved_resolution, persist=False)
     _register_pages(window)
