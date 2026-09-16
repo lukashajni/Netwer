@@ -2,9 +2,9 @@
 NETWER — Network Information page.
 
 Detailed IP configuration for any network adapter. The user picks an
-adapter from a dropdown; the page shows a compact key/value table with
+adapter from a dropdown, the page shows a compact key/value table with
 all its details (IP, subnet, gateway, DNS, MAC, speed, MTU, DHCP...).
-A Copy button puts the details on the clipboard; Refresh re-reads them.
+A Copy button puts the details on the clipboard, "Refresh" re-reads them.
 
 All backend calls go through the worker layer so the UI never blocks.
 """
@@ -34,7 +34,7 @@ class NetworkInfoPage(BasePage):
         self._current_adapter = None
         self._public_ip = None
 
-        # ── Toolbar: adapter selector + actions ────────────────
+        # -- Toolbar: adapter selector + actions --
         toolbar = QHBoxLayout()
         toolbar.setSpacing(10)
 
@@ -58,7 +58,7 @@ class NetworkInfoPage(BasePage):
 
         self.body_layout.addLayout(toolbar)
 
-        # ── Details card with the table ────────────────────────
+        # -- Details card with the table --
         self.details_card = Card("Adapter Details", "network")
         self.info_table = InfoTable()
 
@@ -82,7 +82,7 @@ class NetworkInfoPage(BasePage):
         )
         self.body_layout.addWidget(self._status)
 
-    # ── Styling helpers ────────────────────────────────────────
+    # -- Styling helpers --
     def _combo_style(self):
         return (
             f"QComboBox {{ background: {Theme.BG_ELEVATED}; color: {Theme.TEXT_BODY};"
@@ -107,9 +107,9 @@ class NetworkInfoPage(BasePage):
         )
         return btn
 
-    # ── Lifecycle ──────────────────────────────────────────────
+    # -- Lifecycle --
     def preload(self):
-        """Učitaj adaptere i javni IP u pozadini pri pokretanju."""
+        # Load adapters and the public IP in the background at startup
         if not self._loaded_once:
             self._loaded_once = True
             self._load_adapters()
@@ -121,7 +121,7 @@ class NetworkInfoPage(BasePage):
             self._load_adapters()
             self._load_public_ip()
 
-    # ── Data loading ───────────────────────────────────────────
+    # -- Data loading --
     def _load_adapters(self):
         self._status.setText("Loading adapters…")
         w = OneshotWorker(self.core.list_adapters)
@@ -137,7 +137,7 @@ class NetworkInfoPage(BasePage):
             return
         self.adapter_combo.blockSignals(True)
         self.adapter_combo.clear()
-        # Sort: Up adapters first, then by name
+        # Sort - Up adapters first, then by name
         adapters.sort(key=lambda a: (a.get("status") != "Up", a.get("name", "")))
         for a in adapters:
             name = a.get("name", "")
@@ -220,7 +220,7 @@ class NetworkInfoPage(BasePage):
         self.info_table.add_row(
             "Error", self.core.friendly_error(msg), value_color=Theme.DANGER)
 
-    # ── Actions ────────────────────────────────────────────────
+    # -- Actions --
     def _refresh_current(self):
         if self._current_adapter:
             self._load_details(self._current_adapter)

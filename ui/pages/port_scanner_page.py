@@ -2,14 +2,14 @@
 NETWER — Port Scanner page.
 
 Scan a host's TCP ports in parallel and classify each result the way a real
-scanner does: open (service listening), closed (host refused → reachable but
-nothing there), or filtered (no response → firewall dropping packets). Each
+scanner does: open (service listening), closed (host refused - reachable but
+nothing there), or filtered (no response - firewall dropping packets). Each
 row shows the port number, the well-known service, its transport protocol,
 and a colored state badge. A summary strip tallies open/closed/filtered.
 
 The scan streams live from netwer_core.port_scan_stream, which pings every
 port at once through a thread pool. The target can be pre-filled from the
-Ping Sweep page (click a device → "Scan ports") via set_target().
+Ping Sweep page (click a device - "Scan ports") via set_target().
 """
 
 from PyQt6.QtCore import Qt
@@ -61,21 +61,21 @@ class PortScannerPage(BasePage):
         self._total = 0
         self._results = []          # collected port dicts (for export)
         self._counts = {"open": 0, "closed": 0, "filtered": 0}
-        self._show_all = False      # toggle: show closed/filtered or open-only
+        self._show_all = False      # toggle - show closed/filtered or open-only
 
         self._build_toolbar()
         self._build_summary()
         self._build_table()
         self.body_layout.addStretch(0)
 
-    # ── Public: pre-target from another page ───────────────────
+    # -- Public: pre-target from another page --
     def set_target(self, ip, autostart=False):
         """Fill the target field (used when jumping here from Ping Sweep)."""
         self.target_input.setText(ip)
         if autostart:
             self._start()
 
-    # ── UI ─────────────────────────────────────────────────────
+    # -- UI --
     def _build_toolbar(self):
         row = QHBoxLayout()
         row.setSpacing(8)
@@ -355,7 +355,7 @@ class PortScannerPage(BasePage):
 
     def _repaint_rows(self):
         """Rebuild visible rows honoring the show-all toggle and sorting
-        (open first, then closed, then filtered; each by port number)."""
+        (open first, then closed, then filtered, each by port number)."""
         self._clear_rows()
         order = {"open": 0, "closed": 1, "filtered": 2}
         rows = sorted(self._results,
@@ -377,12 +377,12 @@ class PortScannerPage(BasePage):
                                 else "Show all ports")
         self._repaint_rows()
 
-    # ── Lifecycle ──────────────────────────────────────────────
+    # -- Lifecycle --
     def on_leave(self):
         self._stop()
         super().on_leave()
 
-    # ── Run / stop ─────────────────────────────────────────────
+    # -- Run / stop --
     def _toggle(self):
         if self._running:
             self._stop()
@@ -460,7 +460,7 @@ class PortScannerPage(BasePage):
             if self._counts["open"] > 0:
                 self.progress.set_color(Theme.SUCCESS)
             self._update_chips()
-            # Live-add open ports immediately; closed/filtered only when
+            # Live-add open ports immediately, closed/filtered only when
             # "show all" is active (keeps the view focused during scan).
             if d["state"] == "open" or self._show_all:
                 if self._empty is not None:
@@ -530,7 +530,7 @@ class PortScannerPage(BasePage):
         self.device_badge.setText(labels.get(dtype, "Device"))
         self.device_badge_wrap.setVisible(True)
 
-    # ── Export ─────────────────────────────────────────────────
+    # -- Export --
     def _export(self):
         if not self._results:
             return

@@ -1,25 +1,23 @@
 """
 NETWER — BasePage.
 
-Zajednička osnova SVIH 17 stranica. Svaka stranica (Dashboard, Ping,
-Port Scanner...) nasljeđuje ovo i time automatski dobiva:
+Common basis of all 17 pages. Each page (Dashboard, Ping,
+Port Scanner...) inherits this and the time automatically gets:
 
-  1. Jedinstven lifecycle: on_enter() / on_leave()
-     - on_enter() se zove kad korisnik OTVORI stranicu → tu pokrećeš
-       učitavanje podataka, tajmere, live workere.
-     - on_leave() se zove kad korisnik NAPUSTI stranicu → tu se AUTOMATSKI
-       zaustave svi workeri i tajmeri. Ovo sprječava curenje niti i
-       nepotrebno trošenje resursa (npr. da monitor nastavi vrtjeti u
-       pozadini kad ga ne gledaš).
+  1. Unique life cycle: on_enter() / on_leave()
+     - on_enter() is called when the user opens the page - you start it there
+       loading data, timers, live workers.
+     - on_leave() is called when the user leaves the page - there automatically
+       all workers and timers stop. This separate thread leakage and
+       unnecessary consumption of resources (e.g. for the monitor to continue rotating in
+       background when you are not looking at it).
 
-  2. Upravljanje workerima: register_worker()
-     - Kad stranica pokrene worker, registrira ga ovdje. on_leave() ga
-       onda zna zaustaviti bez da svaka stranica to ručno pamti.
+  2. Management of workers: register_worker()
+     - When the site starts a worker, it registers it here. on_leave() him
+       then it can stop without manually remembering each page.
 
-  3. Naslov + podnaslov u jedinstvenom stilu (header).
+  3. Title + subtitle in a unique style (header).
 
-Zašto je ovo ključno za skalabilnost: dodavanje 18. stranice ne dira
-nijednu postojeću. Sve stranice se ponašaju isto jer dijele ovu osnovu.
 """
 
 from PyQt6.QtCore import Qt
@@ -29,28 +27,28 @@ from app.theme import Theme
 
 
 class BasePage(QWidget):
-    #: Podklase postave ovo — koristi se za naslov i navigaciju.
+    # Subclasses set this - used for title and navigation.
     PAGE_TITLE = "Page"
     PAGE_SUBTITLE = ""
 
     def __init__(self, core, parent=None, embedded=False):
         """
-        core — modul netwer_core (backend). Stranica NIKAD ne zove backend
-               izravno u glavnoj niti; koristi ga samo da workeru preda
-               referencu na funkciju.
-        embedded — kad je True, stranica ne crta vlastiti naslov/podnaslov
-               (koristi se kad je ugniježđena u kontejner poput DNS Tools
-               koji ima svoj zajednički header + tabove).
+        core — module netwer_core (backend). The page never calls the backend
+               directly in the main thread, it only uses it to hand over to the worker
+               a function reference.
+        embedded — when True, the page does not draw its own title/subtitle
+               (used when nested in a container like DNS Tools
+               which has its own common header + tabs).
         """
         super().__init__(parent)
         self.core = core
         self._embedded = embedded
-        self._workers = []  # aktivni workeri ove stranice
-        self._window = None  # referenca na MainWindow (za loading koordinaciju)
+        self._workers = []  # Active workers for this page 
+        self._window = None  # reference to MainWindow (for loading cordination)
 
         self.setStyleSheet(f"background: {Theme.BG_APP};")
 
-        # Vanjski layout — podklase dodaju sadržaj u self.body_layout
+        # Outer layout — sublcasses add content to self.body_layout
         self._root = QVBoxLayout(self)
         margins = (0, 0, 0, 0) if embedded else (24, 20, 24, 20)
         self._root.setContentsMargins(*margins)
@@ -59,12 +57,12 @@ class BasePage(QWidget):
         if not embedded:
             self._build_header()
 
-        # Ovamo podklase slažu svoj sadržaj.
+        # Subclasses arrange their content here.
         self.body_layout = QVBoxLayout()
         self.body_layout.setSpacing(Theme.GAP)
         self._root.addLayout(self.body_layout)
 
-    # ── Header ─────────────────────────────────────────────────
+    # -- Header --
     def _build_header(self) -> None:
         title = QLabel(self.PAGE_TITLE)
         title.setStyleSheet(
@@ -83,15 +81,15 @@ class BasePage(QWidget):
             )
             self._root.addWidget(sub)
 
-    # ── Upravljanje workerima ──────────────────────────────────
+    # -- Upravljanje workerima --
     def set_window(self, window) -> None:
-        """MainWindow se registrira ovdje da stranica moze javljati
-        napredak ucitavanja (za fullscreen loading screen)."""
+        """The MainWindow initializes itself here so that the page can report
+        loading progress (for the fullscreen loading screen)."""
         self._window = window
 
     def register_worker(self, worker) -> None:
-        """Registriraj worker da ga on_leave() može automatski zaustaviti.
-        Također ga čisti iz liste kad prirodno završi."""
+        """Register the worker so that on_leave() can automatically stop it.
+        It also removes it from the list when it finishes normally."""
         self._workers.append(worker)
         worker.done.connect(lambda: self._unregister_worker(worker))
 
@@ -100,7 +98,7 @@ class BasePage(QWidget):
             self._workers.remove(worker)
 
     def stop_workers(self) -> None:
-        """Zaustavi i uredno ugasi sve aktivne workere ove stranice."""
+        """Stop and neatly shut down all active workers for this site."""
         for worker in list(self._workers):
             # Disconnect signals FIRST so a result/error queued just before
             # stop() can't fire back into a widget we're about to delete
@@ -114,26 +112,26 @@ class BasePage(QWidget):
                         pass
             worker.stop()
             if worker.isRunning():
-                worker.wait(2000)  # čekaj do 2s da nit izađe čisto
+                worker.wait(2000)  # Wait for 2 seconds so that the thread can exit cleanly
         self._workers.clear()
 
-    # ── Lifecycle (podklase nadjačavaju po potrebi) ────────────
+    # -- Lifecycle (Subclasses override as needed.) --
     def preload(self) -> None:
-        """Pokreni jednokratno učitavanje podataka U POZADINI pri pokretanju
-        aplikacije, PRIJE nego korisnik uđe na stranicu. Tako podaci već
-        stoje spremni kad se klikne na stranicu — ne vrti se učitavanje tek
-        na prvi ulazak. Default: ništa (podklase koje imaju spori jednokratni
-        load nadjačaju ovo). Mora biti sigurno pozvati dok stranica nije
-        vidljiva i idempotentno (dvostruki poziv ne smije duplati posao).
+        """Trigger a one-time data load in the background upon application startup, 
+           before the user navigates to the page. This ensures the data is already 
+           ready when the page is clicked, avoiding a loading spinner upon the 
+           initial visit. Default: none (subclasses with a slow one-time load 
+           override this). The method must be safe to call while the page is not 
+           visible and must be idempotent (a second call must not duplicate the work).
         """
         pass
 
     def on_enter(self) -> None:
-        """Zove se kad korisnik uđe na stranicu. Podklase pokreću
-        učitavanje podataka ovdje. Default: ništa."""
+        """Called when the user opens the page. Subclasses initiate
+        data loading here."""
         pass
 
     def on_leave(self) -> None:
-        """Zove se kad korisnik napusti stranicu. Uvijek gasi workere.
-        Podklase koje nadjačaju MORAJU pozvati super().on_leave()."""
+        """Called when the user leaves the page. Always shuts down workers.
+        Subclasses that override this must call super().on_leave()."""
         self.stop_workers()

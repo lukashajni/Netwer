@@ -1,8 +1,8 @@
 """
 NETWER — Ping Sweep page.
 
-Discover every device on the local network: enter a subnet (defaults to the
-auto-detected local /24), pick a per-host timeout, and hit Scan. Hosts appear
+Discover every device on the local network - enter a subnet (defaults to the
+auto-detected local /24), pick a per-host timeout, and hit "Scan". Hosts appear
 live in the table as they answer, a progress bar tracks how far the sweep has
 gotten and how many devices were found, and the result can be exported to a
 plain-text (.txt) report that opens cleanly in Notepad.
@@ -51,7 +51,7 @@ class PingSweepPage(BasePage):
     PAGE_TITLE = "Ping Sweep"
     PAGE_SUBTITLE = "Discover every device on your local network"
 
-    # Table column widths (px); Hostname flexes.
+    # Table column widths (px), Hostname flexes.
     COL_DOT = 30
     COL_TYPE = 28
     COL_IP = 140
@@ -72,9 +72,7 @@ class PingSweepPage(BasePage):
         self._build_table()
         self.body_layout.addStretch(1)
 
-    # ══════════════════════════════════════════════════════════
-    # UI
-    # ══════════════════════════════════════════════════════════
+    # -- UI -- 
     def _build_toolbar(self):
         row = QHBoxLayout()
         row.setSpacing(8)
@@ -166,8 +164,8 @@ class PingSweepPage(BasePage):
         top.addWidget(self.count_label)
         lay.addLayout(top)
 
-        # Progress bar (custom widget, resize-safe). Turns green once
-        # the first device is found so success is visible at a glance.
+        """ Progress bar (custom widget, resize-safe). Turns green once
+        the first device is found so success is visible at a glance. """
         self.progress_bar = ProgressBar(height=8)
         lay.addWidget(self.progress_bar)
 
@@ -248,7 +246,7 @@ class PingSweepPage(BasePage):
         rl.setContentsMargins(0, 8, 0, 8)
         rl.setSpacing(0)
 
-        # Status dot (green — device is online)
+        # Status dot (green - device is online)
         dot_wrap = QLabel()
         dot_wrap.setFixedWidth(self.COL_DOT)
         dot_wrap.setText(
@@ -256,7 +254,7 @@ class PingSweepPage(BasePage):
         dot_wrap.setStyleSheet("background: transparent;")
         rl.addWidget(dot_wrap)
 
-        # Device-type icon (inferred from vendor / gateway / hostname)
+        # Device-type icon (inferred from vendor /gateway / hostname)
         dtype = self.core.detect_device_type(
             vendor=dev.get("vendor", ""), is_gateway=is_gateway,
             hostname=dev.get("hostname", ""))
@@ -315,7 +313,7 @@ class PingSweepPage(BasePage):
             f"font-family: {Theme.FONT_MONO}; font-size: 13px; background: transparent;")
         rl.addWidget(rtt)
 
-        # Scan-ports action → jumps to the Port Scanner pre-targeted at this IP
+        # Scan-ports action - jumps to the Port Scanner pre-targeted at this IP
         ip_addr = dev.get("ip", "")
         scan_btn = QPushButton()
         scan_btn.setIcon(Icons.get("port_scanner", Theme.TEXT_SECONDARY))
@@ -362,12 +360,12 @@ class PingSweepPage(BasePage):
         self._empty_label = None
 
     def _scan_ports(self, ip):
-        """Jump to the Port Scanner pre-targeted at this device's IP."""
+        # Jump to the Port Scanner pre-targeted at this device's IP.
         if ip and self._window is not None:
             self._window.scan_ports_for(ip)
 
     def _wake(self, mac, name):
-        """Send a Wake-on-LAN magic packet to a device by MAC."""
+        # Send a Wake-on-LAN magic packet to a device by MAC.
         subnet = self.subnet_input.text().strip()
         broadcast = "255.255.255.255"
         # If we know the subnet, use its directed broadcast (more reliable).
@@ -388,7 +386,7 @@ class PingSweepPage(BasePage):
 
 
     def _show_empty(self, text: str):
-        """Show a centered placeholder message in the (empty) table body."""
+        # Show a centered placeholder message in the (empty) table body.
         if self._empty_label is not None:
             self._empty_label.setText(text)
             return
@@ -399,16 +397,12 @@ class PingSweepPage(BasePage):
         self._rows_layout.insertWidget(self._rows_layout.count() - 1, lbl)
         self._empty_label = lbl
 
-    # ══════════════════════════════════════════════════════════
-    # Lifecycle
-    # ══════════════════════════════════════════════════════════
+    # -- Lifecycle --
     def on_leave(self):
         self._stop()
         super().on_leave()
 
-    # ══════════════════════════════════════════════════════════
-    # Run / stop
-    # ══════════════════════════════════════════════════════════
+    # -- Run / stop --
     def _toggle(self):
         if self._running:
             self._stop()
@@ -499,9 +493,7 @@ class PingSweepPage(BasePage):
         store.set_setting("known_device_macs",
                           sorted(known | current))
 
-    # ══════════════════════════════════════════════════════════
-    # Stream events
-    # ══════════════════════════════════════════════════════════
+    # -- Stream events --
     def _on_event(self, d: dict):
         # Network announced at the start of the sweep
         if "network" in d and not d.get("online"):
@@ -523,7 +515,7 @@ class PingSweepPage(BasePage):
         if d.get("online"):
             self._devices.append(d)
             self._add_device_row(d)
-            # First device found → turn the progress bar green so success
+            # First device found - turn the progress bar green so success
             # is obvious even before the scan finishes.
             self.progress_bar.set_color(Theme.SUCCESS)
             self.count_label.setText(
@@ -538,9 +530,7 @@ class PingSweepPage(BasePage):
     def _set_progress(self, pct: int):
         self.progress_bar.set_fraction(pct / 100)
 
-    # ══════════════════════════════════════════════════════════
-    # Export
-    # ══════════════════════════════════════════════════════════
+    # -- Export --
     def _export_csv(self, path):
         """Write the discovered devices as a spreadsheet-friendly CSV."""
         import csv

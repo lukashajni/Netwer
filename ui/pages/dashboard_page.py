@@ -2,7 +2,7 @@
 NETWER — Dashboard (full version).
 
 Main monitoring screen. On first entry it triggers the app-wide loading
-screen (owned by MainWindow) while ALL data is fetched in the background,
+screen (owned by MainWindow) while all data is fetched in the background,
 then reveals the fully populated app at once.
 
 Data sources (all through the worker layer, never blocking the UI):
@@ -49,14 +49,14 @@ class DashboardPage(BasePage):
         # (System-uptime card was replaced by a live "Devices online" count.)
         self._boot_epoch = None
 
-        # Ping refresh: re-check connectivity every 5s so the ping/loss
+        # Ping refresh - re-check connectivity every 5s so the ping/loss
         # sparklines keep moving (not just one reading at startup).
         self._ping_timer = QTimer(self)
         self._ping_timer.setInterval(5000)
         self._ping_timer.timeout.connect(self._refresh_internet)
         self._internet_worker = None
 
-        # Live info refresh: re-read WiFi + Network Summary every few seconds
+        # Live info refresh - re-read WiFi + Network Summary every few seconds
         # so plugging in a WiFi adapter (or IP changes) shows up immediately,
         # with no app restart.
         self._info_timer = QTimer(self)
@@ -68,7 +68,7 @@ class DashboardPage(BasePage):
         self._loaded_once = False
         self._pending = set()
 
-        # Content — no scrolling: the dashboard is sized to fit the window and
+        # Content - no scrolling - the dashboard is sized to fit the window and
         # the layout stretches to fill it, so the vertical scrollbar is off.
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
@@ -86,13 +86,8 @@ class DashboardPage(BasePage):
         self._build_stat_cards()
         self._build_middle_row()
         self._build_bottom_row()
-        # Fullscreen fix: no trailing stretch and no fixed height on the middle
-        # row, so the content grows to fill the window when maximized/fullscreen
-        # instead of leaving a big empty band at the bottom.
 
-    # ══════════════════════════════════════════════════════════
-    # UI CONSTRUCTION
-    # ══════════════════════════════════════════════════════════
+    # -- UI CONSTRUCTION -- 
     def _build_stat_cards(self):
         row = QHBoxLayout()
         row.setSpacing(Theme.GAP)
@@ -138,7 +133,7 @@ class DashboardPage(BasePage):
         legend.addWidget(self._legend_item("Download", Theme.ACCENT))
         legend.addWidget(self._legend_item("Upload", Theme.ACCENT_PURPLE))
         legend.addStretch()
-        # Peak / Avg readouts (updated live; hover the graph for per-point).
+        # Peak / Avg readouts (updated live, hover the graph for per-point).
         self.stat_peak = QLabel("Peak \u2014")
         self.stat_avg = QLabel("Avg \u2014")
         for lbl in (self.stat_peak, self.stat_avg):
@@ -202,7 +197,7 @@ class DashboardPage(BasePage):
         self._grid.addLayout(row, 0)
 
     def _legend_item(self, text, color):
-        """A small colored dot + label for the chart legend."""
+        # A small colored dot + label for the chart legend.
         w = QWidget()
         w.setStyleSheet("background: transparent;")
         lay = QHBoxLayout(w)
@@ -226,9 +221,9 @@ class DashboardPage(BasePage):
 
         BOTTOM_HEIGHT = 300
 
-        # Static network map on the dashboard: Internet -> Router -> devices,
-        # each labelled, so you can read the network at a glance. The animated
-        # radar lives in the full-screen Expand view.
+        """ Static network map on the dashboard: Internet - Router - devices,
+        each labelled, so you can read the network at a glance. The animated
+        radar lives in the full-screen "Expand" view. """
         from ui.widgets.network_map import NetworkMap
         self.map_card = Card("Network Map", "network")
         self.map_card.setFixedHeight(BOTTOM_HEIGHT)
@@ -254,8 +249,8 @@ class DashboardPage(BasePage):
         self.devices_card = Card("Top Devices", "devices")
         self.devices_card.setFixedHeight(BOTTOM_HEIGHT)
 
-        # Rescan button in the card header — re-runs the network scan,
-        # refreshing both Top Devices and the Network Map.
+        # Rescan button in the card header - re-runs the network scan,
+        # refreshing both "Top Devices" and the "Network Map".
         self.btn_rescan = QPushButton("  Rescan")
         self.btn_rescan.setIcon(Icons.get("refresh", Theme.TEXT_BODY))
         self.btn_rescan.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -290,7 +285,7 @@ class DashboardPage(BasePage):
         self.devices_card.content_layout.addWidget(dev_scroll)
         row.addWidget(self.devices_card, 2)
 
-        # Third column: Recent Activity stacked ABOVE System Resources
+        # Third column - Recent Activity stacked above "System Resources"
         right_col = QVBoxLayout()
         right_col.setSpacing(Theme.GAP)
 
@@ -331,17 +326,15 @@ class DashboardPage(BasePage):
 
         self._grid.addLayout(row, 0)
 
-    # ══════════════════════════════════════════════════════════
-    # LIFECYCLE
-    # ══════════════════════════════════════════════════════════
+    # -- LIFECYCLE --
     def on_enter(self):
         if not self._loaded_once:
             self._loaded_once = True
             self._begin_loading()
         else:
-            # Returning to the page: restart EVERY live timer that on_leave
+            # Returning to the page - restart every live timer that on_leave
             # stopped. Missing one here (info/ping) silently kills live
-            # refresh — e.g. a WiFi adapter plugged in later never shows up.
+            # refresh - e.g. a WiFi adapter plugged in later never shows up.
             self._start_monitor()
             self._resource_timer.start()
             self._ping_timer.start()
@@ -356,17 +349,15 @@ class DashboardPage(BasePage):
         self._monitor_worker = None
         super().on_leave()
 
-    # ══════════════════════════════════════════════════════════
-    # LOADING PHASE — fetch everything, then reveal (app-wide screen)
-    # ══════════════════════════════════════════════════════════
+    # -- LOADING PHASE - fetch everything, then reveal (app-wide screen) -- 
     def _begin_loading(self):
         if self._window:
             self._window.begin_loading()
             self._window.loading_progress("Checking connectivity…")
 
-        # Loading waits ONLY on fast tasks. Network scan (get_top_devices)
-        # takes 10-30s scanning 254 addresses — we DON'T block on it. It
-        # fills in the background after the app is revealed.
+        """ Loading waits only on fast tasks. Network scan (get_top_devices)
+        takes 10-30s scanning 254 addresses - we don't block on it. It
+        fills in the background after the app is revealed. """
         self._pending = {"internet", "sysinfo", "summary", "wifi", "resources"}
 
         self._load_internet_status()
@@ -375,7 +366,7 @@ class DashboardPage(BasePage):
         self._load_wifi()
         self._refresh_resources(initial=True)
         self._start_monitor()
-        # Device scan starts but does NOT gate the reveal.
+        # Device scan starts but does not gate the reveal.
         self._load_devices()
         # Adapter list also loads in background.
         self._load_adapters()
@@ -394,7 +385,7 @@ class DashboardPage(BasePage):
         self._info_timer.start()
 
     def _show_all_activity(self):
-        """Open the full activity history in a dialog."""
+        # Open the full activity history in a dialog.
         from ui.components.activity_dialog import ActivityDialog
         dlg = ActivityDialog(self)
         dlg.exec()
@@ -424,9 +415,7 @@ class DashboardPage(BasePage):
         self._internet_worker = w
         w.start()
 
-    # ══════════════════════════════════════════════════════════
-    # DATA LOADING
-    # ══════════════════════════════════════════════════════════
+    # -- DATA LOADING --
     def _load_internet_status(self):
         w = OneshotWorker(self.core.ping_quick)
         w.result.connect(self._on_internet)
@@ -471,7 +460,7 @@ class DashboardPage(BasePage):
         w.start()
 
     def _on_sysinfo(self, data: dict):
-        # System info is still fetched (used elsewhere); the uptime card was
+        # System info is still fetched (used elsewhere), the uptime card was
         # replaced by the live "Devices online" count, so there's nothing to
         # tick here anymore.
         d = data.get("days", 0)
@@ -528,7 +517,7 @@ class DashboardPage(BasePage):
         self._set_wifi("Signal", str(signal), Theme.SUCCESS)
         self._set_wifi("Channel", str(d.get("channel", "\u2014")))
         # Update the visual signal indicator. signal may be like "-42 dBm"
-        # or a percentage; try to derive a 0-100 strength.
+        # or a percentage, try to derive a 0-100 strength.
         pct = self._signal_to_percent(signal)
         self.wifi_signal.set_signal(pct)
 
@@ -568,8 +557,8 @@ class DashboardPage(BasePage):
                 )
 
     def _rescan_network(self):
-        """Manually re-run the network scan (button in Top Devices header).
-        Clears the current list/map and scans again — picks up devices that
+        """Manually re-run the network scan (button in "Top Devices" header).
+        Clears the current list/map and scans again - picks up devices that
         came online since the last scan."""
         if getattr(self, "_devices_scanning", False):
             return
@@ -588,7 +577,7 @@ class DashboardPage(BasePage):
         self._load_devices()
 
     def _load_devices(self):
-        # Runs in background — shows its own inline spinner text.
+        # Runs in background - shows its own inline spinner text.
         self._devices_placeholder.setText("Scanning local network…")
         self._devices_placeholder.show()
         w = OneshotWorker(self.core.get_top_devices, 12)
@@ -633,7 +622,7 @@ class DashboardPage(BasePage):
         self._maybe_update_map()
 
     def _open_topology(self):
-        """Open the full-screen topology view with the current scan data."""
+        # Open the full-screen topology view with the current scan data.
         from ui.components.topology_dialog import TopologyDialog
         gateway = getattr(self, "_gateway", "") or ""
         devices = getattr(self, "_all_devices", None) or []
@@ -658,7 +647,7 @@ class DashboardPage(BasePage):
         gateway = getattr(self, "_gateway", None)
         devices = getattr(self, "_all_devices", None)
         if gateway and devices:
-            # Find router vendor from the device whose IP == gateway
+            # Find router vendor from the device whose IP is equal to the gateway
             router_vendor = ""
             for d in devices:
                 if d.get("ip") == gateway:
@@ -700,10 +689,10 @@ class DashboardPage(BasePage):
         row.addWidget(status)
         return w
 
-    # ── Live monitor (stream) ──────────────────────────────────
-    # ── Adapter selection ──────────────────────────────────────
+    # -- Live monitor (stream) --
+    # -- Adapter selection --
     def _load_adapters(self):
-        """Populate the adapter dropdown (background, after reveal)."""
+        # Populate the adapter dropdown (background, after reveal).
         w = OneshotWorker(self.core.list_adapters)
         w.result.connect(self._on_adapters)
         w.error.connect(lambda e: None)
@@ -729,7 +718,7 @@ class DashboardPage(BasePage):
         self.adapter_combo.blockSignals(False)
 
     def _on_adapter_changed(self, index):
-        """User picked a different adapter — restart monitor on it."""
+        # User picked a different adapter - restart monitor on it.
         selected = self.adapter_combo.currentData()
         # Stop current monitor
         if self._monitor_worker is not None:
@@ -785,7 +774,7 @@ class DashboardPage(BasePage):
                                        color=Theme.ACCENT_PURPLE, subtitle="Live")
             self.card_download.push_spark(d["dl"])
             self.card_upload.push_spark(d["ul"])
-            # Live trend badge: % change vs the previous sample.
+            # Live trend badge - % change vs the previous sample.
             self._update_trend(self.card_download, "_prev_dl", d["dl"])
             self._update_trend(self.card_upload, "_prev_ul", d["ul"])
 
@@ -800,7 +789,7 @@ class DashboardPage(BasePage):
             self.stat_avg.setText(
                 f"Avg \u2193{dav}{dav_u} \u2191{uav}{uav_u}")
 
-    # ── System resources (timer) ───────────────────────────────
+    # -- System resources (timer) --
     def _refresh_resources(self, initial: bool = False):
         if self._resource_worker is not None and self._resource_worker.isRunning():
             return

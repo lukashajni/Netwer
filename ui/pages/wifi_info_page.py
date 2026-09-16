@@ -40,7 +40,7 @@ class WiFiInfoPage(BasePage):
         self._info_worker = None
         self._last_scan_time = None
 
-        # Live refresh of the connection info (adapter plugged in, roaming…)
+        # Live refresh of the connection info (adapter plugged in, roaming...)
         self._refresh_timer = QTimer(self)
         self._refresh_timer.setInterval(4000)
         self._refresh_timer.timeout.connect(self._refresh_info)
@@ -55,9 +55,7 @@ class WiFiInfoPage(BasePage):
 
         self.body_layout.addStretch(1)
 
-    # ══════════════════════════════════════════════════════════
-    # UI
-    # ══════════════════════════════════════════════════════════
+    # -- UI -- 
     def _build_headline_row(self):
         row = QHBoxLayout()
         row.setSpacing(Theme.GAP)
@@ -142,7 +140,7 @@ class WiFiInfoPage(BasePage):
         row.setSpacing(Theme.GAP)
         DETAIL_H = 300
 
-        # ── Connection details ──
+        # -- Connection details --
         self.details_card = Card("Connection Details", "summary")
         self.details_card.setFixedHeight(DETAIL_H)
         self._detail_values = {}
@@ -155,7 +153,7 @@ class WiFiInfoPage(BasePage):
         self.details_card.content_layout.addStretch()
         row.addWidget(self.details_card, 10)
 
-        # ── Available networks ──
+        # -- Available networks --
         self.networks_card = Card("Available Networks", "ping_sweep")
         self.networks_card.setFixedHeight(DETAIL_H)
 
@@ -219,11 +217,9 @@ class WiFiInfoPage(BasePage):
         row.addWidget(self.networks_card, 15)
         self.body_layout.addLayout(row)
 
-    # ══════════════════════════════════════════════════════════
-    # Lifecycle
-    # ══════════════════════════════════════════════════════════
+    # -- Lifecycle --
     def preload(self):
-        """Učitaj WiFi info jednom u pozadini pri pokretanju."""
+        # Load the WiFi info once in the background at startup 
         self._refresh_info()
 
     def on_enter(self):
@@ -244,9 +240,7 @@ class WiFiInfoPage(BasePage):
         from app.activity import time_ago
         self.last_scan_label.setText(f"Last scan: {time_ago(self._last_scan_time)}")
 
-    # ══════════════════════════════════════════════════════════
-    # Connection info
-    # ══════════════════════════════════════════════════════════
+    # -- Connection info --
     def _refresh_info(self):
         if self._info_worker is not None and self._info_worker.isRunning():
             return
@@ -349,9 +343,7 @@ class WiFiInfoPage(BasePage):
         m = re.search(r'(\d+)\s*%', str(text))
         return int(m.group(1)) if m else 50
 
-    # ══════════════════════════════════════════════════════════
-    # Nearby networks scan
-    # ══════════════════════════════════════════════════════════
+    # -- Nearby networks scan --
     def _scan_networks(self):
         if self._scan_worker is not None and self._scan_worker.isRunning():
             return

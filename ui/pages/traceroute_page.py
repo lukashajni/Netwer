@@ -8,7 +8,7 @@ at once (stacking them vertically pushed the map below the window, where
 there was no way to scroll to it).
 
 Flow:
-  1. netwer_core.traceroute_stream streams one event per hop → rows appear live
+  1. netwer_core.traceroute_stream streams one event per hop - rows appear live
   2. when the trace finishes, the public hops are geolocated in ONE background
      call (never inline, or a slow provider would stall the trace)
   3. the located hops are handed to TracerouteMap, which animates the path
@@ -57,9 +57,7 @@ class TraceroutePage(BasePage):
         self._build_status()
         self._build_split()
 
-    # ══════════════════════════════════════════════════════════
-    # Build
-    # ══════════════════════════════════════════════════════════
+    # -- Build --
     def _build_toolbar(self):
         row = QHBoxLayout()
         row.setSpacing(8)
@@ -122,13 +120,13 @@ class TraceroutePage(BasePage):
         self.body_layout.addWidget(card)
 
     def _build_split(self):
-        """Map left, hop list right — both on screen at the same time."""
-        # ── Map ────────────────────────────────────────────────
+        # Map left, hop list right - both on screen at the same time.
+        # -- Map --
         map_card = Card("Path on map", "route")
         self.map = TracerouteMap()
         map_card.content_layout.addWidget(self.map, 1)
 
-        # ── Hops ───────────────────────────────────────────────
+        # -- Hops --
         hops_card = Card("Hops", "list")
         header = QHBoxLayout()
         header.setContentsMargins(10, 0, 10, 6)
@@ -172,9 +170,7 @@ class TraceroutePage(BasePage):
         split.addWidget(hops_card, 2)
         self.body_layout.addLayout(split, 1)
 
-    # ══════════════════════════════════════════════════════════
-    # Rows
-    # ══════════════════════════════════════════════════════════
+    # -- Rows --
     def _show_empty(self, text):
         self._clear_rows()
         self._empty = QLabel(text)
@@ -222,7 +218,7 @@ class TraceroutePage(BasePage):
         if hostname and hostname != ip:
             sub_parts.append(hostname)
         elif city and not city_approx:
-            # Only show a real, known city (from the live lookup) — never the
+            # Only show a real, known city (from the live lookup) - never the
             # coarse offline "Europe/United States" placeholders.
             sub_parts.append(city)
         if dest:
@@ -256,9 +252,7 @@ class TraceroutePage(BasePage):
 
         self._rows_layout.insertWidget(self._rows_layout.count() - 1, row)
 
-    # ══════════════════════════════════════════════════════════
-    # Run
-    # ══════════════════════════════════════════════════════════
+    # -- Run --
     def _toggle(self):
         self._stop() if self._running else self._start()
 
@@ -276,7 +270,7 @@ class TraceroutePage(BasePage):
         self._hops = []
         # Bump the trace id so any still-running geolocation worker from a
         # previous trace is ignored when it finishes (that stale result was
-        # mixing old hops — Zagreb/Osijek/Mountain View — into a new trace).
+        # mixing old hops - Zagreb/Osijek/Mountain View - into a new trace).
         self._trace_id = getattr(self, "_trace_id", 0) + 1
 
         self.btn.setText("  Stop")
@@ -294,7 +288,7 @@ class TraceroutePage(BasePage):
         max_hops = self.hops_combo.currentData()
         auto = (max_hops == 0)
         if auto:
-            max_hops = 30   # ceiling; the trace stops early at the destination
+            max_hops = 30   # ceiling, the trace stops early at the destination
         w = StreamWorker(self.core.traceroute_stream, target, max_hops, auto)
         w.result.connect(self._on_event)
         w.error.connect(self._on_error)
@@ -410,9 +404,9 @@ class TraceroutePage(BasePage):
                "local": local, "city": "", "lat": None, "lon": None,
                "approx": False}
         self._hops.append(hop)
-        # Geolocate this hop in the background and plot the path as hops come
-        # in. Local hops are pinned to our own location; public hops get a
-        # real city from ip-api.com. Cheap and non-blocking, one lookup/hop.
+        """ Geolocate this hop in the background and plot the path as hops come
+        in. Local hops are pinned to our own location, public hops get a
+        real city from ip-api.com. Cheap and non-blocking, one lookup/hop. """
         self._locate_hop(hop)
 
     def _on_finished(self):
@@ -432,9 +426,7 @@ class TraceroutePage(BasePage):
         self._worker = None
         self._stop()
 
-    # ══════════════════════════════════════════════════════════
-    # Map
-    # ══════════════════════════════════════════════════════════
+    # -- Map --
     def _is_local(self, ip):
         try:
             return self.core._is_private_ip(ip)
@@ -442,7 +434,7 @@ class TraceroutePage(BasePage):
             return False
 
     def _ensure_home(self):
-        """Fetch our own approximate location once, in the background."""
+        # Fetch our own approximate location once, in the background.
         if self._home is not None or getattr(self, "_home_pending", False):
             return
         self._home_pending = True
@@ -496,9 +488,7 @@ class TraceroutePage(BasePage):
         self.map.set_status(None)
         self.map.set_hops(self._hops)
 
-    # ══════════════════════════════════════════════════════════
-    # Lifecycle
-    # ══════════════════════════════════════════════════════════
+    # -- Lifecycle --
     def on_enter(self):
         self._ensure_home()
 

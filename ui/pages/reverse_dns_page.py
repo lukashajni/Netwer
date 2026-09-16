@@ -34,7 +34,7 @@ class ReverseDnsPage(BasePage):
         self._build_results()
         self.body_layout.addStretch(1)
 
-    # ── UI ─────────────────────────────────────────────────────
+    # -- UI --
     def _build_toolbar(self):
         row = QHBoxLayout()
         row.setSpacing(8)
@@ -144,13 +144,13 @@ class ReverseDnsPage(BasePage):
             if w:
                 w.deleteLater()
 
-    # ── Lifecycle ──────────────────────────────────────────────
+    # -- Lifecycle --
     def on_leave(self):
         if self._worker is not None:
             self._worker.stop()
         super().on_leave()
 
-    # ── Lookup ─────────────────────────────────────────────────
+    # -- Lookup --
     def _lookup(self):
         ip = self.input.text().strip()
         if not ip:

@@ -4,9 +4,9 @@ NETWER — Network Health page.
 One button that answers the question people actually have: "why is my internet
 being weird?". It runs a short battery of checks (adapter, Wi-Fi, router,
 internet, DNS) and then states, in plain language, where the problem is and
-what to do about it — rather than leaving you to interpret raw numbers.
+what to do about it - rather than leaving you to interpret raw numbers.
 
-The checks run in a StreamWorker so the window stays responsive; the reasoning
+The checks run in a StreamWorker so the window stays responsive, the reasoning
 lives in core/diagnostics.py.
 """
 
@@ -39,7 +39,7 @@ def _severity_colour(sev):
 
 
 class _FindingRow(QFrame):
-    """One issue: coloured bar, title, explanation and what to do."""
+    # One issue - coloured bar, title, explanation and what to do.
 
     def __init__(self, finding, parent=None):
         super().__init__(parent)
@@ -98,7 +98,7 @@ class HealthPage(BasePage):
         self._worker = None
         self._report = None
 
-        # ── Run bar ──
+        # -- Run bar --
         bar = QHBoxLayout()
         bar.setSpacing(12)
         self.btn_run = QPushButton("  Diagnose my network")
@@ -129,7 +129,7 @@ class HealthPage(BasePage):
             f"color: {Theme.TEXT_MUTED}; font-size: 12px;")
         self.body_layout.addWidget(self.status)
 
-        # ── Verdict banner ──
+        # -- Verdict banner --
         self.verdict = QFrame()
         self.verdict.setObjectName("Verdict")
         self.verdict.hide()
@@ -149,7 +149,7 @@ class HealthPage(BasePage):
         vl.addWidget(self.verdict_text)
         self.body_layout.addWidget(self.verdict)
 
-        # ── Findings ──
+        # -- Findings --
         self.findings_card = Card("What we found", "summary")
         self._findings_area = QScrollArea()
         self._findings_area.setWidgetResizable(True)
@@ -172,7 +172,7 @@ class HealthPage(BasePage):
         self.findings_card.content_layout.addWidget(self._findings_area)
         self.body_layout.addWidget(self.findings_card, 1)
 
-        # ── Measurements strip ──
+        # -- Measurements strip --
         self.metrics_card = Card("Measurements", "monitor")
         self._metrics = QGridLayout()
         self._metrics.setHorizontalSpacing(26)
@@ -181,7 +181,7 @@ class HealthPage(BasePage):
         self.metrics_card.hide()
         self.body_layout.addWidget(self.metrics_card)
 
-    # ── Run ──
+    # -- Run --
     def _run(self):
         if self._worker is not None:
             return
@@ -217,7 +217,7 @@ class HealthPage(BasePage):
         self.btn_run.setText("  Diagnose my network")
         self.progress.setValue(100)
 
-    # ── Results ──
+    # -- Results --
     def _clear_findings(self):
         while self._findings_layout.count():
             item = self._findings_layout.takeAt(0)

@@ -44,7 +44,7 @@ class ReportPage(BasePage):
         row = QHBoxLayout()
         row.setSpacing(Theme.GAP)
 
-        # ── Left: options panel ────────────────────────────────
+        # -- Left: options panel --
         options_card = Card("Report Options", "report")
         options_card.setFixedWidth(300)
 
@@ -97,7 +97,7 @@ class ReportPage(BasePage):
 
         row.addWidget(options_card)
 
-        # ── Right: preview panel ───────────────────────────────
+        # -- Right: preview panel --
         preview_card = Card("Preview", "report")
         self._preview_scroll = QScrollArea()
         self._preview_scroll.setWidgetResizable(True)
@@ -124,11 +124,11 @@ class ReportPage(BasePage):
         row.addWidget(preview_card, 1)
         self.body_layout.addLayout(row)
 
-    # ── Styling ────────────────────────────────────────────────
+    # -- Styling --
     def _section_option(self, key, label, icon_name):
         """A clickable row with an icon, label, and a checkbox — nicer than
         a bare checkbox. Clicking anywhere toggles it."""
-        from ui.widgets.card import Card  # not needed; build a frame
+        from ui.widgets.card import Card  # not needed, build a frame
         frame = QFrame()
         frame.setObjectName("SectOpt")
         frame.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -195,7 +195,7 @@ class ReportPage(BasePage):
             f"QPushButton:disabled {{ color: {Theme.TEXT_FAINT}; }}"
         )
 
-    # ── Generate ───────────────────────────────────────────────
+    # -- Generate --
     def _generate(self):
         sections = [k for k, cb in self._checks.items() if cb.isChecked()]
         if not sections:
@@ -214,7 +214,7 @@ class ReportPage(BasePage):
         w.start()
 
     def _on_data(self, data, sections):
-        # Build PDF to a temp file (still off the UI-blocking path; building
+        # Build PDF to a temp file (still off the UI-blocking path, building
         # is fast once data is gathered)
         try:
             tmp = os.path.join(tempfile.gettempdir(),
@@ -257,7 +257,7 @@ class ReportPage(BasePage):
         self._preview_layout.addWidget(lbl, alignment=Qt.AlignmentFlag.AlignCenter)
         self._preview_layout.addStretch()
 
-    # ── Preview rendering ──────────────────────────────────────
+    # -- Preview rendering --
     def _show_preview(self, pdf_path):
         # Clear existing preview
         while self._preview_layout.count():
@@ -286,7 +286,7 @@ class ReportPage(BasePage):
             self._preview_layout.addWidget(lbl, alignment=Qt.AlignmentFlag.AlignCenter)
         self._preview_layout.addStretch()
 
-    # ── Save ───────────────────────────────────────────────────
+    # -- Save --
     def _save(self):
         if not self._temp_pdf or not os.path.exists(self._temp_pdf):
             self._status.setText("Generate a preview first.")

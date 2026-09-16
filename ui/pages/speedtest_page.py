@@ -50,7 +50,7 @@ class SpeedTestPage(BasePage):
         self._build_progress()
         self.body_layout.addStretch(1)
 
-    # ── UI ─────────────────────────────────────────────────────
+    # -- UI --
     def _build_toolbar(self):
         row = QHBoxLayout()
         row.setSpacing(8)
@@ -145,7 +145,7 @@ class SpeedTestPage(BasePage):
                 "spark": spark, "label": label_lbl}
 
     def _set_card_active(self, card, active):
-        """Highlight the card whose phase is currently running."""
+        # Highlight the card whose phase is currently running.
         color = card["color"]
         if active:
             card["frame"].setStyleSheet(
@@ -188,12 +188,12 @@ class SpeedTestPage(BasePage):
 
         self.body_layout.addWidget(card)
 
-    # ── Lifecycle ──────────────────────────────────────────────
+    # --Lifecycle --
     def on_leave(self):
         self._stop()
         super().on_leave()
 
-    # ── Run / stop ─────────────────────────────────────────────
+    # --Run / stop --
     def _toggle(self):
         if self._running:
             self._stop()

@@ -2,8 +2,8 @@
 NETWER — System Information page.
 
 Hardware and OS details plus live resource usage. Static details (CPU model,
-core count, OS build) are fetched once; live usage (CPU/RAM/Disk) updates on
-a timer using horizontal bars — a denser read than the dashboard's gauges,
+core count, OS build) are fetched once, live usage (CPU/RAM/Disk) updates on
+a timer using horizontal bars - a denser read than the dashboard's gauges,
 which suits a detail page.
 """
 
@@ -41,9 +41,7 @@ class SystemInfoPage(BasePage):
         self._build_detail_row()
         self.body_layout.addStretch(1)
 
-    # ══════════════════════════════════════════════════════════
-    # UI
-    # ══════════════════════════════════════════════════════════
+    # -- UI --
     def _build_headline_row(self):
         row = QHBoxLayout()
         row.setSpacing(Theme.GAP)
@@ -122,9 +120,7 @@ class SystemInfoPage(BasePage):
 
         self.body_layout.addLayout(row)
 
-    # ══════════════════════════════════════════════════════════
-    # Lifecycle
-    # ══════════════════════════════════════════════════════════
+    # -- Lifecycle -- 
     def preload(self):
         """Učitaj hardverske/OS detalje u pozadini pri pokretanju."""
         if not self._loaded_once:
@@ -145,9 +141,7 @@ class SystemInfoPage(BasePage):
         self._uptime_timer.stop()
         super().on_leave()
 
-    # ══════════════════════════════════════════════════════════
-    # Data
-    # ══════════════════════════════════════════════════════════
+    # -- Data --
     def _load_details(self):
         w = OneshotWorker(self.core.get_system_details)
         w.result.connect(self._on_details)

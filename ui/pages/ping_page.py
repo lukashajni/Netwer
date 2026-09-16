@@ -52,9 +52,7 @@ class PingPage(BasePage):
         self._build_results()
         self.body_layout.addStretch(1)
 
-    # ══════════════════════════════════════════════════════════
-    # UI
-    # ══════════════════════════════════════════════════════════
+    # -- UI --
     def _build_toolbar(self):
         row = QHBoxLayout()
         row.setSpacing(8)
@@ -155,16 +153,12 @@ class PingPage(BasePage):
 
         self.body_layout.addLayout(row)
 
-    # ══════════════════════════════════════════════════════════
-    # Lifecycle
-    # ══════════════════════════════════════════════════════════
+    # -- Lifecycle --
     def on_leave(self):
         self._stop()
         super().on_leave()
 
-    # ══════════════════════════════════════════════════════════
-    # Run / stop
-    # ══════════════════════════════════════════════════════════
+    # -- Run / stop -- 
     def _toggle(self):
         if self._running:
             self._stop()
@@ -225,9 +219,7 @@ class PingPage(BasePage):
         self._worker = None
         self._stop()
 
-    # ══════════════════════════════════════════════════════════
-    # Results
-    # ══════════════════════════════════════════════════════════
+    # -- Results --
     def _on_reply(self, d: dict):
         if d.get("done"):
             return
@@ -236,7 +228,7 @@ class PingPage(BasePage):
         ms = d.get("ms")
         is_up = d.get("status") == "ok"
 
-        # Connection-state alerting (watch mode): announce transitions between
+        # Connection-state alerting (watch mode) - announce transitions between
         # reachable and unreachable so a long-running monitor is useful.
         prev = getattr(self, "_link_up", None)
         if prev is not None and prev != is_up:

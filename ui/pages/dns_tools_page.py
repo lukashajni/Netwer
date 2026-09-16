@@ -37,7 +37,7 @@ class DnsToolsPage(BasePage):
         self._build_tabs()
         self._build_stack()
 
-    # ── Tab bar ────────────────────────────────────────────────
+    # -- Tab bar --
     def _build_tabs(self):
         row = QHBoxLayout()
         row.setSpacing(8)
@@ -76,7 +76,7 @@ class DnsToolsPage(BasePage):
                 f"QPushButton:hover {{ border-color: {Theme.GLASS_BORDER_HI};"
                 f"color: {Theme.TEXT_BODY}; }}")
 
-    # ── Stacked tool panels ────────────────────────────────────
+    # -- Stacked tool panels --
     def _build_stack(self):
         self._stack = QStackedWidget()
         self._panels = []
@@ -107,7 +107,7 @@ class DnsToolsPage(BasePage):
             btn.setChecked(i == active_index)
             self._style_tab(btn, i == active_index)
 
-    # ── Lifecycle ──────────────────────────────────────────────
+    # -- Lifecycle --
     def set_window(self, window):
         super().set_window(window)
         # Propagate to child panels (built before window may be set).

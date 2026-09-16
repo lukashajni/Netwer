@@ -4,10 +4,10 @@ NETWER — About page.
 Brand panel with the rotating 3D globe on the left, project information on
 the right, a feature strip and a footer with links.
 
-The globe is the centrepiece: the real Blender model rendered with
+The globe is the centrepiece - the real Blender model rendered with
 QtQuick3D, draggable, springing back to its home orientation after three
 idle seconds. If 3D isn't available on the machine (no GPU, software
-rendering), Globe3D quietly falls back to the flat logo — the page still
+rendering), Globe3D quietly falls back to the flat logo - the page still
 looks right rather than breaking.
 """
 
@@ -92,7 +92,6 @@ class AboutPage(BasePage):
 
         self.body_layout.addWidget(shell)
 
-    # ══════════════════════════════════════════════════════════
     def _divider(self):
         line = QFrame()
         line.setFixedHeight(1)
@@ -319,11 +318,9 @@ class AboutPage(BasePage):
             f"color: {Theme.TEXT_BODY}; }}")
         return btn
 
-    # ══════════════════════════════════════════════════════════
-    # Footer actions
-    # ══════════════════════════════════════════════════════════
+    # -- Footer actions --
     def _dialog_style(self):
-        """Shared style. The QLabel rules matter: without an explicit
+        """Shared style. The QLabel rules matter - without an explicit
         transparent background, Qt paints its own panel behind the text and
         it reads as a separate dark block sitting on the dialog."""
         return (
@@ -359,9 +356,7 @@ class AboutPage(BasePage):
         box.setStyleSheet(self._dialog_style())
         box.exec()
 
-    # ══════════════════════════════════════════════════════════
-    # Project stats — computed, not hard-coded, so they stay honest
-    # ══════════════════════════════════════════════════════════
+    # -- Project stats - computed, not hard-coded, so they stay honest --
     def _project_root(self):
         return os.path.dirname(os.path.dirname(os.path.dirname(
             os.path.abspath(__file__))))
