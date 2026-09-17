@@ -16,6 +16,6 @@ for prefix, vendor in EXTENDED_OUI.items():
 # Calling it here ensures all subsequent UI gauge updates report accurate metrics immediately.
 try:
     import psutil
-    psutil.cpu_percent(interval=None)  # uspostavi referentnu tocku
+    psutil.cpu_percent(interval=None)
 except Exception:
     pass
