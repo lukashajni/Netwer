@@ -1,5 +1,5 @@
 """
-NETWER — persistent store.
+NETWER persistent store.
 
 A tiny JSON-backed key/value store living in the user's config folder, used
 for things that should survive across sessions: app settings (default
@@ -11,9 +11,9 @@ Location:
     Linux   : ~/.config/NETWER/netwer_data.json
     macOS   : ~/Library/Application Support/NETWER/netwer_data.json
 
-The store is deliberately simple and forgiving: a corrupt or missing file
-just resets to defaults rather than crashing the app. Writes are atomic
-(write temp + replace) so a crash mid-write can't corrupt the file.
+The store is forgiving on purpose: a corrupt or missing file just resets to
+defaults instead of crashing the app. Writes are atomic (write a temp file,
+then replace) so a crash mid-write can't leave a broken file behind.
 """
 
 import os
@@ -74,7 +74,7 @@ class Store:
         self._loaded = False
         self.load()
 
-    # ── Load / save ────────────────────────────────────────────
+    # Load / save
     def load(self):
         try:
             with open(_data_path(), "r", encoding="utf-8") as f:
@@ -87,7 +87,7 @@ class Store:
                 self._data["favorites"] = disk.get("favorites", [])
                 self._data["last_scans"] = disk.get("last_scans", {})
         except Exception:
-            pass  # missing/corrupt → keep defaults
+            pass  # missing or corrupt file, keep defaults
         self._loaded = True
 
     def save(self):
@@ -101,7 +101,7 @@ class Store:
         except Exception:
             pass
 
-    # ── Settings ───────────────────────────────────────────────
+    # Settings
     def get_setting(self, key, default=None):
         return self._data["settings"].get(
             key, DEFAULT_SETTINGS.get(key, default))
@@ -117,7 +117,7 @@ class Store:
         self._data["settings"] = dict(DEFAULT_SETTINGS)
         self.save()
 
-    # ── Recent hosts ───────────────────────────────────────────
+    # Recent hosts
     def add_recent_host(self, host, kind="ping"):
         host = (host or "").strip()
         if not host:
@@ -141,7 +141,7 @@ class Store:
         self._data["recent_hosts"] = []
         self.save()
 
-    # ── Favorites ──────────────────────────────────────────────
+    # Favorites
     def add_favorite(self, host, label=""):
         host = (host or "").strip()
         if not host:
@@ -164,7 +164,7 @@ class Store:
     def favorites(self):
         return list(self._data["favorites"])
 
-    # ── Last scan cache ────────────────────────────────────────
+    # Last scan cache
     def set_last_scan(self, feature, payload):
         self._data["last_scans"][feature] = {
             "ts": datetime.now().isoformat(timespec="seconds"),
@@ -175,7 +175,7 @@ class Store:
     def get_last_scan(self, feature):
         return self._data["last_scans"].get(feature)
 
-    # ── Utility ────────────────────────────────────────────────
+    # Utility
     def data_file_path(self):
         return _data_path()
 

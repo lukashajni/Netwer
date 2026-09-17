@@ -1,18 +1,18 @@
 """
-NETWER — Ikone (centralni registar).
+NETWER icons (central registry).
 
-Sve ikone aplikacije definirane su ovdje, kao što su boje u theme.py.
-Koristimo qtawesome (Font Awesome 6) — prave vektorske ikone koje se
-boje kroz temu i skaliraju bez gubitka kvalitete.
+All of the app's icons are defined here, the same way colors live in
+theme.py. We use qtawesome (Font Awesome 6), real vector icons that take
+their color from the theme and scale without going fuzzy.
 
-Korištenje:
+Usage:
     from app.resources import Icons
     label.setPixmap(Icons.pixmap("dashboard", 16, Theme.ACCENT))
     button.setIcon(Icons.get("wifi", Theme.TEXT_SECONDARY))
 
-Nazivi ikona su naši (npr. "dashboard"), a mapiraju se na Font Awesome
-imena u _MAP. Tako ako poželimo promijeniti izgled ikone, mijenjamo na
-jednom mjestu.
+The icon names are ours (e.g. "dashboard") and map to Font Awesome names
+in _MAP. That way, changing how an icon looks is a one-line edit in one
+place.
 """
 
 import os
@@ -24,17 +24,17 @@ from PyQt6.QtCore import Qt
 from app.theme import Theme
 
 
-# Korijen projekta (dvije razine iznad app/resources.py)
+# Project root (two levels above app/resources.py)
 _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 ASSETS_DIR = os.path.join(_PROJECT_ROOT, "assets")
 LOGO_PATH = os.path.join(ASSETS_DIR, "logo", "netwer_logo.png")
 
 
 def logo_pixmap(size: int = 44) -> QPixmap:
-    """Ucitaj NETWER logo skaliran na zadanu velicinu (glatko)."""
+    """NETWER logo, smoothly scaled to the given size."""
     pm = QPixmap(LOGO_PATH)
     if pm.isNull():
-        # Fallback na globus ikonu ako logo nije nadjen
+        # Fall back to the globe icon if the logo file isn't there
         return Icons.get("globe", Theme.ACCENT_GLOW).pixmap(size, size)
     return pm.scaled(
         size, size,
@@ -44,9 +44,9 @@ def logo_pixmap(size: int = 44) -> QPixmap:
 
 
 class Icons:
-    # Naš naziv → Font Awesome 6 solid naziv
+    # Our name -> Font Awesome 6 solid name
     _MAP = {
-        # Navigacija
+        # Navigation
         "dashboard": "fa6s.house",
         "network": "fa6s.network-wired",
         "wifi": "fa6s.wifi",
@@ -67,7 +67,7 @@ class Icons:
         "sun": "fa6s.sun",
         "bell": "fa6s.bell",
         "about": "fa6s.circle-info",
-        # Dashboard kartice
+        # Dashboard cards
         "internet": "fa6s.globe",
         "download": "fa6s.download",
         "upload": "fa6s.upload",
@@ -76,7 +76,7 @@ class Icons:
         "summary": "fa6s.list",
         "devices": "fa6s.laptop",
         "resources": "fa6s.server",
-        # Statusi / razno
+        # Statuses / misc
         "check": "fa6s.circle-check",
         "checkmark": "fa6s.check",
         "warning": "fa6s.triangle-exclamation",
@@ -123,23 +123,23 @@ class Icons:
 
     @classmethod
     def get(cls, name: str, color: str = None) -> QIcon:
-        """Vrati QIcon za dani naziv i boju (za gumbe, akcije)."""
+        """QIcon for a given name and color (for buttons and actions)."""
         fa_name = cls._MAP.get(name, "fa6s.circle")
         return qta.icon(fa_name, color=color or Theme.TEXT_SECONDARY)
 
     @classmethod
     def pixmap(cls, name: str, size: int = 16, color: str = None) -> QPixmap:
-        """Vrati QPixmap zadane veličine (za QLabel ikone u karticama)."""
+        """QPixmap at the given size (for QLabel icons inside cards)."""
         return cls.get(name, color).pixmap(size, size)
 
-    #: Cache za PNG-ove ikona koje QSS koristi kao image: url(...).
+    #: Cache of the icon PNGs that QSS pulls in as image: url(...).
     _png_cache = {}
 
     @classmethod
     def png_path(cls, name: str, size: int = 16, color: str = "#ffffff") -> str:
-        """Renderiraj ikonu u PNG na disk i vrati putanju (s file-URL slash
-        formatom). Potrebno jer Qt stylesheet ne može crtati qtawesome ikonu
-        izravno — treba mu image: url(putanja). Rezultat se kešira."""
+        """Render an icon to a PNG on disk and return the path (with
+        forward slashes). Needed because a Qt stylesheet can't draw a
+        qtawesome icon directly, it wants image: url(path). Cached."""
         key = (name, size, color)
         if key in cls._png_cache and os.path.isfile(cls._png_cache[key]):
             return cls._png_cache[key]
@@ -150,7 +150,7 @@ class Icons:
         safe = name.replace("/", "_") + f"_{size}_{color.lstrip('#')}.png"
         path = os.path.join(out_dir, safe)
         pm.save(path, "PNG")
-        # QSS url() na Windowsu voli forward-slashe.
+        # QSS url() prefers forward slashes on Windows.
         url_path = path.replace("\\", "/")
         cls._png_cache[key] = url_path
         return url_path

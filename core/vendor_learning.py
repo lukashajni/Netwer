@@ -4,7 +4,7 @@ NETWER ships with a built-in OUI table, but it can't know every device on
 Earth. This module lets the app *learn*: every time it successfully resolves a
 vendor online, it remembers it; and the user can correct a wrong/blank guess,
 which is also remembered. Over time the local database fills in, so the app
-gets better the more it's used — even offline.
+gets better the more it's used, even offline.
 
 Everything is stored in a small JSON file next to the app's other settings, so
 learned vendors survive restarts. Keys are 6-hex-digit OUI prefixes (the first
@@ -99,7 +99,7 @@ def remember(mac_or_prefix: str, vendor: str) -> None:
 
 
 def teach(mac_or_prefix: str, vendor: str) -> bool:
-    """User correction — always wins and is persisted. Returns True if stored.
+    """User correction, always wins and is persisted. Returns True if stored.
     Passing an empty vendor forgets a previously taught entry."""
     prefix = _norm(mac_or_prefix)
     if len(prefix) < 6:

@@ -1,15 +1,15 @@
 """
-NETWER CORE — pure Python backend logic, no web framework dependency.
+NETWER core: pure Python backend logic, no web framework dependency.
 
 This module contains every diagnostic/monitoring function as plain
 functions and generators. Designed to be imported directly by any
-frontend (PyQt, CLI, Flask, etc.) — nothing here depends on Flask,
+frontend (PyQt, CLI, Flask, etc.), nothing here depends on Flask,
 request objects, or HTTP at all.
 
 Conventions used throughout:
 - Functions that return one result return a dict.
 - Functions that produce a stream of updates (ping sweep, monitor,
-  speed test) are Python generators that `yield` dicts — the caller
+  speed test) are Python generators that `yield` dicts, so the caller
   decides how to consume them (Qt signal emission, SSE, print, etc.)
 - All functions handle their own errors and return {"error": "..."}
   rather than raising, so callers don't need try/except everywhere.
@@ -49,7 +49,7 @@ def _no_window():
 
 def friendly_error(exc):
     """Turn a raw exception (or message) into a short, human message suitable
-    for showing in the app — never the raw 'Command [...] timed out' text that
+    for showing in the app, never the raw 'Command [...] timed out' text that
     looks like a console dump."""
     msg = str(exc) if not isinstance(exc, str) else exc
     low = msg.lower()
@@ -76,9 +76,7 @@ def friendly_error(exc):
 
 
 
-# ══════════════════════════════════════════
-# HELPERS
-# ══════════════════════════════════════════
+# Helpers
 
 def prefix_to_mask(prefix):
     masks = [0, 128, 192, 224, 240, 248, 252, 254, 255]
@@ -156,7 +154,7 @@ def run_powershell(command, timeout=10):
 
 
 def _windows_ipconfig_config():
-    """Fast native adapter config via `ipconfig /all` — no PowerShell, so it
+    """Fast native adapter config via `ipconfig /all`, no PowerShell, so it
     returns instantly and works reliably on Wi-Fi where the Get-Net* cmdlets
     are slow to cold-start (they were timing out at 8-12s). Parses the FIRST
     adapter block that has an IPv4 address and a default gateway (the active
@@ -226,14 +224,12 @@ def _mask_to_prefix(mask):
         return 24
 
 
-# ══════════════════════════════════════════
-# MAC VENDOR LOOKUP (OUI) — offline, no API dependency
-# ══════════════════════════════════════════
+# MAC vendor lookup (OUI), offline, no API dependency.
 
 # Minimal built-in OUI table covering the vendors you'll actually see on a
 # home/office network. Keys are the first 6 hex chars of the MAC (no
-# separators, uppercase). This is intentionally small — add entries as
-# needed rather than shipping a multi-MB IEEE database.
+# separators, uppercase). Kept small on purpose, add entries as needed
+# rather than shipping a multi-MB IEEE database.
 OUI_TABLE = {
     "001A11": "Google", "3C5AB4": "Google", "F4F5D8": "Google",
     "A45C2C": "ASUSTek", "AC9E17": "ASUSTek", "D8501A": "ASUSTek",
@@ -276,7 +272,7 @@ def lookup_vendor(mac_address, allow_online=False):
         return "Unknown"
     prefix = cleaned[:6]
 
-    # A user-taught vendor always wins — even over the randomized-MAC label,
+    # A user-taught vendor always wins, even over the randomized-MAC label,
     # since the user explicitly corrected it.
     try:
         from core import vendor_learning
@@ -288,7 +284,7 @@ def lookup_vendor(mac_address, allow_online=False):
 
     # Locally-administered / randomized MAC (2nd nibble is 2, 6, A or E).
     # Modern phones/laptops randomize their MAC for privacy, so there's no
-    # real manufacturer to look up — label it honestly instead of "Unknown".
+    # real manufacturer to look up, so label it honestly instead of "Unknown".
     try:
         second_nibble = int(cleaned[1], 16)
         if second_nibble & 0x2:
@@ -337,9 +333,7 @@ def teach_vendor(mac_address, vendor):
         return False
 
 
-# ══════════════════════════════════════════
-# NETWORK CONFIG (Ethernet Info source of truth)
-# ══════════════════════════════════════════
+# Network config (Ethernet Info source of truth)
 
 def get_network_config():
     """Returns the active adapter's IP config as a dict, or {"error": ...}.
@@ -432,7 +426,7 @@ def get_public_ip():
 
 
 def get_ethernet_info():
-    """Full Ethernet Info screen data — same shape as before, unchanged."""
+    """Full Ethernet Info screen data, same shape as before, unchanged."""
     cfg = get_network_config()
     if "error" in cfg:
         return cfg
@@ -455,9 +449,7 @@ def get_ethernet_info():
     }
 
 
-# ══════════════════════════════════════════
-# WIFI INFO
-# ══════════════════════════════════════════
+# Wi-Fi info
 
 def get_wifi_info():
     try:
@@ -598,9 +590,7 @@ def scan_wifi_networks():
         return {"error": str(e)}
 
 
-# ══════════════════════════════════════════
-# SYSTEM INFO (static snapshot — name/CPU model/OS/uptime)
-# ══════════════════════════════════════════
+# System info (static snapshot: name/CPU model/OS/uptime)
 
 def get_system_info():
     try:
@@ -646,7 +636,7 @@ def get_system_details():
     """Extended system information for the System Information page.
 
     Builds on get_system_info() (computer/CPU/RAM/OS/uptime) and adds
-    hardware detail — core counts, CPU frequency, architecture, OS build,
+    hardware detail: core counts, CPU frequency, architecture, OS build,
     Python version, disk layout. Uses platform/psutil rather than more
     PowerShell so it's testable and fast.
     """
@@ -710,13 +700,11 @@ def get_system_details():
         return details
 
 
-# ══════════════════════════════════════════
-# SYSTEM RESOURCES — live CPU / RAM / Disk for dashboard gauges
-# (NEW — this is the "System Resources" card from the dashboard mockup)
-# ══════════════════════════════════════════
+# System resources: live CPU / RAM / Disk for dashboard gauges
+# (this is the "System Resources" card from the dashboard mockup)
 
 def get_system_resources():
-    """A live snapshot of CPU%, RAM%, and Disk% usage — call this on a
+    """A live snapshot of CPU%, RAM%, and Disk% usage, call this on a
     timer (e.g. every 1-2s) from the PyQt side to drive the dashboard
     gauges. Lightweight by design, no subprocess calls."""
     if not PSUTIL_AVAILABLE:
@@ -742,16 +730,14 @@ def get_system_resources():
 
 def stream_system_resources(interval_s=1.5, max_samples=600):
     """Generator version for continuous dashboard updates. Caller breaks
-    the loop (e.g. by closing the dashboard tab) — this doesn't run forever
-    on its own past max_samples as a safety net."""
+    the loop (e.g. by closing the dashboard tab); this doesn't run forever
+    on its own past max_samples, which is just a safety net."""
     for _ in range(max_samples):
         yield get_system_resources()
         time.sleep(interval_s)
 
 
-# ══════════════════════════════════════════
-# PING — quick / stability / custom
-# ══════════════════════════════════════════
+# Ping: quick / stability / custom
 
 def ping_quick():
     """Pings 3 well-known DNS servers once each (4 pings), returns a list
@@ -810,7 +796,7 @@ def ping_stability_stream(target="8.8.8.8", count=20):
 def ping_custom_stream(target="8.8.8.8", count=4, interval_ms=500):
     """Ping a target, yielding one result per packet.
 
-    count=0 means CONTINUOUS — run until the caller stops iterating (the
+    count=0 means CONTINUOUS: run until the caller stops iterating (the
     worker's cancel flag closes the generator). Running stats (avg/min/max/
     jitter/loss) are emitted alongside each packet so the UI can update live
     rather than only at the end.
@@ -862,9 +848,7 @@ def ping_custom_stream(target="8.8.8.8", count=4, interval_ms=500):
         yield {"done": True, "error": "All packets lost", "sent": sent}
 
 
-# ══════════════════════════════════════════
-# PORT SCANNER
-# ══════════════════════════════════════════
+# Port scanner
 
 # Well-known service map: port -> (service name, transport/protocol note).
 # Covers the ports a real scanner flags by default plus common extras.
@@ -930,7 +914,7 @@ def _clean_banner(text):
         o = ord(ch)
         if 32 <= o <= 126:            # printable ASCII
             cleaned.append(ch)
-        elif o in (9,):              # tab → space
+        elif o in (9,):              # tab becomes a space
             cleaned.append(" ")
     result = "".join(cleaned).strip()
     # Collapse runs of spaces left behind by stripped bytes.
@@ -981,9 +965,9 @@ def _grab_banner(sock, port, timeout):
 def _classify_port(ip, port, timeout, grab_banner=True):
     """Probe a single TCP port and classify the result the way a real
     scanner does:
-        open     — connection succeeded (service is listening)
-        closed   — host actively refused (RST) → port reachable, nothing there
-        filtered — no response within timeout (firewall dropping packets)
+        open:     connection succeeded (service is listening)
+        closed:   host actively refused (RST), port reachable, nothing there
+        filtered: no response within timeout (firewall dropping packets)
     When the port is open and grab_banner is set, also try to read a service
     banner (e.g. "OpenSSH_8.9", "nginx/1.24.0"). Returns a dict with port,
     service, protocol, state, and banner.
@@ -1002,7 +986,7 @@ def _classify_port(ip, port, timeout, grab_banner=True):
         elif result in (111, 10061):        # ECONNREFUSED (Linux / Windows)
             state = "closed"
         else:
-            state = "filtered"              # timeout / unreachable → filtered
+            state = "filtered"              # timeout / unreachable
         s.close()
     except socket.timeout:
         state = "filtered"
@@ -1049,10 +1033,10 @@ def _parse_port_spec(spec):
 def port_scan_stream(ip, ports=None, timeout_ms=600, max_workers=100):
     """Generator: scan a host's ports IN PARALLEL and yield results live.
 
-    ip         — target host (IP or resolvable hostname)
-    ports      — profile name, spec string, or explicit list of ints.
-                 Defaults to the 'common' profile.
-    timeout_ms — per-port connect timeout.
+    ip: target host (IP or resolvable hostname)
+    ports: profile name, spec string, or explicit list of ints,
+        defaults to the 'common' profile.
+    timeout_ms: per-port connect timeout.
 
     Yields:
         {"target": ip, "resolved": ip, "total": N}         (once, at start)
@@ -1065,7 +1049,7 @@ def port_scan_stream(ip, ports=None, timeout_ms=600, max_workers=100):
     """
     from concurrent.futures import ThreadPoolExecutor, as_completed
 
-    # Resolve hostname → IP up front.
+    # Resolve hostname to an IP up front.
     try:
         resolved = socket.gethostbyname(ip)
     except Exception:
@@ -1125,9 +1109,9 @@ def wake_on_lan(mac, broadcast="255.255.255.255", port=9):
     16 times, broadcast over UDP. The device's NIC (if WoL is enabled in its
     BIOS/OS) powers the machine on.
 
-    mac        — target MAC ('AA:BB:CC:DD:EE:FF', with : - or none)
-    broadcast  — broadcast address (usually the subnet or 255.255.255.255)
-    port       — UDP port (7 or 9 conventionally)
+    mac: target MAC ('AA:BB:CC:DD:EE:FF', with : - or none)
+    broadcast: broadcast address (usually the subnet or 255.255.255.255)
+    port: UDP port (7 or 9 conventionally)
 
     Returns {"ok": True} on success or {"error": "..."}.
     """
@@ -1153,7 +1137,7 @@ def wake_on_lan(mac, broadcast="255.255.255.255", port=9):
         return {"error": str(e)}
 
 
-# ── Device type detection ──────────────────────────────────────
+# Device type detection
 # Infer what a device *is* from its open ports and vendor string. Used by
 # the Ping Sweep (icon + label per device) and reports. Returns one of the
 # type keys below; the UI maps these to icons.
@@ -1187,10 +1171,10 @@ def detect_device_type(open_ports=None, vendor="", is_gateway=False,
                         hostname=""):
     """Best-effort device classification.
 
-    open_ports — iterable of open port numbers (ints), if a scan was run
-    vendor     — OUI vendor string (e.g. "MikroTik", "Apple")
-    is_gateway — True if this is the default gateway (→ router)
-    hostname   — reverse-DNS hostname, used as a weak hint
+    open_ports: iterable of open port numbers (ints), if a scan was run
+    vendor: OUI vendor string (e.g. "MikroTik", "Apple")
+    is_gateway: True if this is the default gateway (counts as a router)
+    hostname: reverse-DNS hostname, used as a weak hint
 
     Returns a type key: router, printer, nas, tv, phone, camera, console,
     media, computer, or generic.
@@ -1219,17 +1203,15 @@ def detect_device_type(open_ports=None, vendor="", is_gateway=False,
         if kw in h:
             return dtype
 
-    # 4) Web-only device → probably some appliance/computer.
+    # 4) Web-only device, probably some appliance/computer.
     if ports & {80, 443, 8080}:
         return "computer"
     return "generic"
 
 
-# ══════════════════════════════════════════
-# PING SWEEP / TOP DEVICES / NETWORK MAP
-# These three share the same underlying scan — they're just different
+# Ping sweep / Top Devices / Network Map.
+# These three share the same underlying scan, they're just different
 # presentations of "what's alive on my LAN right now".
-# ══════════════════════════════════════════
 
 def _resolve_local_network_prefix():
     """Returns ('192.168.1', '192.168.1.1', cfg_dict) or raises."""
@@ -1261,7 +1243,7 @@ def _get_own_ip_and_mac():
 def _get_mac_for_ip(ip, own_ip=None, own_mac=None):
     """Best-effort MAC lookup. For your OWN IP, ARP returns nothing, so use
     the adapter's MAC passed in. Otherwise read the ARP table."""
-    # Own machine: ARP won't have it — use the adapter MAC.
+    # Own machine: ARP won't have it, so use the adapter MAC.
     if own_ip and ip == own_ip and own_mac:
         return own_mac
     try:
@@ -1281,7 +1263,7 @@ def _get_mac_for_ip(ip, own_ip=None, own_mac=None):
 
 
 def _read_arp_table():
-    """Read the full ARP table → {ip: mac}. Devices that block ping (common
+    """Read the full ARP table into {ip: mac}. Devices that block ping (common
     on Windows firewalls) still show up here if they've communicated on the
     LAN recently. Real scanners cross-reference this so a silent host isn't
     invisible."""
@@ -1317,7 +1299,7 @@ def _read_arp_table():
 def _parse_subnet_prefix(subnet):
     """Normalise a user-supplied subnet to a 3-octet prefix like
     '192.168.88'. Accepts '192.168.88.0/24', '192.168.88.0', '192.168.88.',
-    or '192.168.88'. Only /24 (or an implied /24) is supported — returns
+    or '192.168.88'. Only /24 (or an implied /24) is supported, returns
     None on anything invalid."""
     if not subnet:
         return None
@@ -1339,7 +1321,7 @@ def ping_sweep_stream(timeout_ms=150, subnet=None):
     Angry IP Scanner). Yields per-host results as they come in, then a final
     summary. Powers Ping Sweep, Top Devices, and Network Map.
 
-    subnet — optional CIDR or prefix to scan (e.g. "192.168.88.0/24" or
+    subnet: optional CIDR or prefix to scan (e.g. "192.168.88.0/24" or
              "192.168.88"). When omitted, the local /24 is auto-detected
              and the gateway is highlighted (Top Devices / Network Map path).
 
@@ -1371,7 +1353,7 @@ def ping_sweep_stream(timeout_ms=150, subnet=None):
 
     import concurrent.futures
 
-    # Resolve our own IP/MAC once — ARP won't list us, so we label our own
+    # Resolve our own IP/MAC once. ARP won't list us, so we label our own
     # machine (and thus resolve its vendor) using the adapter's MAC.
     own_ip, own_mac = _get_own_ip_and_mac()
 
@@ -1385,7 +1367,7 @@ def ping_sweep_stream(timeout_ms=150, subnet=None):
         except Exception:
             hostname = "Unknown"
         # MAC is filled in AFTER the sweep from the ARP table (populated by
-        # these very pings). Resolving it here per-host is unreliable — the
+        # these very pings). Resolving it here per-host is unreliable, the
         # OS often hasn't written the ARP entry yet, giving "Unknown".
         return {
             "online": True,
@@ -1418,7 +1400,7 @@ def ping_sweep_stream(timeout_ms=150, subnet=None):
                 seen_ips.add(host["ip"])
                 pending.append(host)
 
-    # Now the ARP table is populated by the sweep — read it ONCE and fill in
+    # Now the ARP table is populated by the sweep, read it ONCE and fill in
     # every host's MAC/vendor. Give the OS a brief moment to flush entries,
     # then read; retry once if some are still missing.
     time.sleep(0.3)
@@ -1455,7 +1437,7 @@ def ping_sweep_stream(timeout_ms=150, subnet=None):
 
     # Second pass: the ping sweep populates the OS ARP table as a side
     # effect. Devices that block ping (typical Windows firewall default)
-    # never answered above, but they're now in the ARP table — pick them up
+    # never answered above, but they're now in the ARP table, so pick them up
     # so a silent PC still appears, like a real scanner does.
     arp = _read_arp_table()
     for ip, mac in arp.items():
@@ -1487,7 +1469,7 @@ def ping_sweep_stream(timeout_ms=150, subnet=None):
 
 
 def _needs_fingerprint(host: dict) -> bool:
-    """True when we couldn't name the device from its MAC — i.e. a randomized
+    """True when we couldn't name the device from its MAC: a randomized
     address or an OUI we don't know, and no useful hostname either."""
     if host.get("is_self") or host.get("is_gateway"):
         return False
@@ -1546,7 +1528,7 @@ def _fingerprint_unknown_devices(hosts, max_workers=16):
 
 
 def get_top_devices(limit=10):
-    """Non-streaming convenience wrapper around ping_sweep_stream — runs
+    """Non-streaming convenience wrapper around ping_sweep_stream. Runs
     the full sweep and returns a sorted device list, for callers that
     just want a finished table (e.g. populating a Qt table widget once)
     rather than live progress updates."""
@@ -1594,13 +1576,7 @@ def get_network_map():
     }
 
 
-# ══════════════════════════════════════════
-# TRACEROUTE
-# ══════════════════════════════════════════
-
-# ══════════════════════════════════════════
-# TRACEROUTE
-# ══════════════════════════════════════════
+# Traceroute
 
 _HOP_RE = re.compile(r'^\s*(\d{1,2})\s+(.*)$')
 _IP_RE = re.compile(r'(\d{1,3}(?:\.\d{1,3}){3})')
@@ -1727,7 +1703,7 @@ def traceroute_stream(target, max_hops=30, auto=False):
     Uses the OS traceroute/tracert, falling back to a ping TTL-walk if that
     yields nothing. Always stops as soon as the destination answers.
 
-    auto — when True, NETWER decides how far to go: it also gives up early
+    auto: when True, NETWER decides how far to go, it also gives up early
     after several hops in a row time out (the destination is unreachable /
     silently dropping probes), so an "Auto" trace doesn't crawl all the way
     to the ceiling on a dead route.
@@ -1762,15 +1738,13 @@ def traceroute_stream(target, max_hops=30, auto=False):
     yield from _walk(_system_trace(resolved, max_hops))
 
     if produced == 0:
-        # System tool unavailable or silent — use the ping fallback.
+        # System tool unavailable or silent, so use the ping fallback.
         yield from _walk(_ping_trace(resolved, max_hops))
 
     yield {"done": True, "reached": reached}
 
 
-# ══════════════════════════════════════════
-# GEOLOCATION (for traceroute-on-map)
-# ══════════════════════════════════════════
+# Geolocation (for traceroute-on-map)
 
 _GEO_CACHE = {}   # ip -> {lat, lon, city, country} (session cache)
 _GEO_LAST_ERROR = None   # last geolocation failure reason (for the UI)
@@ -1793,7 +1767,7 @@ def _load_offline_geo():
 
 def _offline_geolocate(ip):
     """Approximate location from a bundled table (no network). Returns
-    {lat, lon, city, country} for ANY public IPv4 — falls back to a coarse
+    {lat, lon, city, country} for ANY public IPv4. Falls back to a coarse
     guess for octets not explicitly mapped, so the map always has a point."""
     data = _load_offline_geo()
     known = data.get("known", {})
@@ -1809,7 +1783,7 @@ def _offline_geolocate(ip):
     if rule:
         lat, lon, country = rule
     else:
-        # Unmapped octet — place at the region centroid by first octet.
+        # Unmapped octet, place at the region centroid by first octet.
         if first < 64:
             lat, lon, country = 39, -98, "United States"
         elif first < 128:
@@ -1888,7 +1862,7 @@ def geolocate_ip(ip, timeout=4):
 def traceroute_geo_stream(target, max_hops=30, home_lat=None, home_lon=None):
     """Traceroute that yields the same events as traceroute_stream, marking
     private hops as local (and pinning them to the user's coordinates if
-    known). Public hops are NOT geolocated here — that happens afterwards in
+    known). Public hops are NOT geolocated here, that happens afterwards in
     geolocate_hops(), in parallel, so a slow or blocked geo provider can't
     stall the trace itself (one blocking HTTP call per hop used to make a
     30-hop trace take minutes on a network where the provider is blocked).
@@ -1908,7 +1882,7 @@ def geolocate_hops(ips, timeout=6, max_workers=8):
     """Geolocate several IPs at once. Returns {ip: geo_or_None}.
 
     Tries ip-api.com's batch endpoint first (a single POST for up to 100
-    addresses — far faster and much less likely to hit the per-minute rate
+    addresses, far faster and much less likely to hit the per-minute rate
     limit than one request per hop). Falls back to parallel single lookups
     if the batch call isn't available.
     """
@@ -1924,7 +1898,7 @@ def geolocate_hops(ips, timeout=6, max_workers=8):
     if not todo:
         return out
 
-    # 1) Batch endpoint — one request for everything.
+    # 1) Batch endpoint: one request for everything.
     try:
         payload = json.dumps([
             {"query": ip, "fields": "status,lat,lon,city,country,query"}
@@ -1962,7 +1936,7 @@ def geolocate_hops(ips, timeout=6, max_workers=8):
     except Exception:
         pass
 
-    # 2) Fallback — parallel single lookups (each already falls back offline).
+    # 2) Fallback: parallel single lookups (each already falls back offline).
     from concurrent.futures import ThreadPoolExecutor
     try:
         with ThreadPoolExecutor(max_workers=min(max_workers, len(todo))) as ex:
@@ -1992,9 +1966,7 @@ def geolocate_me(timeout=3):
     return None
 
 
-# ══════════════════════════════════════════
-# DNS TOOLS
-# ══════════════════════════════════════════
+# DNS tools
 
 def dns_lookup(domain):
     try:
@@ -2018,9 +1990,7 @@ def reverse_dns(ip):
         return {"error": str(e)}
 
 
-# ══════════════════════════════════════════
-# NETWORK ADAPTERS
-# ══════════════════════════════════════════
+# Network adapters
 
 def list_adapters_linux():
     """List network adapters on Linux via psutil (name, status, speed, MTU,
@@ -2070,7 +2040,7 @@ def handle_adapter_details_linux(adapter_name):
         def get_virtual_type(adapter_name):
             adapter_path = Path(f"/sys/class/net/{adapter_name}/device")
             if adapter_path.is_dir():
-                # Physical → return nothing (UI treats empty as physical).
+                # Physical, so return nothing (UI treats empty as physical).
                 return ""
             else:
                 return "Virtual"
@@ -2129,7 +2099,7 @@ def list_adapters():
 def _windows_adapter_details_native(adapter_name):
     """Fast native adapter details via `ipconfig /all` (+ `netsh wlan` for the
     Wi-Fi link rate). Used to fill in Description / DHCP / Link Speed when the
-    Get-Net* PowerShell path is slow or times out — which is exactly what left
+    Get-Net* PowerShell path is slow or times out, which is exactly what left
     those fields blank in the PDF report on Wi-Fi."""
     out = {}
     try:
@@ -2167,7 +2137,7 @@ def _windows_adapter_details_native(adapter_name):
         if mac:
             out["mac"] = mac.replace("-", ":").upper()
 
-        # Addressing — these were still blank on the Network Information page
+        # Addressing: these were still blank on the Network Information page
         # whenever the PowerShell path timed out, so read them here too.
         ipv4 = re.sub(r'\(.*?\)', '', field(r'IPv4 Address', r'IPv4 adresa',
                                             r'IP Address')).strip()
@@ -2197,7 +2167,7 @@ def _windows_adapter_details_native(adapter_name):
             out["status"] = "Up"
         break
 
-    # MTU isn't in ipconfig — netsh knows it.
+    # MTU isn't in ipconfig, but netsh knows it.
     try:
         mt = subprocess.run(
             ["netsh", "interface", "ipv4", "show", "subinterfaces"],
@@ -2226,7 +2196,7 @@ def _windows_adapter_details_native(adapter_name):
 
 
 def get_adapter_details(adapter_name):
-    """Full IP configuration for ONE named adapter — drives the Network
+    """Full IP configuration for ONE named adapter, drives the Network
     Information page. Returns a dict of fields (ip, mask, gateway, dns,
     mac, speed, status, dhcp, ...) or {"error": ...}. Windows-only."""
     if not adapter_name:
@@ -2304,7 +2274,7 @@ $linkSpeed = if ($ad.LinkSpeed) { $ad.LinkSpeed } else { '' }
                 result[key] = native[key]
         return result
     except Exception:
-        # PowerShell failed or timed out (common on Wi-Fi) — return whatever
+        # PowerShell failed or timed out (common on Wi-Fi), so return whatever
         # the native path can tell us instead of an error with empty fields.
         native = _windows_adapter_details_native(adapter_name)
         if native:
@@ -2323,10 +2293,8 @@ def _prefix_to_mask(prefix):
         return ""
 
 
-# ══════════════════════════════════════════
-# NETWORK MONITOR (live download/upload, for both the standalone screen
+# Network monitor (live download/upload, for both the standalone screen
 # and the dashboard's "Live Network Monitor" + "Interface Traffic" charts)
-# ══════════════════════════════════════════
 
 def find_psutil_interface(ps_name):
     if not PSUTIL_AVAILABLE:
@@ -2363,7 +2331,7 @@ def _pick_traffic_ifaces(adapter_name=""):
 
     - If adapter_name is given, resolve it to a single psutil iface.
     - Otherwise, return ALL real (physical, up) interfaces. We sum their
-      traffic, so it doesn't matter which one the OS routes through — the
+      traffic, so it doesn't matter which one the OS routes through, the
       one actually moving bytes dominates. This avoids the whole 'picked
       the VMware adapter' problem entirely.
     """
@@ -2408,7 +2376,7 @@ def monitor_stream(adapter_name="", max_samples=600):
     the dashboard's live traffic chart.
 
     Auto mode sums ALL real (non-virtual) adapters, so traffic shows up
-    regardless of which adapter Windows routes through — no fragile
+    regardless of which adapter Windows routes through, no fragile
     'guess the right adapter' logic, and VMware/VirtualBox adapters are
     excluded automatically.
     """
@@ -2458,7 +2426,7 @@ def monitor_stream(adapter_name="", max_samples=600):
 
 
 def get_bandwidth_today():
-    """Total bytes sent/received since boot — backs the dashboard's
+    """Total bytes sent/received since boot, backs the dashboard's
     'Bandwidth Usage (Today)' card. Note: this is since-boot, not a true
     midnight-to-now figure, since the OS doesn't track that natively
     without a persistence layer. Documented here so the PyQt side knows
@@ -2475,9 +2443,7 @@ def get_bandwidth_today():
         return {"error": str(e)}
 
 
-# ══════════════════════════════════════════
-# SPEED TEST (Ookla CLI wrapper)
-# ══════════════════════════════════════════
+# Speed test (Ookla CLI wrapper)
 
 def find_speedtest_exe():
     search_paths = [
@@ -2537,9 +2503,7 @@ def speedtest_stream():
         yield {"error": str(e)}
 
 
-# ══════════════════════════════════════════
-# SAVE REPORT
-# ══════════════════════════════════════════
+# Save report
 
 def save_report(path="", name="netwer_report"):
     path = path.strip() or os.path.join(os.path.expanduser("~"), "Desktop")

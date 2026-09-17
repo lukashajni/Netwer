@@ -1,14 +1,14 @@
 """Device fingerprinting for devices that hide behind a randomized MAC.
 
-Since iOS 14 / Android 10, phones use a *private Wi-Fi address* — a randomized
-MAC — so the OUI table has nothing to look up and the device shows as a bare IP.
+Since iOS 14 / Android 10, phones use a *private Wi-Fi address*, a randomized
+MAC, so the OUI table has nothing to look up and the device shows as a bare IP.
 That's most of the "unidentified" nodes on a home network, and most of those are
 Apple devices.
 
 Two techniques that don't depend on the MAC at all:
 
 1. **mDNS (Bonjour) reverse lookup.** Apple devices run Bonjour and answer a
-   reverse PTR query on 224.0.0.251:5353 with their real name — "Lukas-iPhone",
+   reverse PTR query on 224.0.0.251:5353 with their real name, "Lukas-iPhone",
    "Ana-iPad", "MacBook-Pro". This is the reliable one: it gives us the actual
    device name, not a guess.
 
@@ -17,7 +17,7 @@ Two techniques that don't depend on the MAC at all:
    fingerprint; 7000 + 5000 mean AirPlay; 548 (AFP) and 88 point at a Mac.
 
 Everything here is best-effort and fast-failing: short timeouts, run in
-parallel, and a miss simply leaves the device as it was.
+parallel, and a miss just leaves the device as it was.
 """
 from __future__ import annotations
 
@@ -34,7 +34,7 @@ _AFP = 548                 # macOS file sharing
 
 _APPLE_PORT_HINTS = (_IOS_LOCKDOWN, _AIRPLAY, _DAAP, _AFP, _AIRPLAY_ALT)
 
-#: Hostname fragment → (vendor, device kind)
+#: Hostname fragment -> (vendor, device kind)
 _NAME_SIGNATURES = (
     ("iphone", ("Apple", "dev_phone")),
     ("ipad", ("Apple", "dev_tablet")),
@@ -66,7 +66,7 @@ _NAME_SIGNATURES = (
 )
 
 
-# ── mDNS reverse lookup ────────────────────────────────────────
+# mDNS reverse lookup
 def _build_reverse_query(ip: str) -> bytes:
     """A DNS PTR query for <reversed-ip>.in-addr.arpa, with mDNS's QU bit set
     so the device answers us directly instead of multicasting."""
@@ -176,7 +176,7 @@ def mdns_hostname(ip: str, timeout: float = 0.7) -> str | None:
 
 
 def clean_mdns_name(name: str) -> str:
-    """'Lukas-iPhone.local.' → 'Lukas-iPhone'."""
+    """Turns 'Lukas-iPhone.local.' into 'Lukas-iPhone'."""
     n = (name or "").strip().rstrip(".")
     for suffix in (".local", ".lan", ".home", ".home.arpa"):
         if n.lower().endswith(suffix):
@@ -185,7 +185,7 @@ def clean_mdns_name(name: str) -> str:
     return n.strip()
 
 
-# ── Port signatures ────────────────────────────────────────────
+# Port signatures
 def _port_open(ip: str, port: int, timeout: float = 0.35) -> bool:
     try:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
@@ -198,7 +198,7 @@ def _port_open(ip: str, port: int, timeout: float = 0.35) -> bool:
 def apple_port_signature(ip: str, timeout: float = 0.35) -> tuple[str, str] | None:
     """Probe a few Apple-specific ports. Returns (vendor, kind) or None.
 
-    Port 62078 is iOS `lockdownd` — present on iPhones and iPads and almost
+    Port 62078 is iOS `lockdownd`, present on iPhones and iPads and almost
     nothing else, so it's the strongest single signal we have."""
     if _port_open(ip, _IOS_LOCKDOWN, timeout):
         return ("Apple", "dev_phone")          # iPhone or iPad
@@ -223,7 +223,7 @@ def name_signature(hostname: str) -> tuple[str, str] | None:
     return None
 
 
-# ── Public entry point ─────────────────────────────────────────
+# Public entry point
 def identify(ip: str, hostname: str = "", vendor: str = "",
              use_ports: bool = True) -> dict:
     """Best-effort identification of a device the MAC couldn't name.
@@ -233,7 +233,7 @@ def identify(ip: str, hostname: str = "", vendor: str = "",
     device dict without clobbering good data with blanks."""
     out: dict = {}
 
-    # 1) Ask Bonjour for the real name — by far the best answer.
+    # 1) Ask Bonjour for the real name, by far the best answer.
     name = mdns_hostname(ip)
     if name:
         out["hostname"] = name

@@ -53,12 +53,12 @@ def _rot(axis, degrees):
 def build_globe() -> trimesh.Scene:
     meshes = []
 
-    # ── Core sphere (translucent) ──────────────────────────────
+    # Core sphere (translucent)
     core = trimesh.creation.icosphere(subdivisions=3, radius=R * 0.96)
     core.visual.vertex_colors = np.tile(C_CORE, (len(core.vertices), 1))
     meshes.append(core)
 
-    # ── Wireframe shell ────────────────────────────────────────
+    # Wireframe shell
     wire_parts = []
 
     # Meridians: vertical rings rotated around the Y axis
@@ -77,13 +77,13 @@ def build_globe() -> trimesh.Scene:
     wire.visual.vertex_colors = np.tile(C_WIRE, (len(wire.vertices), 1))
     meshes.append(wire)
 
-    # ── Orbital ring (purple, tilted) ──────────────────────────
+    # Orbital ring (purple, tilted)
     ring_t = _rot([1, 0, 0], 75)
     ring = _torus(R * 1.33, RING_TUBE, ring_t, sections=96)
     ring.visual.vertex_colors = np.tile(C_RING, (len(ring.vertices), 1))
     meshes.append(ring)
 
-    # ── Surface node dots ──────────────────────────────────────
+    # Surface node dots
     rng = random.Random(7)
     dot_parts = []
     dot_colors = []

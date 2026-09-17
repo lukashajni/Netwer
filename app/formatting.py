@@ -1,8 +1,8 @@
 """
-NETWER — Formatting helpers.
+NETWER formatting helpers.
 
 Speed values are stored internally in Mbps (that's what the backend
-yields), but showing "0.02 Mbps" is unhelpful — real network tools switch
+yields), but showing "0.02 Mbps" is unhelpful. Real network tools switch
 units to whatever fits: Kbps for slow traffic, Mbps for normal, Gbps for
 very fast links. These helpers do that.
 """
@@ -11,9 +11,9 @@ very fast links. These helpers do that.
 def format_speed(mbps: float):
     """Return (value_string, unit_string) with a sensible unit.
 
-    < 1 Mbps      → Kbps   (e.g. 512 Kbps)
-    < 1000 Mbps   → Mbps   (e.g. 152.4 Mbps)
-    >= 1000 Mbps  → Gbps   (e.g. 1.20 Gbps)
+    Under 1 Mbps comes back as Kbps (512 Kbps), under 1000 Mbps as Mbps
+    (152.4 Mbps), and anything at or above 1000 Mbps as Gbps
+    (1.20 Gbps).
     """
     try:
         v = float(mbps)
@@ -25,7 +25,7 @@ def format_speed(mbps: float):
 
     if v < 1.0:
         kbps = v * 1000.0
-        # Whole numbers below 100 Kbps read better without decimals
+        # Below 100 Kbps a decimal place is still worth showing
         if kbps < 100:
             return f"{kbps:.1f}", "Kbps"
         return f"{kbps:.0f}", "Kbps"
@@ -46,7 +46,7 @@ def scale_for_axis(max_mbps: float):
     """Pick the display unit + divisor for a chart axis given the peak value.
 
     Returns (unit_name, divisor). Chart values (in Mbps) divided by the
-    divisor give numbers in that unit — so the axis reads 'Kbps' when
+    divisor give numbers in that unit, so the axis reads 'Kbps' when
     traffic is small instead of a flat line near zero on an Mbps axis.
     """
     try:

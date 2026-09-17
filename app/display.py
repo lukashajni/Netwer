@@ -1,7 +1,7 @@
 """Screen-resolution profiles.
 
 Lets NETWER either auto-detect the current screen or be pinned to a specific
-resolution — handy when preparing a demo for a projector or a specific
+resolution, handy when prepping a demo for a projector or a particular
 monitor size ahead of time. Picking a resolution selects a UI density profile
 (compact / standard / large, see app.theme.UI_SCALE_PROFILES) and a sensible
 window size, so a cramped 1366x768 laptop and a 4K monitor both get a
@@ -43,17 +43,17 @@ def profile_for(width: int) -> str:
 def resolve(key: str, screen_width: int, screen_height: int) -> tuple[int, int]:
     """Turn a resolution key into the (width, height) to plan a layout for.
 
-    'auto' (or any unrecognised key) uses the screen NETWER is actually
+    'auto' (or anything unrecognised) uses the screen NETWER is actually
     running on; a preset key uses that fixed size regardless of the real
-    screen — useful for testing a specific target display."""
+    screen, which is useful for testing a specific target display."""
     return _SIZES.get(key, (screen_width, screen_height))
 
 
 def window_geometry(width: int, height: int) -> tuple[int, int, int, int]:
     """A sensible (window_w, window_h, min_w, min_h) for a screen this size.
 
-    The window itself is ~82% of the screen (never edge-to-edge, never
-    overflowing it even when the preset is larger than the real display it's
+    The window is about 82% of the screen (never edge-to-edge, and never
+    overflowing it even when the preset is bigger than the real display it's
     previewed on), with a minimum size scaled down for small screens so the
     app still fits rather than clipping off the edge."""
     win_w = max(1000, min(int(width * 0.82), width - 60))

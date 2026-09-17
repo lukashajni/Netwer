@@ -1,7 +1,7 @@
 """Custom device names.
 
 Hostnames are often useless ("Unknown", or just the IP again), so NETWER lets
-you name a device yourself — "Mum's laptop", "Printer in the office" — and
+you name a device yourself, "Mum's laptop", "Printer in the office", and
 remembers it. Names are keyed by MAC address (stable across DHCP lease
 changes); if a device has no usable MAC we fall back to keying on its IP.
 

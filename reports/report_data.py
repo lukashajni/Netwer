@@ -1,5 +1,5 @@
 """
-NETWER — Report data collector.
+NETWER report data collector.
 
 Gathers everything the PDF report needs by calling the backend, based on
 which sections were requested. Runs inside a worker (it makes network
@@ -64,7 +64,7 @@ def collect(core, sections):
                 "uptime": uptime,
             }
 
-    # Connectivity test (ping) — also feeds summary
+    # Connectivity test (ping), also feeds summary
     ping_results = None
     if "connectivity" in sections:
         ping_results = core.ping_quick()

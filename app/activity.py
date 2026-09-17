@@ -1,13 +1,13 @@
 """
-NETWER — Activity log.
+NETWER activity log.
 
 A small in-memory log of things the user has done (ran a ping sweep, saved
 a report, completed a speed test...). The Dashboard's Recent Activity card
 reads from it; any page can append to it.
 
-Kept deliberately simple: a module-level singleton with a bounded deque, so
-any page can record an event without threading a reference through the whole
-app. Entries are timestamped so the UI can show "2m ago".
+It's a module-level singleton with a bounded deque, so any page can record
+an event without passing a reference down through the whole app. Entries
+are timestamped so the UI can show "2m ago".
 
 Usage:
     from app.activity import activity
@@ -21,7 +21,7 @@ from PyQt6.QtCore import QObject, pyqtSignal
 
 
 class ActivityLog(QObject):
-    #: Emitted whenever a new entry is added, so open views can refresh.
+    #: Emitted when a new entry is added so open views can refresh.
     changed = pyqtSignal()
 
     MAX_ENTRIES = 50
@@ -33,9 +33,9 @@ class ActivityLog(QObject):
     def add(self, title: str, detail: str = "", kind: str = "success") -> None:
         """Record an action.
 
-        title  — what happened ("Ping sweep completed")
-        detail — supporting text ("192.168.1.1 - 254")
-        kind   — "success" | "warning" | "error" | "info" (drives the icon)
+        title: what happened ("Ping sweep completed")
+        detail: supporting text ("192.168.1.1 - 254")
+        kind: "success" | "warning" | "error" | "info", picks the icon
         """
         self._entries.appendleft({
             "title": title,
@@ -55,7 +55,7 @@ class ActivityLog(QObject):
 
 
 def time_ago(timestamp: float) -> str:
-    """Human-friendly relative time: 'just now', '2m ago', '3h ago'."""
+    """Relative time for display: 'just now', '2m ago', '3h ago'."""
     delta = max(0, int(time.time() - timestamp))
     if delta < 10:
         return "just now"

@@ -1,15 +1,15 @@
-"""Network diagnostics — measurements plus a plain-language verdict.
+"""Network diagnostics: measurements plus a plain-language verdict.
 
 Most tools hand you numbers and leave the interpreting to you. This module runs
 a short battery of checks and then *reasons* about them: it works out where the
 problem actually is (your device, your Wi-Fi, your router, your ISP, or DNS) and
 says so in a sentence a normal person can act on.
 
-The measuring and the reasoning are deliberately separate:
+The measuring and the reasoning are kept separate on purpose:
 
 * `run_diagnostics_stream()` performs the checks and yields progress, ending
   with the raw measurements.
-* `analyse(measurements)` is pure logic — no I/O — so the reasoning can be
+* `analyse(measurements)` is pure logic, no I/O, so the reasoning can be
   unit-tested against any scenario without touching a real network.
 """
 from __future__ import annotations
@@ -31,9 +31,7 @@ _PUBLIC_DNS = [("Cloudflare", "1.1.1.1"), ("Google", "8.8.8.8")]
 _TEST_DOMAINS = ["google.com", "cloudflare.com", "github.com"]
 
 
-# ══════════════════════════════════════════
-# MEASURING
-# ══════════════════════════════════════════
+# Measuring
 def _ping_series(core, host, count=5, timeout_ms=1000):
     """Ping a host a few times. Returns (rtts, loss_percent)."""
     rtts = []
@@ -198,9 +196,7 @@ def run_diagnostics_stream(core, deep=False):
     yield {"done": True, "measurements": m, "report": analyse(m)}
 
 
-# ══════════════════════════════════════════
-# REASONING  (pure logic — no I/O)
-# ══════════════════════════════════════════
+# Reasoning (pure logic, no I/O)
 def _finding(severity, title, detail, action=""):
     return {"severity": severity, "title": title, "detail": detail,
             "action": action}
@@ -210,11 +206,12 @@ def analyse(m: dict) -> dict:
     """Turn raw measurements into a verdict plus ranked findings.
 
     The order of these checks matters: we look for the *first* thing that
-    actually breaks the chain (adapter → router → internet → DNS), because
-    reporting "DNS is slow" when the cable is unplugged would be nonsense."""
+    actually breaks the chain (adapter, then router, then internet, then
+    DNS), because reporting "DNS is slow" when the cable is unplugged would
+    be nonsense."""
     findings = []
 
-    # ── Link layer ──
+    # Link layer
     if not m.get("has_ip"):
         findings.append(_finding(
             CRITICAL, "No IP address",
@@ -241,7 +238,7 @@ def analyse(m: dict) -> dict:
             "a static configuration."))
         return _verdict(findings, m)
 
-    # ── Router ──
+    # Router
     router = m.get("router") or {}
     if not m.get("router_reachable"):
         findings.append(_finding(
@@ -274,7 +271,7 @@ def analyse(m: dict) -> dict:
             "device in your own home.",
             "Usually a weak Wi-Fi link or a busy router."))
 
-    # ── Wi-Fi quality ──
+    # Wi-Fi quality
     if m.get("wifi"):
         signal = m.get("signal", 0)
         if signal and signal < 40:
@@ -291,7 +288,7 @@ def analyse(m: dict) -> dict:
                 f"Signal strength is {signal}% — usable, but not great.",
                 "Moving the router higher or more central usually helps."))
 
-    # ── Internet ──
+    # Internet
     internet = m.get("internet") or {}
     if not m.get("internet_reachable"):
         if m.get("router_reachable"):
@@ -340,7 +337,7 @@ def analyse(m: dict) -> dict:
             "That instability is what makes calls robotic.",
             "Often caused by a congested Wi-Fi channel or an overloaded line."))
 
-    # ── DNS ──
+    # DNS
     if not m.get("dns_working"):
         findings.append(_finding(
             CRITICAL, "Names aren't resolving",

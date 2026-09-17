@@ -1,5 +1,5 @@
 """
-NETWER — PDF report builder.
+NETWER PDF report builder.
 
 Builds a branded PDF network report from collected data. Which sections
 are included is controlled by a `sections` set, so the Report page can
@@ -104,7 +104,7 @@ def _device_display_name(dev):
 def _kv_table(rows):
     data = [[k, v if v not in (None, "") else "\u2014"] for k, v in rows]
     # splitByRow=0 forbids the table from breaking across pages. KeepTogether
-    # alone isn't enough — a Table will happily split itself unless told not
+    # alone isn't enough, a Table will happily split itself unless told not
     # to, which is what left half a table stranded on the previous page.
     t = Table(data, colWidths=[45 * mm, None], splitByRow=0, repeatRows=0)
     style = [
@@ -127,7 +127,7 @@ def _kv_table(rows):
 
 def _grid_table(header, rows, success_col=None, col_widths=None):
     data = [header] + rows
-    # splitByRow=0 forbids the table from breaking across pages — KeepTogether
+    # splitByRow=0 forbids the table from breaking across pages. KeepTogether
     # alone isn't enough, because a Table will still split itself unless told
     # not to. That's what stranded half a table on the previous page.
     # repeatRows=1 keeps the header with the rows if a table is ever so long
@@ -203,11 +203,10 @@ def build_report(path, data: dict, sections=None):
         story.append(chip)
         story.append(Spacer(1, 10))
 
-    # Network Configuration
     if "network" in sections and data.get("network"):
         n = data["network"]
         # KeepTogether: a section's heading and its table must never be
-        # split across a page break — ReportLab would otherwise strand the
+        # split across a page break, ReportLab would otherwise strand the
         # heading at the bottom of one page and the rows on the next.
         story.append(KeepTogether([
             _section_title("Network Configuration"),
@@ -226,7 +225,6 @@ def build_report(path, data: dict, sections=None):
         ]))
         story.append(Spacer(1, 10))
 
-    # System Information
     if "system" in sections and data.get("system"):
         s = data["system"]
         story.append(KeepTogether([
@@ -241,7 +239,6 @@ def build_report(path, data: dict, sections=None):
         ]))
         story.append(Spacer(1, 10))
 
-    # Connected Devices
     if "devices" in sections and data.get("devices"):
         devs = data["devices"]
         rows = [[_device_display_name(d),
@@ -257,7 +254,6 @@ def build_report(path, data: dict, sections=None):
         ]))
         story.append(Spacer(1, 10))
 
-    # Connectivity Test
     if "connectivity" in sections and data.get("connectivity"):
         pings = data["connectivity"]
         rows = [[p.get("label", ""), p.get("ip", ""),
@@ -273,7 +269,7 @@ def build_report(path, data: dict, sections=None):
         ]))
         story.append(Spacer(1, 10))
 
-    # Port Scan (from the last scan run in the Port Scanner)
+    # From the last scan run in the Port Scanner
     if "port_scan" in sections and data.get("port_scan"):
         ps = data["port_scan"]
         results = ps.get("results", [])

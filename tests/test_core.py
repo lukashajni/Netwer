@@ -1,5 +1,5 @@
 """
-NETWER — unit tests for pure backend helpers.
+NETWER unit tests for pure backend helpers.
 
 These cover the deterministic, network-free functions so we catch regressions
 when adding features. Run with:  python -m pytest tests/  (or python -m unittest)
@@ -216,7 +216,7 @@ class TestGeolocateHops(unittest.TestCase):
 
 
 class TestTracerouteStaysFast(unittest.TestCase):
-    """The trace itself must not perform geolocation — that used to make a
+    """The trace itself must not perform geolocation, that used to make a
     long trace take minutes when the geo provider was blocked."""
 
     def test_no_geolocation_during_trace(self):
@@ -393,7 +393,7 @@ class TestNetworkHelpers(unittest.TestCase):
         self.assertEqual(core._mask_to_prefix("garbage"), 24)
 
     def test_private_mac_detected(self):
-        # 2nd nibble 2/6/A/E → locally administered (randomized)
+        # 2nd nibble 2/6/A/E means locally administered (randomized)
         self.assertEqual(core.lookup_vendor("0A:39:82:6C:B8:B6"),
                          "Private (randomized)")
         self.assertEqual(core.lookup_vendor("2A:24:0F:55:3A:C6"),
@@ -451,7 +451,7 @@ Wireless LAN adapter Wi-Fi:
 
 
 class TestNetworkRadar(unittest.TestCase):
-    """The radar reuses the map's data model — check set_topology builds the
+    """The radar reuses the map's data model, check set_topology builds the
     expected nodes without a display/GPU."""
 
     @classmethod
@@ -521,7 +521,7 @@ class TestVendorLearning(unittest.TestCase):
 
     def test_teach_overrides_randomized(self):
         import core.netwer_core as core
-        # AA has the locally-administered bit → normally "Private (randomized)"
+        # AA has the locally-administered bit, normally "Private (randomized)"
         self.assertEqual(core.lookup_vendor("AA:BB:CC:11:22:33"),
                          "Private (randomized)")
         core.teach_vendor("AA:BB:CC:11:22:33", "My Router")
@@ -792,7 +792,7 @@ class TestPolishFixes(unittest.TestCase):
 
 
 class TestDiagnosticsReasoning(unittest.TestCase):
-    """The verdict logic is pure — test it without touching a network."""
+    """The verdict logic is pure, test it without touching a network."""
 
     def _m(self, **kw):
         m = dict(has_ip=True, ip="192.168.0.238", gateway="192.168.0.1",

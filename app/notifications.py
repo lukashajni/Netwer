@@ -1,12 +1,12 @@
 """
-NETWER — Notification center.
+NETWER notification center.
 
 A tiny in-memory pub/sub for app notifications (host down, scan complete,
 new device, etc.). Widgets push notifications; the TopBar bell and the
 Notifications panel subscribe to render them and the unread count.
 
-Kept separate from the activity feed (which is a dashboard widget): this is
-the global, cross-page notification stream shown in the slide-in panel.
+Separate from the activity feed (which is a dashboard widget): this is the
+global, cross-page notification stream shown in the slide-in panel.
 """
 
 from datetime import datetime
@@ -45,8 +45,8 @@ class NotificationCenter:
         del self._items[self._max:]
         self._emit()
 
-    # ── Settings-aware helpers ─────────────────────────────────
-    # These respect the on/off toggles in Settings so a disabled category
+    # Settings-aware helpers.
+    # These respect the on/off toggles in Settings, so a disabled category
     # produces no notification. Pages should call these instead of push()
     # for the three toggleable categories.
     def notify_host_down(self, host, up):

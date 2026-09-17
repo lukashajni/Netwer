@@ -1,15 +1,15 @@
 """
-NETWER — background scan scheduler.
+NETWER background scan scheduler.
 
-Runs a periodic ping sweep of the local network in the background (independent
-of which page is open) and raises notifications when a device appears or
-disappears. This is the foundation of light-touch network monitoring: leave
-NETWER running and it tells you when something joins or leaves your network.
+Runs a periodic ping sweep of the local network in the background, whatever
+page happens to be open, and raises notifications when a device appears or
+disappears. That's the basis of light-touch monitoring: leave NETWER running
+and it tells you when something joins or leaves your network.
 
-The scheduler is off by default; the user enables it in Settings and picks an
-interval. It runs the sweep in a worker thread (never blocking the UI), diffs
-the result against the last known set of devices, and pushes notifications
-through the settings-aware notification helpers.
+The scheduler is off by default; the user turns it on in Settings and picks
+an interval. The sweep runs in a worker thread so the UI never blocks, the
+result is diffed against the last known set of devices, and notifications go
+out through the settings-aware helpers.
 """
 
 from PyQt6.QtCore import QObject, QTimer, pyqtSignal
@@ -36,7 +36,7 @@ class ScanScheduler(QObject):
         self._timer = QTimer(self)
         self._timer.timeout.connect(self._run_scan)
 
-    # ── Control ────────────────────────────────────────────────
+    # Control
     def start(self):
         """Begin periodic scanning at the interval from Settings."""
         if self._running:
@@ -69,7 +69,7 @@ class ScanScheduler(QObject):
         if self._running:
             self._timer.start(max(1, int(minutes)) * 60 * 1000)
 
-    # ── Scan cycle ─────────────────────────────────────────────
+    # Scan cycle
     def _run_scan(self):
         # Don't stack scans if a previous one is still going.
         if self._worker is not None and self._worker.isRunning():
@@ -92,8 +92,8 @@ class ScanScheduler(QObject):
         self._worker = None
 
     def _diff_and_notify(self, devices):
-        """Compare against the last known device set and raise notifications
-        for devices that appeared or disappeared."""
+        """Compare against the last known device set and notify about
+        devices that showed up or went away."""
         prev = set(store.get_setting("scheduler_known_macs", []) or [])
         prev_names = store.get_setting("scheduler_device_names", {}) or {}
 
