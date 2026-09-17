@@ -1,14 +1,14 @@
 """
 NETWER — NetworkMap widget (rebuilt on real layouts, not hand-painted math).
 
-Architecture: Internet / Router / Devices are REAL child widgets arranged
+Architecture: Internet / Router / Devices are real child widgets arranged
 by Qt's layout engine (QVBoxLayout + QHBoxLayout), the same system that
 lays out the whole Dashboard. Qt guarantees these never overlap, no matter
-the widget's size — no more fragile pixel arithmetic.
+the widget's size - no more fragile pixel arithmetic.
 
 Connector lines are drawn in NetworkMap's own paintEvent, which Qt always
-renders BEHIND child widgets. That means the icons are structurally
-guaranteed to sit on top of the lines — a line can never visually cross a
+renders behind child widgets. That means the icons are structurally
+guaranteed to sit on top of the lines - a line can never visually cross a
 logo, by construction, not by careful coordinate tuning.
 """
 
@@ -21,9 +21,9 @@ from app.resources import Icons
 
 
 def guess_device_icon(dev: dict) -> str:
-    """Pick an icon name based on hostname/vendor hints."""
-    # A kind determined by fingerprinting (Bonjour name / port signature) is
-    # more reliable than guessing from text, so trust it first.
+    """Pick an icon name based on hostname/vendor hints.
+    A kind determined by fingerprinting (Bonjour name / port signature) is
+    more reliable than guessing from text, so trust it first. """
     kind = (dev.get("kind") or "").strip()
     if kind.startswith("dev_"):
         return kind
@@ -71,13 +71,7 @@ def guess_device_icon(dev: dict) -> str:
 def device_display_name(dev: dict) -> str:
     """Best available name, in order: a name the user gave the device, its real
     hostname, a real manufacturer, else the IP.
-
-    A randomized/locally-administered MAC has no real manufacturer, so its
-    'vendor' is the placeholder 'Private (randomized)'. That's useful info but
-    a bad *name* — showing it under an icon looks like a glitch. So we only
-    fall back to the vendor when it's an actual manufacturer, otherwise the
-    IP address (which is always meaningful)."""
-    # A name the user typed always wins.
+    A name the user typed always wins."""
     try:
         from core import device_names
         custom = device_names.get(dev)
@@ -93,21 +87,19 @@ def device_display_name(dev: dict) -> str:
     vendor = (dev.get("vendor") or "").strip()
     generic = ("unknown", "private (randomized)", "private", "randomized", "")
     if vendor and vendor.lower() not in generic:
-        # "Apple (private address)" is useful detail, but as a *name* the
+        # "Apple (private address)" is useful detail, but as a "name" the
         # manufacturer alone reads better under an icon.
         return vendor.replace(" (private address)", "")
     return dev.get("ip", "?")
 
 
 class _LabeledIcon(QWidget):
-    """Icon with title (+ optional subtitle) to its RIGHT.
+    """Icon with title (+ optional subtitle) to its right.
 
     Layout trick: the node is symmetric around its ICON. Empty space of the
-    same width as the text block is reserved on the LEFT, so when the node
-    is centered in the map, the ICON lands exactly on the map's centerline —
-    the same centerline the device row centers on. Without this the icon
-    would be offset by half the text width and the connector lines would
-    not line up with the devices below.
+    same width as the text block is reserved on the left, so when the node
+    is centered in the map, the ICON lands exactly on the map's centerline -
+    the same centerline the device row centers on.
     """
 
     TEXT_WIDTH = 120   # room for "MikroTik" + an IP address
@@ -179,7 +171,7 @@ class _LabeledIcon(QWidget):
 
 
 class _DeviceNode(QWidget):
-    """Icon centered above a name + IP, stacked below — used for devices.
+    """Icon centered above a name + IP, stacked below - used for devices.
 
     Clicking one asks the map to open that device's details, so the static map
     stays as useful as the radar."""
@@ -227,7 +219,7 @@ class _DeviceNode(QWidget):
 
 
 class NetworkMap(QWidget):
-    #: Emitted with the device dict when a device node is clicked.
+    # Emitted with the device dict when a device node is clicked.
     node_clicked = pyqtSignal(dict)
 
     def __init__(self, parent=None):
@@ -292,9 +284,9 @@ class NetworkMap(QWidget):
             for dev in self._devices:
                 ip = dev.get("ip", "")
                 name = device_display_name(dev)
-                # If the only thing we have is the IP, show a friendly generic
-                # name instead (so the title isn't identical to the subtitle
-                # IP below it). 'Private (randomized)' MACs are usually phones.
+                """ If the only thing we have is the IP, show a friendly generic
+                name instead (so the title isn't identical to the subtitle
+                IP below it). "Private (randomized)" MACs are usually phones. """
                 if name == ip or not name or name == "?":
                     vendor = (dev.get("vendor") or "").lower()
                     if "private" in vendor or "random" in vendor:
@@ -312,9 +304,9 @@ class NetworkMap(QWidget):
         self.update()
 
     def paintEvent(self, event):
-        # Lines are painted here, in the PARENT's paintEvent — Qt always
-        # composites child widgets (the icons) on top of this, so a line
-        # can never visually cover an icon, regardless of layout size.
+        """ Lines are painted here, in the parent's paintEvent - Qt always
+        composites child widgets (the icons) on top of this, so a line
+        can never visually cover an icon, regardless of layout size. """
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
 

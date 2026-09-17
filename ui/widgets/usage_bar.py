@@ -2,7 +2,7 @@
 NETWER — UsageBar widget.
 
 A labelled horizontal progress bar for resource usage (CPU / memory / disk).
-Denser than a circular gauge, which suits the System Information detail page
+Denser than a circular gauge, which suits the "System Information" detail page
 where several readings sit stacked. The fill animates to new values so
 updates read as movement rather than jumps.
 """
@@ -15,7 +15,7 @@ from app.theme import Theme
 
 
 class _Bar(QWidget):
-    """The bar itself — animated fill."""
+    # The bar itself - animated fill
 
     def __init__(self, color: str, parent=None):
         super().__init__(parent)

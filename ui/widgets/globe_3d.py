@@ -5,7 +5,7 @@ Displays the NETWER logo model on the About page: slow idle spin, drag to
 rotate, eases back to its starting orientation after three idle seconds.
 
 The model is the project's own .glb, recoloured to the theme palette. It's
-shown as-is — no added geometry, no decoration.
+shown as-is - no added geometry, no decoration.
 
 Falls back to the flat 2D logo if 3D can't run (no GPU / software
 rendering), so the page still looks right rather than showing an empty box.
@@ -16,6 +16,8 @@ import tempfile
 
 from PyQt6.QtCore import QUrl, Qt
 from PyQt6.QtWidgets import QWidget, QVBoxLayout, QLabel
+from PyQt6.QtQuick import QSGRendererInterface
+
 
 from app.theme import Theme
 from app.resources import ASSETS_DIR, logo_pixmap
@@ -23,8 +25,8 @@ from app.resources import ASSETS_DIR, logo_pixmap
 
 MODEL_PATH = os.path.join(ASSETS_DIR, "models", "netwer_globe.glb")
 
-# The model is authored at ~1 unit radius; QtQuick3D's scene units are far
-# larger, so scale up to fill the viewport.
+""" The model is authored at ~1 unit radius, QtQuick3D's scene units are far
+larger, so scale up to fill the viewport. """
 MODEL_SCALE = 120
 
 
@@ -155,7 +157,7 @@ Item {{
 
 
 class Globe3D(QWidget):
-    """The logo in 3D, or a static logo if 3D isn't available."""
+    # The logo in 3D, or a static logo if 3D isn't available.
 
     def __init__(self, size: int = 260, parent=None):
         super().__init__(parent)
@@ -198,9 +200,9 @@ class Globe3D(QWidget):
             if view.status() != QQuickWidget.Status.Ready:
                 return None
 
-            # `Ready` only means the QML parsed. Qt Quick 3D additionally needs
+            # "Ready" only means the QML parsed. Qt Quick 3D additionally needs
             # an RHI-based scene graph (a real 3D graphics API). On software
-            # rendering — old GPUs, some VMs, remote desktop — View3D silently
+            # rendering - old GPUs, some VMs, remote desktop - View3D silently
             # draws nothing, which left an empty box instead of the logo. So
             # check the actual graphics API and fall back if it can't do 3D.
             if not self._scene_graph_supports_3d(view):
@@ -211,9 +213,8 @@ class Globe3D(QWidget):
 
     @staticmethod
     def _scene_graph_supports_3d(view) -> bool:
-        """True only when the scene graph is backed by a real 3D API."""
+        # True only when the scene graph is backed by a real 3D API.
         try:
-            from PyQt6.QtQuick import QSGRendererInterface
             win = view.quickWindow()
             if win is None:
                 return False

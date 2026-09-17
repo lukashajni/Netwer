@@ -3,20 +3,12 @@ NETWER — TracerouteMap widget.
 
 Draws traceroute hops on a world map, natively with QPainter (no web engine
 dependency). Each hop with a known location becomes a dot connected by the
-packet path; the view starts zoomed on the origin and zooms out — city →
-regional → world — as the path spans larger distances, so a route that ends
+packet path, the view starts zoomed on the origin and zooms out - city ->
+regional -> world - as the path spans larger distances, so a route that ends
 on another continent ends on a full world view.
-
-Major reference cities are labelled so you can tell where you are, and each
-hop's own city is tagged on the map.
 
 Coordinates come from a bundled, simplified world-land dataset
 (assets/world_land.json) projected with a Web-Mercator projection.
-
-    m = TracerouteMap()
-    m.set_hops([{ "n":1, "ip":"...", "city":"Zagreb", "lat":45.8, "lon":16.0,
-                  "ms":12, "kind":"transit" }, ...])
-    m.animate()        # replay the build-up
 """
 
 import json
@@ -63,17 +55,17 @@ def _load_world():
             with open(path, "r", encoding="utf-8") as f:
                 data = json.load(f)[key]
             if key == "countries":
-                # Flatten to a list of rings but remember they're separate
-                # countries so we can stroke each outline.
+                """ Flatten to a list of rings but remember they're separate
+                countries so we can stroke each outline. """
                 return data
-            # Old format: list of rings → wrap each as a one-ring "country".
+            # Old format: list of rings -> wrap each as a one-ring "country".
             return [[ring] for ring in data]
         except Exception:
             continue
     return []
 
 
-_WORLD = _load_world()   # list of countries; each country = list of rings
+_WORLD = _load_world()   # list of countries, each country - list of rings
 
 
 class TracerouteMap(QWidget):
@@ -92,14 +84,14 @@ class TracerouteMap(QWidget):
         self._span = 60.0
         self._world_mode = False
 
-    # ── Public API ─────────────────────────────────────────────
+    # -- Public API --
     def set_status(self, text):
-        """Show a message on the map (e.g. when geolocation is unavailable)."""
+        # Show a message on the map (e.g. when geolocation is unavailable).
         self._status = text
         self.update()
 
     def set_hops(self, hops):
-        """hops: list of dicts with lat/lon (optional), city, ms, kind, ip."""
+        # hops - list of dicts with lat/lon (optional), city, ms, kind, ip.
         self._hops = [h for h in hops]
         self._visible = len(self._hops)
         self._fit(self._visible)
@@ -112,7 +104,7 @@ class TracerouteMap(QWidget):
         self.update()
 
     def animate(self):
-        """Replay the path build-up from the first hop."""
+        # Replay the path build-up from the first hop.
         if not self._located_hops():
             self.update()
             return
@@ -121,7 +113,7 @@ class TracerouteMap(QWidget):
         self.update()
         self._timer.start(850)
 
-    # ── Animation ──────────────────────────────────────────────
+    # -- Animation --
     def _tick(self):
         self._visible += 1
         self._fit(self._visible)
@@ -133,7 +125,7 @@ class TracerouteMap(QWidget):
         return [h for h in self._hops
                 if h.get("lat") is not None and h.get("lon") is not None]
 
-    # ── Projection ─────────────────────────────────────────────
+    # -- Projection --
     def _fit(self, up_to):
         """Choose center + span (zoom) to frame the hops seen so far.
 
@@ -157,21 +149,21 @@ class TracerouteMap(QWidget):
         spread = max(max_lon - min_lon, max_lat - min_lat)
 
         if spread > 60:
-            # Path crosses continents → full world view.
+            # Path crosses continents -> full world view.
             self._world_mode = True
         elif spread > 18:
-            # Multi-region (e.g. Europe → US east coast) → continental.
+            # Multi-region (e.g. Europe → US east coast) -> continental.
             self._world_mode = False
             self._span = max(spread * 2.2, 55)
         else:
-            # Everything is clustered (one country / region, or coarse offline
-            # estimates all at one point). Keep a comfortable regional frame
-            # rather than zooming to street level — this is what was garbling.
+            """ Everything is clustered (one country / region, or coarse offline
+            estimates all at one point). Keep a comfortable regional frame
+            rather than zooming to street level - this is what was garbling. """
             self._world_mode = False
             self._span = 42
 
     def _project(self, lon, lat, w, h):
-        """Web-Mercator projection to widget pixels for the current view."""
+        # Web-Mercator projection to widget pixels for the current view.
         def merc_y(deg):
             deg = max(min(deg, 84), -84)
             return math.log(math.tan(math.pi / 4 + math.radians(deg) / 2))
@@ -194,7 +186,7 @@ class TracerouteMap(QWidget):
         y = (y_top - merc_y(lat)) / (y_top - y_bot) * h
         return QPointF(x, y)
 
-    # ── Paint ──────────────────────────────────────────────────
+    # -- Paint --
     def paintEvent(self, event):
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -203,7 +195,7 @@ class TracerouteMap(QWidget):
         # Background
         p.fillRect(self.rect(), QColor(Theme.BG_SIDEBAR))
 
-        # Countries — filled land with visible borders between them.
+        # Countries - filled land with visible borders between them.
         land_fill = QColor("#1b2949") if is_dark() else QColor("#d6deeb")
         border = QColor("#41547d") if is_dark() else QColor("#a9b6cc")
         p.setPen(QPen(border, 0.7))
@@ -224,9 +216,9 @@ class TracerouteMap(QWidget):
         located = [h for h in self._hops[:self._visible]
                    if h.get("lat") is not None]
 
-        # Reference cities (only when zoomed out enough to have room).
-        # Skip any label that would overlap one already drawn, so a tight
-        # European view doesn't turn into a pile of overlapping names.
+        """ Reference cities (only when zoomed out enough to have room).
+        Skip any label that would overlap one already drawn, so a tight
+        European view doesn't turn into a pile of overlapping names. """
         if self._world_mode or self._span > 30:
             p.setFont(QFont(Theme.FONT_FAMILY_PRIMARY, 7))
             fm = p.fontMetrics()
@@ -239,7 +231,6 @@ class TracerouteMap(QWidget):
                     continue
                 tw = fm.horizontalAdvance(name)
                 lx, ly = pt.x() + 4, pt.y() + 3
-                # Does this label's box collide with one already placed?
                 clash = False
                 for (px, py, pw, ph) in placed:
                     if (lx < px + pw and lx + tw > px and
@@ -274,8 +265,8 @@ class TracerouteMap(QWidget):
             p.setBrush(col)
             p.drawEllipse(pt, r, r)
 
-        # Hop city labels — skip duplicates and any that would overlap a label
-        # already drawn (offline estimates can put several hops at one point).
+        """ Hop city labels - skip duplicates and any that would overlap a label
+        already drawn (offline estimates can put several hops at one point). """
         p.setFont(QFont(Theme.FONT_FAMILY_PRIMARY, 8, QFont.Weight.Medium))
         fm = p.fontMetrics()
         seen_cities = set()

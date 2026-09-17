@@ -1,13 +1,9 @@
 """
 NETWER — Spinner (inline).
 
-A small rotating-arc spinner for inline "loading…" states (e.g. while a PDF
+A small rotating-arc spinner for inline "loading..." states (e.g. while a PDF
 preview renders or a scan spins up). Same visual language as the fullscreen
 LoadingOverlay spinner, but standalone and embeddable anywhere.
-
-    spin = Spinner(size=28)
-    spin.start()   # begins animating
-    spin.stop()    # freezes + you typically hide() it
 """
 
 from PyQt6.QtCore import Qt, QTimer, QRectF

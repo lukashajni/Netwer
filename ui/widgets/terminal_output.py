@@ -1,13 +1,10 @@
 """
 NETWER — TerminalOutput widget.
 
-A scrolling, monospace log panel that reads like a real terminal — used for
+A scrolling, monospace log panel that reads like a real terminal - used for
 ping replies, traceroute hops and scan output. New lines append at the
 bottom and the view auto-scrolls, unless the user has scrolled up to read
 history (then it stays put, so output doesn't yank the view away mid-read).
-
-Lines are colour-coded by kind: success (green), error (red), muted
-(informational), plain.
 """
 
 from PyQt6.QtCore import Qt
@@ -55,7 +52,7 @@ class TerminalOutput(QWidget):
         self._count = 0
 
     def append(self, text: str, value: str = "", kind: str = "plain") -> None:
-        """Add a line. `value` is right-aligned (e.g. 'time=14ms')."""
+        # Add a line. "value"" is right-aligned (e.g. 'time=14ms').
         was_at_bottom = self._at_bottom()
 
         row = QWidget()
@@ -110,7 +107,7 @@ class TerminalOutput(QWidget):
         return bar.value() >= bar.maximum() - 4
 
     def _scroll_to_bottom(self) -> None:
-        # Defer: the new row isn't laid out yet at the moment we append it
+        # Defer - the new row isn't laid out yet at the moment we append it
         from PyQt6.QtCore import QTimer
         QTimer.singleShot(0, lambda: self._scroll.verticalScrollBar().setValue(
             self._scroll.verticalScrollBar().maximum()))

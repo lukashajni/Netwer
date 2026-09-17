@@ -1,14 +1,9 @@
 """
-NETWER — Gauge widget (kružni indikator).
+NETWER — Gauge widget (circular indicator)
 
-Crta kružni gauge (CPU / RAM / Disk na dashboardu) pomoću QPainter-a.
-Vrijednost se ANIMIRA do nove pozicije umjesto da skoči — to daje onaj
-"premium" osjećaj (kao MSI Center). Animacija ide preko QPropertyAnimation
-na custom Qt property "value".
-
-Korištenje:
-    g = Gauge("CPU", Theme.ACCENT)
-    g.set_value(23)     # animira se od trenutne do 23%
+Draws circular gauge (CPU / RAM / Disk on dashboard) using QPainter.
+The value is animated to the new position instead of jumping.
+Animation goes via QPropertyAnimation to the custom Qt property "value".
 """
 
 from PyQt6.QtCore import Qt, QRectF, pyqtProperty, QPropertyAnimation, QEasingCurve
@@ -19,7 +14,7 @@ from app.theme import Theme
 
 
 class _Ring(QWidget):
-    """Sam prsten (bez labele). Drži animiranu vrijednost."""
+    # The ring itself (without the label). Holds an animated value.
 
     def __init__(self, color: str, parent=None):
         super().__init__(parent)
@@ -51,21 +46,21 @@ class _Ring(QWidget):
 
         rect = QRectF(8, 8, 60, 60)
 
-        # Pozadinski prsten
+        # Background ring
         pen_bg = QPen(QColor(Theme.BORDER), 6)
         pen_bg.setCapStyle(Qt.PenCapStyle.RoundCap)
         p.setPen(pen_bg)
         p.drawArc(rect, 0, 360 * 16)
-
-        # Aktivni prsten (od vrha, u smjeru kazaljke)
+    
+        # Active ring (from the top, clockwise)
         pen_fg = QPen(QColor(self._color), 6)
         pen_fg.setCapStyle(Qt.PenCapStyle.RoundCap)
         p.setPen(pen_fg)
         span = int(-self._value / 100.0 * 360 * 16)
         p.drawArc(rect, 90 * 16, span)
-
-        # Postotak U SREDINI prstena (kompaktno — ne treba mjesta ispod, pa
-        # kartica ne mora biti visoka).
+        
+        # Percentage in the center of the ring (compact - no space needed underneath, so
+        # the card doesn't need to be tall).
         p.setPen(QColor(self._color))
         p.setFont(QFont(Theme.FONT_FAMILY_PRIMARY, 13, QFont.Weight.Bold))
         p.drawText(rect, Qt.AlignmentFlag.AlignCenter,
@@ -84,8 +79,8 @@ class Gauge(QWidget):
 
         self._ring = _Ring(color)
         lay.addWidget(self._ring, 0, Qt.AlignmentFlag.AlignHCenter)
-
-        # Samo naziv (CPU / Memory / Disk) ISPOD prstena — postotak je unutra.
+        
+        # Only the name (CPU / Memory / Disk) is below the ring - the percentage is inside.
         self._label = QLabel(label)
         self._label.setFixedHeight(16)
         self._label.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -94,7 +89,7 @@ class Gauge(QWidget):
             f"font-size: {Theme.FONT_SIZE_SMALL}px; background: transparent;"
         )
         lay.addWidget(self._label, 0, Qt.AlignmentFlag.AlignHCenter)
-        # 76 (ring) + 4 + 16 (label) = 96 — kompaktno, stane u nisku karticu.
+        # 76 (ring) + 4 + 16 (label) = 96 - compact, fits in a small card.
         self.setFixedHeight(96)
 
     def set_value(self, percent: float, label: str | None = None) -> None:

@@ -2,17 +2,12 @@
 NETWER — HostInput widget.
 
 A QLineEdit for entering a host/IP, augmented with:
-  • a history dropdown (recent + favorited hosts, from the persistent store)
-  • a star toggle to favorite/unfavorite the current host
+  - a history dropdown (recent + favorited hosts, from the persistent store)
+  - a star toggle to favorite/unfavorite the current host
 
 Drop-in replacement for the plain QLineEdit used on the scan pages. Emits
-`submitted` when the user presses Enter, and exposes text()/setText() so the
+"submitted" when the user presses Enter, and exposes text()/setText() so the
 existing page code keeps working.
-
-    inp = HostInput(kind="ping", placeholder="IP or hostname")
-    inp.submitted.connect(self._start)
-    inp.text()          # current value
-    inp.remember()      # call after a successful scan to add to history
 """
 
 from PyQt6.QtCore import Qt, pyqtSignal
@@ -76,7 +71,7 @@ class HostInput(QWidget):
             f"border: 1px solid {Theme.BORDER}; border-radius: 8px; }}"
             f"QPushButton:hover {{ border-color: {Theme.BORDER_STRONG}; }}")
 
-    # ── QLineEdit passthrough ──────────────────────────────────
+    # -- QLineEdit passthrough --
     def text(self):
         return self._edit.text()
 
@@ -98,12 +93,12 @@ class HostInput(QWidget):
     def line_edit(self):
         return self._edit
 
-    # ── Behavior ───────────────────────────────────────────────
+    # -- Behavior --
     def _on_submit(self):
         self.submitted.emit()
 
     def remember(self):
-        """Record the current host in recent history (call after a scan)."""
+        # Record the current host in recent history (call after a scan).
         store.add_recent_host(self.text().strip(), self._kind)
 
     def _show_history(self):

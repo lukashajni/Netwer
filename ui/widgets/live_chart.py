@@ -6,10 +6,10 @@ sliding window of the last N samples and scrolls left-to-right as new data
 arrives.
 
 Units adapt to the traffic: the Y axis shows Kbps for light traffic, Mbps
-for normal, Gbps for very fast links — so small traffic isn't a flat line
+for normal, Gbps for very fast links - so small traffic isn't a flat line
 pinned to the bottom of a 100 Mbps axis.
 
-Values are pushed in Mbps (what the backend yields); the widget converts
+Values are pushed in Mbps (what the backend yields), the widget converts
 for display.
 
 Usage:
@@ -42,8 +42,8 @@ class LiveChart(QWidget):
 
         pg.setConfigOptions(antialias=True)
         self._plot = pg.PlotWidget()
-        # Match the card exactly (glass or flat) so the plot doesn't
-        # show up as a slightly different rectangle inside the card.
+        """ Match the card exactly (glass or flat) so the plot doesn't
+        show up as a slightly different rectangle inside the card. """
         self._plot.setBackground(card_bg())
         self._plot.showGrid(x=False, y=True, alpha=0.15)
         self._plot.setMouseEnabled(x=False, y=False)
@@ -70,8 +70,8 @@ class LiveChart(QWidget):
         )
         lay.addWidget(self._plot)
 
-        # Hover crosshair: a vertical line that follows the cursor plus a
-        # small label showing the download/upload value at that sample.
+        """ Hover crosshair - a vertical line that follows the cursor plus a
+        small label showing the download/upload value at that sample. """
         self._vline = pg.InfiniteLine(
             angle=90, movable=False,
             pen=pg.mkPen(Theme.TEXT_FAINT, width=1,
@@ -87,7 +87,7 @@ class LiveChart(QWidget):
         self._rescale()
 
     def _on_mouse_moved(self, pos):
-        """Show a crosshair + value readout at the hovered sample."""
+        # Show a crosshair + value readout at the hovered sample.
         vb = self._plot.getViewBox()
         if not self._plot.sceneBoundingRect().contains(pos):
             self._vline.setVisible(False)
@@ -123,13 +123,13 @@ class LiveChart(QWidget):
         return {"download": _s(self._dl), "upload": _s(self._ul)}
 
     def push(self, download: float, upload: float) -> None:
-        """Add one sample (values in Mbps) and scroll the chart."""
+        # Add one sample (values in Mbps) and scroll the chart.
         self._dl.append(float(download))
         self._ul.append(float(upload))
         self._rescale()
 
     def _rescale(self) -> None:
-        """Pick the display unit from the current peak, convert, redraw."""
+        # Pick the display unit from the current peak, convert, redraw.
         peak_mbps = max(max(self._dl), max(self._ul), 0.0)
         unit, divisor = scale_for_axis(peak_mbps)
 
@@ -145,7 +145,7 @@ class LiveChart(QWidget):
         self._ul_curve.setData(self._x, ul_scaled)
 
         peak_scaled = max(max(dl_scaled), max(ul_scaled), 0.0)
-        # Headroom above the peak; keep a small floor so an idle chart still
+        # Headroom above the peak, keep a small floor so an idle chart still
         # has a sensible axis instead of collapsing to zero.
         y_max = peak_scaled * 1.25 if peak_scaled > 0 else 10.0
         self._plot.setYRange(0, y_max, padding=0)

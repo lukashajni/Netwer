@@ -2,8 +2,8 @@
 NETWER — WiFiSignal widget.
 
 A WiFi glyph drawn with QPainter that reflects connection state:
-  - No adapter / disconnected → gray glyph with a diagonal strike-through
-  - Connected → arcs fill green according to signal strength (0-100%)
+  - No adapter / disconnected - gray glyph with a diagonal strike-through
+  - Connected - arcs fill green according to signal strength (0-100%)
 
 Signal strength maps to how many of the three arcs light up, and the
 color shifts (green = strong, amber = medium, red = weak).
@@ -21,7 +21,7 @@ class WiFiSignal(QWidget):
         super().__init__(parent)
         self.setFixedSize(size, size)
         self.setStyleSheet("background: transparent;")
-        self._percent = None  # None = no adapter / disconnected
+        self._percent = None  # None - no adapter / disconnected
 
     def set_signal(self, percent) -> None:
         """percent: 0-100 for strength, or None for disconnected/no adapter."""
@@ -65,7 +65,7 @@ class WiFiSignal(QWidget):
         p.setBrush(dot_color)
         p.drawEllipse(QPointF(cx, cy), w * 0.045, w * 0.045)
 
-        # Arcs (span 90° centered on straight up: from 225° to 315°)
+        # Arcs (span 90 centered on straight up: from 225 to 315)
         pen = QPen()
         pen.setWidthF(w * 0.055)
         pen.setCapStyle(Qt.PenCapStyle.RoundCap)

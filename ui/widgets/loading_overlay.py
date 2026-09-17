@@ -1,8 +1,8 @@
 """
 NETWER — LoadingOverlay (fullscreen).
 
-A full-window loading screen: centered NETWER logo, an animated ring
-spinner beneath it, and a status line. Shown over the ENTIRE app (sidebar
+A full-window loading screen: centered "NETWER" logo, an animated ring
+spinner beneath it, and a status line. Shown over the entire app (sidebar
 included) on startup. When all initial data is ready, it fades out and
 reveals the fully populated application at once.
 """
@@ -16,7 +16,7 @@ from app.resources import LOGO_PATH
 
 
 class _Spinner(QWidget):
-    """Rotating arc spinner."""
+    # Rotating arc spinner.
 
     def __init__(self, color: str, size: int = 46, parent=None):
         super().__init__(parent)
@@ -53,7 +53,7 @@ class _Spinner(QWidget):
 
 
 class LoadingOverlay(QWidget):
-    """Full-window overlay. Call show_loading() then finish(on_done)."""
+    # Full-window overlay. Call show_loading() then finish(on_done).
 
     def __init__(self, parent=None, message: str = "Loading network data…"):
         super().__init__(parent)

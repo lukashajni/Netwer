@@ -3,7 +3,7 @@ NETWER — InfoTable widget.
 
 A compact two-column key/value table for detailed information pages
 (Network Information, System Information). Rows alternate subtly for
-readability; values use the mono/data font depending on content type.
+readability, values use the mono/data font depending on content type.
 Supports copying the whole table to clipboard as text.
 """
 
@@ -68,7 +68,7 @@ class InfoTable(QFrame):
         self._lay.addWidget(row)
 
     def add_section(self, title: str):
-        """A subtle section header row."""
+        # A subtle section header row.
         self._rows.append((f"--- {title} ---", ""))
         lbl = QLabel(title)
         lbl.setStyleSheet(
@@ -80,7 +80,7 @@ class InfoTable(QFrame):
         self._lay.addWidget(lbl)
 
     def to_text(self) -> str:
-        """Render the table as plain text for clipboard/export."""
+        # Render the table as plain text for clipboard/export.
         lines = []
         for key, value in self._rows:
             if key.startswith("---"):

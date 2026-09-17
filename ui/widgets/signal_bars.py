@@ -34,7 +34,7 @@ def signal_quality(dbm: float) -> str:
 
 
 def dbm_to_percent(dbm: float) -> int:
-    """Approximate signal percentage from dBm (-90 = 0%, -30 = 100%)."""
+    # Approximate signal percentage from dBm (-90 = 0%, -30 = 100%).
     pct = (dbm + 90) / 60 * 100
     return max(0, min(100, round(pct)))
 

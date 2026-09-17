@@ -2,7 +2,7 @@
 NETWER — LatencyChart widget.
 
 A sliding latency plot for the ping pages. Unlike the dashboard's traffic
-chart, a lost packet must read as a GAP rather than a zero — plotting a
+chart, a lost packet must read as a GAP rather than a zero - plotting a
 timeout as 0 ms would draw a spike down to the axis and lie about the
 result. Timeouts are pushed as NaN, which PyQtGraph renders as a break in
 the line, and are additionally marked with a red tick on the axis.
@@ -28,8 +28,8 @@ class LatencyChart(QWidget):
 
         pg.setConfigOptions(antialias=True)
         self._plot = pg.PlotWidget()
-        # Match the card exactly (glass or flat) so the plot doesn't
-        # show up as a slightly different rectangle inside the card.
+        """ Match the card exactly (glass or flat) so the plot doesn't
+        show up as a slightly different rectangle inside the card. """
         self._plot.setBackground(card_bg())
         self._plot.showGrid(x=False, y=True, alpha=0.15)
         self._plot.setMouseEnabled(x=False, y=False)
@@ -58,7 +58,7 @@ class LatencyChart(QWidget):
         lay.addWidget(self._plot)
 
     def push(self, ms) -> None:
-        """Add a reply. Pass None for a timeout — it renders as a gap."""
+        # Add a reply. Pass None for a timeout - it renders as a gap.
         self._data.append(float("nan") if ms is None else float(ms))
         self._redraw()
 

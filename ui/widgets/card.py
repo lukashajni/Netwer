@@ -1,8 +1,8 @@
 """
 NETWER — Card widget.
 
-Genericki panel-kontejner: naslov s pravom ikonom gore, pa proizvoljan
-sadrzaj ispod (graf, tablica, redovi, gaugevi).
+Generic panel-container: title with real icon above and arbitrary
+content below (graph, table, rows, gauges).
 """
 
 from PyQt6.QtCore import QRectF
@@ -17,10 +17,10 @@ class Card(QFrame):
     def __init__(self, title: str, icon_name: str = "", parent=None):
         super().__init__(parent)
         self.setObjectName("Card")
-        # Background is painted in paintEvent (not via stylesheet) so it fills
-        # the whole rounded rect UNDER child widgets — a stylesheet background
-        # doesn't paint behind transparent children (gauges, charts), which
-        # left a dark app-coloured band across the card.
+        """ Background is painted in paintEvent (not via stylesheet) so it fills
+        the whole rounded rect under child widgets - a stylesheet background
+        doesn't paint behind transparent children (gauges, charts), which
+        left a dark app-coloured band across the card. """
         self.setStyleSheet(
             "#Card QLabel { background: transparent; border: none; }"
         )
@@ -29,9 +29,9 @@ class Card(QFrame):
         outer.setContentsMargins(18, 16, 18, 18)
         outer.setSpacing(12)
 
-        # Cards used as compact stat tiles pass an empty title — in that case
-        # skip the header entirely, otherwise it eats ~30px of height and the
-        # content gets clipped.
+        """ Cards used as compact stat tiles pass an empty title - in that case
+        skip the header entirely, otherwise it eats ~30px of height and the
+        content gets clipped. """
         self.header_layout = QHBoxLayout()
         if title or icon_name:
             header = self.header_layout
@@ -73,7 +73,7 @@ class Card(QFrame):
 
 
 def kv_row(key: str, value: str, value_color: str = None, mono: bool = False):
-    """Redak 'oznaka .... vrijednost' za Network Summary."""
+    # Row 'Label .... Value' for Network Summary.
     container = QFrame()
     container.setStyleSheet("background: transparent; border: none;")
     row = QHBoxLayout(container)

@@ -2,7 +2,7 @@
 NETWER — StatCard widget.
 
 Card for one key metric (Internet Status, Download, Upload, Packet Loss,
-Uptime — the dashboard's top row). Real qtawesome icon, modern data font,
+Uptime - the dashboard's top row). Real qtawesome icon, modern data font,
 and an optional sparkline (mini trend chart) at the bottom like the mockup.
 """
 
@@ -16,16 +16,16 @@ from ui.widgets.sparkline import Sparkline
 
 
 class StatCard(QFrame):
-    #: Tint presets for the little icon tile (solid bg, icon color).
+    # Tint presets for the little icon tile (solid bg, icon color).
     TILE_TINTS = {
         "internet": ("#123528", "#33d6a6"),
         "download": ("#152340", "#5b8cff"),
         "upload":   ("#231c40", "#8b6dff"),
-        # The card is built with icon_name="packet_loss", so the key has to
-        # match exactly — the old "packet" key never hit and the tile silently
-        # fell back to the default blue.
-        # Packet loss is GREEN while healthy; the dashboard recolours the tile
-        # to amber/red only when loss actually rises.
+        """ The card is built with icon_name="packet_loss", so the key has to
+        match exactly - the old "packet" key never hit and the tile silently
+        fell back to the default blue.
+        Packet loss is green while healthy, the dashboard recolours the tile
+        to amber/red only when loss actually rises. """
         "packet_loss": ("#123528", "#33d6a6"),
         "packet":   ("#123528", "#33d6a6"),
         "uptime":   ("#332916", "#f5b545"),
@@ -36,11 +36,11 @@ class StatCard(QFrame):
                  tint: str = None, parent=None):
         super().__init__(parent)
         self.setObjectName("StatCard")
-        # We paint the card background ourselves in paintEvent (below) rather
-        # than via a stylesheet. A stylesheet background on the frame doesn't
-        # paint behind transparent child widgets (the sparkline), which left a
-        # dark app-coloured band across the card. Painting it ourselves fills
-        # the whole rounded rect under every child.
+        """ We paint the card background ourselves in paintEvent (below) rather
+        than via a stylesheet. A stylesheet background on the frame doesn't
+        paint behind transparent child widgets (the sparkline), which left a
+        dark app-coloured band across the card. Painting it ourselves fills
+        the whole rounded rect under every child. """
         self.setStyleSheet(
             "#StatCard QLabel { background: transparent; border: none; }"
         )
@@ -64,8 +64,8 @@ class StatCard(QFrame):
         self._icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
         top.addWidget(self._icon)
         top.addStretch()
-        # Trend badge (e.g. ↑12%). Kept in the layout at all times (empty +
-        # transparent when unused) so it's always positioned correctly — a
+        # Trend badge (e.g. 12%). Kept in the layout at all times (empty +
+        # transparent when unused) so it's always positioned correctly - a
         # hidden, never-laid-out label kept painting a stray box.
         self._badge = QLabel("")
         self._badge.setStyleSheet("background: transparent; border: none;")
@@ -94,9 +94,9 @@ class StatCard(QFrame):
         )
         lay.addWidget(self._sub)
 
-        # Sparkline at the bottom. Cards WITHOUT one still reserve the same
-        # vertical space, so the header/value text lines up across every card
-        # in the row (otherwise a no-sparkline card sits lower than the rest).
+        """ Sparkline at the bottom. Cards without one still reserve the same
+        vertical space, so the header/value text lines up across every card
+        in the row (otherwise a no-sparkline card sits lower than the rest). """
         self.spark = None
         if spark_color:
             self.spark = Sparkline(spark_color)
@@ -109,7 +109,7 @@ class StatCard(QFrame):
             lay.addWidget(filler)
 
     def set_badge(self, text: str, positive: bool = True) -> None:
-        """Show a small trend badge in the top-right (e.g. '↑ 12%')."""
+        # Show a small trend badge in the top-right (e.g. '12%').
         if not text:
             self._badge.setText("")
             self._badge.setStyleSheet("background: transparent; border: none;")
@@ -145,7 +145,7 @@ class StatCard(QFrame):
         self._sub.setText(subtitle)
 
     def push_spark(self, value: float) -> None:
-        """Add a point to the sparkline (if this card has one)."""
+        # Add a point to the sparkline (if this card has one).
         if self.spark is not None:
             self.spark.push(value)
 

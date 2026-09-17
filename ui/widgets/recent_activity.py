@@ -49,21 +49,21 @@ class RecentActivity(QWidget):
 
         activity.changed.connect(self.refresh)
 
-        # Refresh the relative timestamps periodically ("2m ago" → "3m ago")
+        # Refresh the relative timestamps periodically ("2m ago" -> "3m ago")
         self._tick = QTimer(self)
         self._tick.setInterval(30000)
         self._tick.timeout.connect(self.refresh)
         self._tick.start()
 
-        # refresh() builds either the rows or the empty-state label, so we
-        # don't keep a permanent placeholder around — an earlier version did,
-        # and it stayed visible under the list once entries appeared.
+        """ refresh() builds either the rows or the empty-state label, so we
+        don't keep a permanent placeholder around - an earlier version did,
+        and it stayed visible under the list once entries appeared. """
         self.refresh()
 
     def refresh(self):
-        # Remove every row (the trailing stretch is the last item and stays).
-        # setParent(None) detaches immediately; deleteLater() alone would let
-        # the old widget linger visibly until Qt's event loop got round to it.
+        """ Remove every row (the trailing stretch is the last item and stays).
+        setParent(None) detaches immediately, deleteLater() alone would let
+        the old widget linger visibly until Qt's event loop got round to it. """
         while self._list.count() > 1:
             item = self._list.takeAt(0)
             w = item.widget()

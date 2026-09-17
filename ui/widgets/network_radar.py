@@ -1,11 +1,11 @@
 """Live network radar — an animated, "breathing" view of the local network.
 
-The router sits at the centre; discovered devices orbit around it. Active
+The router sits at the centre, discovered devices orbit around it. Active
 devices pulse, links glow and carry little packet dots when there's traffic, a
 radar beam sweeps around, and hovering a node shows its details. It's the same
 data as the static NetworkMap (gateway + device dicts), just rendered live.
 
-Rendering is pure QPainter on a QTimer — no GPU, no extra deps — so it behaves
+Rendering is pure QPainter on a QTimer - no GPU, no extra deps - so it behaves
 the same on every machine. When the widget isn't visible the timer stops, so it
 costs nothing on other pages.
 """
@@ -35,8 +35,8 @@ except Exception:                                   # pragma: no cover
         return "devices"
 
 
-# A single glyph per device kind — drawn in the node with the icon font would
-# be ideal, but a compact unicode glyph keeps the radar crisp at small sizes.
+""" A single glyph per device kind - drawn in the node with the icon font would
+be ideal, but a compact unicode glyph keeps the radar crisp at small sizes. """
 class _Node:
     """One device on the radar."""
     __slots__ = ("dev", "angle", "dist", "radius", "kind", "is_router",
@@ -67,16 +67,16 @@ class _Packet:
 
 
 class NetworkRadar(QWidget):
-    """Animated radar view. Feed it data via set_topology(); it renders live."""
+    # Animated radar view. Feed it data via set_topology(), it renders live.
 
-    #: Emitted with the device dict when a node is clicked.
+    # Emitted with the device dict when a node is clicked.
     node_clicked = pyqtSignal(dict)
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        # Keep the minimum low so the widget never overflows a short card (the
-        # bottom of the circle used to get clipped), but let it EXPAND to use
-        # whatever height the card actually offers.
+        """ Keep the minimum low so the widget never overflows a short card (the
+        bottom of the circle used to get clipped), but let it expand to use
+        whatever height the card actually offers. """
         self.setMinimumHeight(170)
         self.setSizePolicy(QSizePolicy.Policy.Expanding,
                            QSizePolicy.Policy.Expanding)
@@ -98,7 +98,7 @@ class NetworkRadar(QWidget):
         self._timer.timeout.connect(self._tick)
 
     def set_detailed(self, on: bool) -> None:
-        """Big-screen mode: larger nodes and a name under every device."""
+        # Big-screen mode - larger nodes and a name under every device.
         self._detailed = bool(on)
         self.update()
 
@@ -113,15 +113,15 @@ class NetworkRadar(QWidget):
     def _radius_of(self, node) -> float:
         return node.radius * self._node_scale()
 
-    # ── Data ───────────────────────────────────────────────────
+    # -- Data --
     def set_topology(self, gateway, devices, router_vendor="", online=True):
-        """Same signature as NetworkMap. `devices` is a list of dicts with
+        """Same signature as NetworkMap. "devices" is a list of dicts with
         ip / hostname / vendor / rtt_ms (and optionally is_self)."""
         self._gateway = gateway or ""
         self._online = online
 
         others = [d for d in (devices or []) if d.get("ip") != gateway]
-        # Keep the radar readable — cap the number of orbiting nodes.
+        # Keep the radar readable - cap the number of orbiting nodes.
         others = others[:12]
 
         nodes: list[_Node] = []
@@ -134,17 +134,17 @@ class NetworkRadar(QWidget):
         n = max(1, len(others))
         for i, dev in enumerate(others):
             angle = -math.pi / 2 + i * (math.tau / n)   # start at top, go round
-            # Orbit radius as a fraction of the outer ring. Keep nodes well
-            # INSIDE the outer ring (0.60–0.72) so their halos never reach the
-            # card edge and the whole radar reads as one clean circle.
+            """ Orbit radius as a fraction of the outer ring. Keep nodes well
+            inside the outer ring (0.60–0.72) so their halos never reach the
+            card edge and the whole radar reads as one clean circle. """
             rtt = dev.get("rtt_ms")
             base = 0.78 if self._detailed else 0.66
             if isinstance(rtt, (int, float)) and rtt > 0:
                 lo, hi = (0.72, 0.86) if self._detailed else (0.60, 0.72)
                 base = max(lo, min(hi, lo + rtt / 600.0))
             vendor = (dev.get("vendor") or "").lower()
-            # "Apple (private address)" means we DID identify it — it just uses
-            # a randomized MAC — so it shouldn't be flagged as unidentified.
+            """ "Apple (private address)" means we did identify it - it just uses
+            a randomized MAC - so it shouldn't be flagged as unidentified. """
             identified = bool(dev.get("kind")) or "(private address)" in vendor
             is_unknown = (not identified
                           and ("private" in vendor or "unknown" in vendor
@@ -168,7 +168,7 @@ class NetworkRadar(QWidget):
         self._packets = []
         self.update()
 
-    # ── Lifecycle: only animate while shown ────────────────────
+    # -- Lifecycle: only animate while shown --
     def showEvent(self, e):
         super().showEvent(e)
         if not self._timer.isActive():
@@ -187,22 +187,22 @@ class NetworkRadar(QWidget):
                 pk.p = 0.0
         self.update()
 
-    # ── Geometry helpers ───────────────────────────────────────
+    # -- Geometry helpers --
     def _center_and_scale(self):
         w, h = self.width(), self.height()
-        # Reserve room at the bottom for the "Router" label, and a uniform
-        # margin so the OUTER ring + node halos never touch (or get clipped by)
-        # the card edges. The radar is a circle, so the radius is limited by
-        # whichever of width/height is smaller.
+        """ Reserve room at the bottom for the "Router" label, and a uniform
+        margin so the outer ring + node halos never touch (or get clipped by)
+        the card edges. The radar is a circle, so the radius is limited by
+        whichever of width/height is smaller. """
         label_room = 38 if self._detailed else 18   # name (+IP) under nodes
         margin = 52 if self._detailed else 26       # halo + label allowance
         avail_w = w - margin * 2
         avail_h = h - margin * 2 - label_room
         radius = max(60, min(avail_w, avail_h) / 2)
         cx = w / 2
-        # Centre the circle in the space that's left, instead of pinning it to
-        # the top — otherwise a wide-but-short view leaves a big empty band
-        # under the radar. Clamped so the ring and its labels always fit.
+        """ Centre the circle in the space that's left, instead of pinning it to
+        the top - otherwise a wide-but-short view leaves a big empty band
+        under the radar. Clamped so the ring and its labels always fit. """
         lo = margin + radius
         hi = h - radius - label_room
         if self._detailed:
@@ -229,7 +229,7 @@ class NetworkRadar(QWidget):
             return QColor(Theme.DANGER)
         return QColor(Theme.ACCENT)
 
-    # ── Painting ───────────────────────────────────────────────
+    # -- Painting --
     def paintEvent(self, event):
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -244,8 +244,8 @@ class NetworkRadar(QWidget):
             p.end()
             return
 
-        # Concentric radar rings (drawn a touch inside `scale` so the outer
-        # ring sits comfortably within the card, never flush to the edge).
+        """ Concentric radar rings (drawn a touch inside `scale` so the outer
+        ring sits comfortably within the card, never flush to the edge). """
         ring_max = scale * 0.94
         for i in range(1, 4):
             rr = ring_max * i / 3.0
@@ -253,9 +253,8 @@ class NetworkRadar(QWidget):
             p.setBrush(Qt.BrushStyle.NoBrush)
             p.drawEllipse(center, rr, rr)
 
-        # Sweeping beam — a soft rotating wedge that fades out both around the
-        # arc AND toward the edge, so it looks like a glow sweeping the radar
-        # rather than a hard pie slice being cut out.
+        """Sweeping beam - a soft rotating wedge that fades out both around the
+        arc and toward the edge."""
         p.save()
         p.setClipRect(self.rect())
         beam = QConicalGradient(center, -math.degrees(self._sweep))
@@ -263,8 +262,8 @@ class NetworkRadar(QWidget):
         cq = QColor(Theme.SUCCESS); cq.setAlpha(20)
         cmid = QColor(Theme.SUCCESS); cmid.setAlpha(8)
         c1 = QColor(Theme.SUCCESS); c1.setAlpha(0)
-        # A long, gradual tail: bright at the leading edge, fading out over a
-        # wide arc so there's no hard "pie slice" edge anywhere.
+        """A long, gradual tail - bright at the leading edge, fading out over a
+        wide arc so there's no hard "pie slice" edge anywhere. """
         beam.setColorAt(0.0, c0)
         beam.setColorAt(0.05, cq)
         beam.setColorAt(0.14, cmid)
@@ -272,8 +271,8 @@ class NetworkRadar(QWidget):
         beam.setColorAt(1.0, c1)
         p.setPen(Qt.PenStyle.NoPen)
         p.setBrush(QBrush(beam))
-        # Paint the wedge in concentric bands with falling opacity, so it also
-        # fades toward the rim — a soft radar glow instead of a hard disc.
+        """ Paint the wedge in concentric bands with falling opacity, so it also
+        fades toward the rim - a soft radar glow instead of a hard disc. """
         bands = 6
         for i in range(bands):
             r_out = ring_max * (i + 1) / bands
@@ -344,17 +343,17 @@ class NetworkRadar(QWidget):
                 p.setPen(QPen(QColor(Theme.TEXT_PRIMARY), 2))
                 p.drawEllipse(np, r + 4, r + 4)
 
-            # A small bright centre dot instead of a glyph — the unicode
-            # squares/rectangles read as boxes at this size and looked broken.
-            # Clean dots keep the radar tidy; the label under each node says
-            # what the device actually is.
+            """ A small bright centre dot instead of a glyph - the unicode
+            squares/rectangles read as boxes at this size and looked broken.
+            Clean dots keep the radar tidy, the label under each node says
+            what the device actually is. """
             p.setPen(Qt.PenStyle.NoPen)
             inner = QColor("#ffffff")
             inner.setAlpha(235 if node.active else 150)
             p.setBrush(inner)
             p.drawEllipse(np, max(2.0, r * 0.30), max(2.0, r * 0.30))
 
-            # Labels: the router always; every device in the big view.
+            # Labels: the router always, every device in the big view.
             label = None
             if node.is_router:
                 label = "Router"
@@ -379,7 +378,7 @@ class NetworkRadar(QWidget):
 
         p.end()
 
-    # ── Hover tooltip ──────────────────────────────────────────
+    # -- Hover tooltip --
     def _node_at(self, pos) -> _Node | None:
         for node in self._nodes:
             np = self._node_pos(node)
