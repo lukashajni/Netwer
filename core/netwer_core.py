@@ -16,6 +16,7 @@ Conventions used throughout:
 """
 
 import os
+import sys
 import re
 import sys
 import json
@@ -2447,7 +2448,6 @@ def get_bandwidth_today():
 
 def find_speedtest_exe():
     search_paths = [
-        os.path.expandvars(r"%USERPROFILE%\Desktop\Netwer\ookla-speedtest-1.2.0-win64\speedtest.exe"),
         os.path.expandvars(r"%USERPROFILE%\Desktop\speedtest.exe"),
         os.path.expandvars(r"%USERPROFILE%\Downloads\speedtest.exe"),
         r"C:\speedtest\speedtest.exe",
