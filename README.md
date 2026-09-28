@@ -9,7 +9,7 @@
 ![Platform](https://img.shields.io/badge/platform-Windows-0078D6?logo=Windows\&logoColor=white)
 ![Platform](https://img.shields.io/badge/platform-Linux-ffc000?logo=linux\&logoColor=white)
 ![Tests](https://img.shields.io/badge/tests-114%20passing-33d6a6)
-![License](https://img.shields.io/badge/license-GNU-lightgrey)
+![License](https://img.shields.io/badge/license-GPLv3-lightgrey)
 
 **Features  Screenshots  Installation  Project Structure  Roadmap**
 
@@ -181,7 +181,7 @@ For major changes, please open an Issue first so we can discuss the proposed dir
 
 ## License
 
-This project is licensed under the **MIT License**. See the `LICENSE` file for details.
+This project is licensed under the **GPLv3 License**. See the `LICENSE` file for details.
 
 
 ## Netwer Team
