@@ -31,6 +31,7 @@ class _GlowDot(QWidget):
 
     def __init__(self, color: str, size: int = 16, parent=None):
         super().__init__(parent)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
         self._color = QColor(color)
         self.setFixedSize(size, size)
 

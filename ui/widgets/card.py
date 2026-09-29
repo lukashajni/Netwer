@@ -5,7 +5,7 @@ Generic panel-container: title with real icon above and arbitrary
 content below (graph, table, rows, gauges).
 """
 
-from PyQt6.QtCore import QRectF
+from PyQt6.QtCore import Qt, QRectF
 from PyQt6.QtGui import QPainter, QColor, QBrush, QPen, QPainterPath
 from PyQt6.QtWidgets import QFrame, QVBoxLayout, QHBoxLayout, QLabel
 
@@ -17,6 +17,7 @@ class Card(QFrame):
     def __init__(self, title: str, icon_name: str = "", parent=None):
         super().__init__(parent)
         self.setObjectName("Card")
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
         """ Background is painted in paintEvent (not via stylesheet) so it fills
         the whole rounded rect under child widgets - a stylesheet background
         doesn't paint behind transparent children (gauges, charts), which

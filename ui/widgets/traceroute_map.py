@@ -71,6 +71,7 @@ _WORLD = _load_world()   # list of countries, each country - list of rings
 class TracerouteMap(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
         self.setMinimumHeight(320)
         self._hops = []
         self._visible = 0          # how many hops are currently drawn

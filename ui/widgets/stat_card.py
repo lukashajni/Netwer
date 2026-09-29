@@ -36,6 +36,7 @@ class StatCard(QFrame):
                  tint: str = None, parent=None):
         super().__init__(parent)
         self.setObjectName("StatCard")
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
         """ We paint the card background ourselves in paintEvent (below) rather
         than via a stylesheet. A stylesheet background on the frame doesn't
         paint behind transparent child widgets (the sparkline), which left a

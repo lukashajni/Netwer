@@ -16,6 +16,7 @@ from app.theme import Theme
 class Spinner(QWidget):
     def __init__(self, size: int = 28, color: str = None, parent=None):
         super().__init__(parent)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
         self._angle = 0
         self._color = color or Theme.ACCENT
         self._size = size

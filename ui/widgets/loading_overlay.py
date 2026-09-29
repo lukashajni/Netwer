@@ -20,6 +20,7 @@ class _Spinner(QWidget):
 
     def __init__(self, color: str, size: int = 46, parent=None):
         super().__init__(parent)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
         self._angle = 0
         self._color = color
         self.setFixedSize(size, size)

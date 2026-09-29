@@ -33,5 +33,6 @@ class OneshotWorker(BaseWorker):
             if not self._cancelled:
                 self.error.emit(str(e))
         finally:
-            if not self._cancelled:
-                self.done.emit()
+            # Always emit done, even when cancelled - pages rely on it to
+            # reset their own state (see BasePage.stop_workers).
+            self.done.emit()

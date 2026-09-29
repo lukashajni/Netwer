@@ -46,7 +46,7 @@ class BasePage(QWidget):
         self._workers = []  # Active workers for this page 
         self._window = None  # reference to MainWindow (for loading cordination)
 
-        self.setStyleSheet(f"background: {Theme.BG_APP};")
+        self.setStyleSheet("background: transparent;")
 
         # Outer layout — sublcasses add content to self.body_layout
         self._root = QVBoxLayout(self)
@@ -100,10 +100,14 @@ class BasePage(QWidget):
     def stop_workers(self) -> None:
         """Stop and neatly shut down all active workers for this site."""
         for worker in list(self._workers):
-            # Disconnect signals FIRST so a result/error queued just before
+            # Disconnect result/error FIRST so a payload queued just before
             # stop() can't fire back into a widget we're about to delete
-            # (that race segfaults on theme rebuild).
-            for sig in ("result", "error", "done"):
+            # (that race segfaults on theme rebuild). `done` is left
+            # connected on purpose: pages rely on it to clear their own
+            # worker reference and re-enable their button, so cancelling
+            # mid-run (e.g. navigating away and back) doesn't leave the
+            # page permanently stuck thinking a worker is still running.
+            for sig in ("result", "error"):
                 s = getattr(worker, sig, None)
                 if s is not None:
                     try:

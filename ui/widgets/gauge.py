@@ -20,6 +20,7 @@ class _Ring(QWidget):
         super().__init__(parent)
         self._value = 0.0
         self._color = color
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
         self.setFixedSize(76, 76)
         self._anim = QPropertyAnimation(self, b"value")
         self._anim.setDuration(Theme.ANIM_SLOW)

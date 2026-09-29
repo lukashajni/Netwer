@@ -16,6 +16,7 @@ from app.theme import Theme
 class ProgressBar(QWidget):
     def __init__(self, height: int = 6, color: str = None, parent=None):
         super().__init__(parent)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
         self._fraction = 0.0
         self._bar_height = height
         self._color = color or Theme.ACCENT
