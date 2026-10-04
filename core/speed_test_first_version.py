@@ -1,9 +1,26 @@
+import os
 import time
 import requests
+import json
+from json import JSONDecodeError
 from requests import Session
 from find_server import *
 
 oneMbps: int = 1000000
+
+"""This function is used to set the best server in the 'best_server.json' file (in order not to find 
+    the best server each time a speed test runs"""
+def set_best_server(best_server: dict[str, str | int]) -> None:
+    try:
+        with open("best_server.json", "r") as best_server_fp:
+            data = json.load(best_server_fp)
+    
+        print(f"best server: {data["server"]}")
+    # In any other case, clear the file and write the best_server to it
+    except:
+        with open("best_server.json","w") as best_server_fp:
+            json.dump(best_server, best_server_fp, indent=4)
+        print("Best server was not found, writing a new best_server to it")
 
 # This function is used to warmup a test by its session
 def warmup_test(session: Session, url: str) -> None:
@@ -48,7 +65,7 @@ def probe_network(url: str) -> int:
         currRequestSize = maxRequestSize
     #print(f"currRequestSize: {currRequestSize}")
     return currRequestSize
-def download_speed_test(url: str, speed_time: float) -> dict[str,float]:
+def download_speed_test(url: str, speed_time: float) -> dict[str,float | int]:
     megabytes_per_request: int = probe_network(url=url)
 
     session: Session = requests.Session()
@@ -74,10 +91,14 @@ def download_speed_test(url: str, speed_time: float) -> dict[str,float]:
     print(f"Recieved {total_bytes} bytes, elapsed_time: {elapsed_time}")
     return {"elapsed_time": elapsed_time, "total_bytes": total_bytes}
 
+def upload_speed_test() -> dict[str,float | int]:
+    pass
+
 best_server: dict[str, str | int] = find_best_server(better_scan=False)
+set_best_server(best_server)
 download_url: str = f"{best_server["server"]}{best_server["dlURL"]}" 
 
-test_dict: dict[str,float] = download_speed_test(url=download_url,speed_time=15)
+test_dict: dict[str,float | int] = download_speed_test(url=download_url,speed_time=15)
 speed_in_Mbps: float = (test_dict["total_bytes"] * 8) / (test_dict["elapsed_time"] * oneMbps)
 print(f"Download speed: {speed_in_Mbps}Mbps")
 

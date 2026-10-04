@@ -5,6 +5,15 @@ import time
 class ServerListFileNotFound(Exception):
     pass
 
+def check_best_server_file() -> dict[str, str | int]:
+    try:
+        with open("best_server.json", "r") as best_server_fp:
+            data = json.load(best_server_fp)
+        return data
+    except:
+        # If there is no best server found, return and id of -1 which indicates that there is no best server yet
+        return {"id": -1}
+
 def construct_ping_server(server_dict: dict[str,str | int], base_url: str, ping_url: str) -> str:
     new_server_url: str = base_url
     # Handle the server url not having the 'https://' at the beginning
@@ -29,6 +38,10 @@ def find_server_list():
     raise ServerListFileNotFound("Server list file 'server-list.json' couldn't be found in the same directory as this file")
    
 def find_best_server(better_scan: bool) -> dict[str, str | int]:
+    best_server_from_file: dict[str, str | int] = check_best_server_file()
+    if int(best_server_from_file["id"]) >= 0:
+        return best_server_from_file
+
     server_list = find_server_list()
     best_server: dict[str, str | int] = dict()
     best_elapsed_time: float = 0
