@@ -1,6 +1,7 @@
 import time
 import requests
 from requests import Session
+from find_server import *
 
 oneMbps: int = 1000000
 
@@ -73,8 +74,8 @@ def download_speed_test(url: str, speed_time: float) -> dict[str,float]:
     print(f"Recieved {total_bytes} bytes, elapsed_time: {elapsed_time}")
     return {"elapsed_time": elapsed_time, "total_bytes": total_bytes}
 
-server_url: str = "https://speedtest2.sox.rs" 
-download_url: str = server_url + "/libre/backend/garbage.php" 
+best_server: dict[str, str | int] = find_best_server(better_scan=False)
+download_url: str = f"{best_server["server"]}{best_server["dlURL"]}" 
 
 test_dict: dict[str,float] = download_speed_test(url=download_url,speed_time=15)
 speed_in_Mbps: float = (test_dict["total_bytes"] * 8) / (test_dict["elapsed_time"] * oneMbps)
