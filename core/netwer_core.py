@@ -28,6 +28,7 @@ import ipaddress
 import subprocess
 import urllib.request
 from pathlib import Path
+import concurrent.futures
 from datetime import datetime
 
 try:
@@ -1158,7 +1159,7 @@ def stream_system_resources(interval_s=1.5, max_samples=600):
 
 # Ping: quick / stability / custom
 
-def ping_quick():
+def ping_quick(timeout_ms=1000, ports=(53,)):
     """Pings 3 well-known DNS servers once each (4 pings), returns a list
     of per-server results. Used for the dashboard's "Internet Status" card
     and the standalone Network Test screen."""
@@ -1167,24 +1168,24 @@ def ping_quick():
         {"label": "Cloudflare", "ip": "1.1.1.1"},
         {"label": "Quad9", "ip": "9.9.9.9"},
     ]
-    results = []
-    for t in targets:
-        times, lost = [], 0
-        for _ in range(4):
-            ms = ping_host(t["ip"], 1000)
-            (times.append(ms) if ms is not None else None)
-            if ms is None:
-                lost += 1
-        if times:
-            results.append({
-                "label": t["label"], "ip": t["ip"],
-                "avg": round(sum(times) / len(times)),
-                "min": min(times), "max": max(times),
-                "loss": round((lost / 4) * 100),
+    results = {t["label"]: [] for t in targets}
+    with concurrent.futures.ThreadPoolExecutor(max_workers=12) as pool:
+        pings = {pool.submit(ping_host, t["ip"], timeout_ms): t["label"] for t in targets for _ in range(4)}
+        final = []
+        for future in concurrent.futures.as_completed(pings):
+            label = pings[future]
+            ms = future.result()
+            results[label].append(ms if ms else None)
+
+        for label, times in results.items():
+            final.append({
+                "label": label,
+                "avg": round(sum(times)/len(times)) if all(times) else 0,
+                "min": min(times) if all(times) else 0, "max": max(times)  if all(times) else 0,
+                "loss": round((times.count(None) / 4) * 100)
             })
-        else:
-            results.append({"label": t["label"], "ip": t["ip"], "unreachable": True})
-    return results
+
+    return final
 
 
 def ping_stability_stream(target="8.8.8.8", count=20):
@@ -1769,8 +1770,6 @@ def ping_sweep_stream(timeout_ms=150, subnet=None):
             return
 
     yield {"network": network}
-
-    import concurrent.futures
 
     # Resolve our own IP/MAC once. ARP won't list us, so we label our own
     # machine (and thus resolve its vendor) using the adapter's MAC.
