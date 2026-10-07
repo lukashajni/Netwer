@@ -19,20 +19,6 @@ from ui.pages.speedtest_page import SpeedTestPage
 from ui.pages.system_info_page import SystemInfoPage
 from ui.pages.wifi_info_page import WiFiInfoPage
 
-
-import traceback
-from PyQt6.QtCore import qInstallMessageHandler
-
-def qt_message_handler(mode, context, message):
-    if "stylesheet" in message.lower():
-        print("\n=== Qt stylesheet warning ===")
-        print(message)
-        traceback.print_stack()
-        print("==============================\n")
-
-qInstallMessageHandler(qt_message_handler)
-
-
 def build_global_qss():
     app_gradient = (
         f"qlineargradient(x1:0, y1:0, x2:1, y2:1, "
