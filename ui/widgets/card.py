@@ -1,16 +1,9 @@
-"""
-NETWER — Card widget.
+from PyQt6.QtCore import QRectF, Qt
+from PyQt6.QtGui import QBrush, QColor, QPainter, QPainterPath, QPen
+from PyQt6.QtWidgets import QFrame, QHBoxLayout, QLabel, QVBoxLayout
 
-Generic panel-container: title with real icon above and arbitrary
-content below (graph, table, rows, gauges).
-"""
-
-from PyQt6.QtCore import Qt, QRectF
-from PyQt6.QtGui import QPainter, QColor, QBrush, QPen, QPainterPath
-from PyQt6.QtWidgets import QFrame, QVBoxLayout, QHBoxLayout, QLabel
-
-from app.theme import Theme
 from app.resources import Icons
+from app.theme import Theme
 
 
 class Card(QFrame):
@@ -18,10 +11,6 @@ class Card(QFrame):
         super().__init__(parent)
         self.setObjectName("Card")
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
-        """ Background is painted in paintEvent (not via stylesheet) so it fills
-        the whole rounded rect under child widgets - a stylesheet background
-        doesn't paint behind transparent children (gauges, charts), which
-        left a dark app-coloured band across the card. """
         self.setStyleSheet(
             "#Card QLabel { background: transparent; border: none; }"
         )
@@ -30,9 +19,6 @@ class Card(QFrame):
         outer.setContentsMargins(18, 16, 18, 18)
         outer.setSpacing(12)
 
-        """ Cards used as compact stat tiles pass an empty title - in that case
-        skip the header entirely, otherwise it eats ~30px of height and the
-        content gets clipped. """
         self.header_layout = QHBoxLayout()
         if title or icon_name:
             header = self.header_layout
@@ -74,7 +60,6 @@ class Card(QFrame):
 
 
 def kv_row(key: str, value: str, value_color: str = None, mono: bool = False):
-    # Row 'Label .... Value' for Network Summary.
     container = QFrame()
     container.setStyleSheet("background: transparent; border: none;")
     row = QHBoxLayout(container)

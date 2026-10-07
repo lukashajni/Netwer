@@ -1,0 +1,1 @@
+"""Packaged application assets."""

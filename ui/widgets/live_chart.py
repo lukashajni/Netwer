@@ -1,29 +1,11 @@
-"""
-NETWER — LiveChart widget (live traffic graph).
-
-PyQtGraph wrapper drawing a sliding download/upload traffic chart. Keeps a
-sliding window of the last N samples and scrolls left-to-right as new data
-arrives.
-
-Units adapt to the traffic: the Y axis shows Kbps for light traffic, Mbps
-for normal, Gbps for very fast links - so small traffic isn't a flat line
-pinned to the bottom of a 100 Mbps axis.
-
-Values are pushed in Mbps (what the backend yields), the widget converts
-for display.
-
-Usage:
-    chart = LiveChart(max_points=60)
-    chart.push(download_mbps, upload_mbps)
-"""
-
 from collections import deque
 
 import pyqtgraph as pg
-from PyQt6.QtWidgets import QWidget, QVBoxLayout
+from PyQt6.QtWidgets import QVBoxLayout, QWidget
 
+from app.formatting import format_speed as _fmt
+from app.formatting import scale_for_axis
 from app.theme import Theme, card_bg
-from app.formatting import scale_for_axis, format_speed as _fmt
 
 
 class LiveChart(QWidget):
@@ -42,8 +24,6 @@ class LiveChart(QWidget):
 
         pg.setConfigOptions(antialias=True)
         self._plot = pg.PlotWidget()
-        """ Match the card exactly (glass or flat) so the plot doesn't
-        show up as a slightly different rectangle inside the card. """
         self._plot.setBackground(card_bg())
         self._plot.showGrid(x=False, y=True, alpha=0.15)
         self._plot.setMouseEnabled(x=False, y=False)
@@ -70,8 +50,6 @@ class LiveChart(QWidget):
         )
         lay.addWidget(self._plot)
 
-        """ Hover crosshair - a vertical line that follows the cursor plus a
-        small label showing the download/upload value at that sample. """
         self._vline = pg.InfiniteLine(
             angle=90, movable=False,
             pen=pg.mkPen(Theme.TEXT_FAINT, width=1,
@@ -111,8 +89,7 @@ class LiveChart(QWidget):
         self._hover_label.setVisible(True)
 
     def stats(self):
-        """Return live min/max/avg (in Mbps) for download and upload, over
-        the non-zero portion of the buffer (so startup zeros don't skew it)."""
+        """Return live download and upload min/max/average values in Mbps."""
         def _s(seq):
             vals = [v for v in seq]
             nonzero = [v for v in vals if v > 0]

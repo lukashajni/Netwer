@@ -1,13 +1,5 @@
-"""
-NETWER — SignalBars widget.
-
-Four ascending bars showing wireless signal strength, colored by quality
-(green = strong, amber = fair, red = weak). Used in the available-networks
-list, where a compact per-row indicator reads better than a full glyph.
-"""
-
-from PyQt6.QtCore import Qt, QRectF
-from PyQt6.QtGui import QPainter, QColor
+from PyQt6.QtCore import QRectF, Qt
+from PyQt6.QtGui import QColor, QPainter
 from PyQt6.QtWidgets import QWidget
 
 from app.theme import Theme

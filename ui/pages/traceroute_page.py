@@ -1,35 +1,27 @@
-"""
-NETWER — Traceroute page.
-
-Traces the network path to a host and plots it on a world map.
-
-Layout: the map sits on the left and the hop list on the right, both visible
-at once (stacking them vertically pushed the map below the window, where
-there was no way to scroll to it).
-
-Flow:
-  1. netwer_core.traceroute_stream streams one event per hop - rows appear live
-  2. when the trace finishes, the public hops are geolocated in ONE background
-     call (never inline, or a slow provider would stall the trace)
-  3. the located hops are handed to TracerouteMap, which animates the path
-"""
+"""Trace a network path and display its hops on a map."""
 
 import html
 
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton,
-    QComboBox, QFrame, QScrollArea
+    QComboBox,
+    QFrame,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QPushButton,
+    QScrollArea,
+    QVBoxLayout,
+    QWidget,
 )
 
-from app.theme import Theme
-from app.resources import Icons
 from app.activity import activity
+from app.resources import Icons
+from app.theme import Theme
 from ui.pages.base_page import BasePage
 from ui.widgets.card import Card
 from ui.widgets.traceroute_map import TracerouteMap
-from workers import StreamWorker, OneshotWorker
-
+from workers import OneshotWorker, StreamWorker
 
 HOP_OPTIONS = [("Auto", 0), ("Max hops: 15", 15), ("Max hops: 30", 30),
                ("Max hops: 64", 64)]
@@ -268,9 +260,7 @@ class TraceroutePage(BasePage):
         self._reached = False
         self._hop_count = 0
         self._hops = []
-        # Bump the trace id so any still-running geolocation worker from a
-        # previous trace is ignored when it finishes (that stale result was
-        # mixing old hops - Zagreb/Osijek/Mountain View - into a new trace).
+        # Ignore geolocation results from earlier traces.
         self._trace_id = getattr(self, "_trace_id", 0) + 1
 
         self.btn.setText("  Stop")
@@ -308,9 +298,7 @@ class TraceroutePage(BasePage):
         self.hops_combo.setEnabled(True)
 
     def _locate_hop(self, hop):
-        """Locate one hop in the background and redraw the path. Keeps the
-        map filling in live as the trace progresses, using real ip-api.com
-        city data (offline estimate only as a last resort)."""
+        """Locate a hop asynchronously and redraw the path when it resolves."""
         tid = getattr(self, "_trace_id", 0)
         if hop["local"]:
             # Pin to our own location if known; else defer to the anchor pass.
@@ -341,8 +329,7 @@ class TraceroutePage(BasePage):
             self._redraw()
 
     def _redraw(self):
-        """Anchor any not-yet-located local hops to the first known point,
-        then draw the current path (called as hops are located)."""
+        """Anchor unlocated local hops and draw the current path."""
         anchor = None
         if self._home and self._home.get("lat") is not None:
             anchor = (self._home["lat"], self._home["lon"],
@@ -404,9 +391,7 @@ class TraceroutePage(BasePage):
                "local": local, "city": "", "lat": None, "lon": None,
                "approx": False}
         self._hops.append(hop)
-        """ Geolocate this hop in the background and plot the path as hops come
-        in. Local hops are pinned to our own location, public hops get a
-        real city from ip-api.com. Cheap and non-blocking, one lookup/hop. """
+        # Locate each hop asynchronously so tracing remains responsive.
         self._locate_hop(hop)
 
     def _on_finished(self):
@@ -451,9 +436,7 @@ class TraceroutePage(BasePage):
             self._home = geo
 
     def _finalize_map(self):
-        """Called when the trace ends. Fill in any hop the live per-hop
-        lookup didn't manage to locate (offline region estimate, plain dot),
-        anchor local hops, and draw the final path once."""
+        """Fill in missing locations, anchor local hops, and draw the path."""
         # Offline fill for any public hop still without a location.
         for h in self._hops:
             if not h["local"] and h["lat"] is None:

@@ -1,22 +1,19 @@
-"""
-NETWER — Settings panel (slides in from the right).
-
-Grouped settings backed by the persistent store. Changing the theme or accent
-applies live via callbacks the MainWindow wires up. Other settings (scan
-timeouts, notification toggles, behaviour) persist immediately.
-"""
-
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QComboBox,
-    QCheckBox, QScrollArea, QFrame
+    QCheckBox,
+    QComboBox,
+    QFrame,
+    QHBoxLayout,
+    QLabel,
+    QPushButton,
+    QScrollArea,
+    QVBoxLayout,
+    QWidget,
 )
 
-from app.theme import (
-    Theme, THEMES, ACCENT_PRESETS, current_theme_name, current_accent_name
-)
 from app.resources import Icons
 from app.store import store
+from app.theme import ACCENT_PRESETS, THEMES, Theme, current_accent_name, current_theme_name
 
 
 class SettingsPanel(QWidget):
@@ -26,6 +23,7 @@ class SettingsPanel(QWidget):
     resolution_changed = pyqtSignal(str)         # resolution key, e.g. "auto"
     schedule_toggled = pyqtSignal(bool)          # background scanning on/off
     schedule_interval_changed = pyqtSignal(int)  # interval in minutes
+    offline_mode_toggled = pyqtSignal(bool)
     closed = pyqtSignal()
 
     WIDTH = 340
@@ -98,10 +96,6 @@ class SettingsPanel(QWidget):
             lambda v: self.glass_toggled.emit(v))
 
         # -- Display --
-        # Lets the window size and UI density (sidebar/topbar/fonts) match a
-        # target screen - auto-detects by default, or can be pinned to a
-        # specific resolution when preparing a demo for a projector or a
-        # particular monitor.
         self._section("Display")
         from app import display as display_res
         self._resolution_labels = list(display_res.RESOLUTIONS.values())
@@ -158,6 +152,13 @@ class SettingsPanel(QWidget):
 
         # -- Behaviour --
         self._section("Behaviour")
+        self.offline_mode = self._check(
+            "Offline privacy mode",
+            store.get_setting("offline_mode", True),
+            self.offline_mode_toggled.emit)
+        self.offline_mode.setToolTip(
+            "Blocks optional third-party vendor lookups. Local scans and any "
+            "diagnostics you start still send network traffic.")
         self.remember = self._check(
             "Remember recent hosts",
             store.get_setting("remember_hosts", True),
@@ -246,6 +247,9 @@ class SettingsPanel(QWidget):
 
     def _reset(self):
         store.reset_settings()
+        self.offline_mode.setChecked(True)
+        self.offline_mode_toggled.emit(True)
+        self.schedule_on.setChecked(False)
         self._reset_btn.setText("  Reset \u2713 (restart to apply all)")
 
     # -- Styling --

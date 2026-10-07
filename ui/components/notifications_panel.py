@@ -1,21 +1,19 @@
-"""
-NETWER — Notifications panel (slides in from the right).
-
-Renders the global notification stream (from app.notifications) with a
-type icon, title, detail and relative time per row, plus a "mark all read"
-action. Subscribes to the notification center so it updates live.
-"""
-
 from datetime import datetime
 
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QScrollArea, QFrame
+    QFrame,
+    QHBoxLayout,
+    QLabel,
+    QPushButton,
+    QScrollArea,
+    QVBoxLayout,
+    QWidget,
 )
 
-from app.theme import Theme
-from app.resources import Icons
 from app.notifications import notifications
+from app.resources import Icons
+from app.theme import Theme
 
 
 def _relative_time(ts):

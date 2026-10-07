@@ -1,21 +1,10 @@
-"""
-NETWER — DNS Tools page.
-
-A single page that hosts three related tools behind an internal tab bar:
-DNS Lookup, Reverse DNS and Traceroute. Each tab embeds the corresponding
-tool page (without its own header) inside a stacked view, so switching tabs
-is instant and each tool keeps its own workers and lifecycle.
-
-Leaving the page (or switching tabs) stops the active tool's workers.
-"""
+"""Tabbed container for DNS lookup, reverse DNS, and traceroute tools."""
 
 from PyQt6.QtCore import Qt
-from PyQt6.QtWidgets import (
-    QWidget, QHBoxLayout, QPushButton, QStackedWidget, QButtonGroup
-)
+from PyQt6.QtWidgets import QButtonGroup, QHBoxLayout, QPushButton, QStackedWidget
 
-from app.theme import Theme
 from app.resources import Icons
+from app.theme import Theme
 from ui.pages.base_page import BasePage
 from ui.pages.dns_lookup_page import DnsLookupPage
 from ui.pages.reverse_dns_page import ReverseDnsPage

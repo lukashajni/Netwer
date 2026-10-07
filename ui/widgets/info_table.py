@@ -1,16 +1,5 @@
-"""
-NETWER — InfoTable widget.
-
-A compact two-column key/value table for detailed information pages
-(Network Information, System Information). Rows alternate subtly for
-readability, values use the mono/data font depending on content type.
-Supports copying the whole table to clipboard as text.
-"""
-
 from PyQt6.QtCore import Qt
-from PyQt6.QtWidgets import (
-    QFrame, QVBoxLayout, QHBoxLayout, QLabel, QWidget
-)
+from PyQt6.QtWidgets import QFrame, QHBoxLayout, QLabel, QVBoxLayout, QWidget
 
 from app.theme import Theme
 
@@ -20,7 +9,7 @@ class InfoTable(QFrame):
         super().__init__(parent)
         self.setObjectName("InfoTable")
         self.setStyleSheet(
-            f"#InfoTable {{ background: transparent; border: none; }}"
+            "#InfoTable { background: transparent; border: none; }"
         )
         self._rows = []  # list of (key, value) for copy/export
         self._lay = QVBoxLayout(self)

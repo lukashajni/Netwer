@@ -1,32 +1,23 @@
-"""
-NETWER — Ping page.
-
-Test connectivity and latency to a single host: enter a target, pick a
-packet count (or run continuously), and watch the replies arrive live —
-headline stats, a latency plot, and terminal-style output.
-
-The ping itself runs in a StreamWorker so the UI stays responsive, and
-stopping mid-run just cancels the worker (the backend generator checks the
-cancel flag between packets).
-"""
+"""Ping a host and display live connectivity and latency results."""
 
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton,
-    QComboBox
+    QComboBox,
+    QHBoxLayout,
+    QLabel,
+    QPushButton,
 )
 
-from app.theme import Theme
-from app.resources import Icons
 from app.activity import activity
 from app.notifications import notifications
+from app.resources import Icons
+from app.theme import Theme
 from ui.pages.base_page import BasePage
 from ui.widgets.card import Card
 from ui.widgets.host_input import HostInput
 from ui.widgets.latency_chart import LatencyChart
 from ui.widgets.terminal_output import TerminalOutput
 from workers import StreamWorker
-
 
 COUNT_OPTIONS = [
     ("4 packets", 4),
@@ -228,8 +219,7 @@ class PingPage(BasePage):
         ms = d.get("ms")
         is_up = d.get("status") == "ok"
 
-        # Connection-state alerting (watch mode) - announce transitions between
-        # reachable and unreachable so a long-running monitor is useful.
+        # Notify only when watch mode detects a connectivity transition.
         prev = getattr(self, "_link_up", None)
         if prev is not None and prev != is_up:
             if is_up:

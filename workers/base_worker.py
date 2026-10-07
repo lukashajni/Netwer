@@ -1,10 +1,8 @@
-"""NETWER — Base worker infrastructure for async execution."""
 
 from PyQt6.QtCore import QThread, pyqtSignal
 
 
 class BaseWorker(QThread):
-    """Base thread worker providing standard signals and cooperative cancellation."""
 
     result = pyqtSignal(dict)
     error = pyqtSignal(str)
@@ -15,7 +13,6 @@ class BaseWorker(QThread):
         self._cancelled = False
 
     def stop(self) -> None:
-        """Flag thread for safe cancellation."""
         self._cancelled = True
 
     @property
@@ -23,7 +20,6 @@ class BaseWorker(QThread):
         return self._cancelled
 
     def run(self) -> None:
-        """Must be implemented by subclasses."""
         raise NotImplementedError(
             "Subclasses of BaseWorker must implement run()"
         )

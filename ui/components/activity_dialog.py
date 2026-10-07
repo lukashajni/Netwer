@@ -1,17 +1,8 @@
-"""
-NETWER — Activity history dialog.
-
-Full-history view behind the dashboard's "View All" button. Shows every
-recorded action (the card only shows the latest few), with a Clear button.
-"""
-
 from PyQt6.QtCore import Qt
-from PyQt6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton
-)
+from PyQt6.QtWidgets import QDialog, QHBoxLayout, QLabel, QPushButton, QVBoxLayout
 
-from app.theme import Theme
 from app.activity import activity
+from app.theme import Theme
 from ui.widgets.recent_activity import RecentActivity
 
 

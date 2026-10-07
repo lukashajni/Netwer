@@ -1,34 +1,31 @@
-"""
-NETWER — Report page.
-
-Generate a branded PDF network report. The user picks which sections to
-include (checkboxes), clicks Generate to build a preview shown inside the
-app, then Save PDF to write it wherever they choose.
-
-Data collection + PDF building run in a worker (they hit the network and
-scan devices), so the UI never freezes.
-"""
+"""Generate, preview, and save a PDF network report."""
 
 import os
 import tempfile
 from datetime import datetime
 
 from PyQt6.QtCore import Qt
-from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QCheckBox, QPushButton,
-    QScrollArea, QFrame
-)
 from PyQt6.QtGui import QPixmap
 from PyQt6.QtPdf import QPdfDocument
+from PyQt6.QtWidgets import (
+    QCheckBox,
+    QFrame,
+    QHBoxLayout,
+    QLabel,
+    QPushButton,
+    QScrollArea,
+    QVBoxLayout,
+    QWidget,
+)
 
-from app.theme import Theme
 from app.resources import Icons
+from app.theme import Theme
+from reports import report_data
+from reports.pdf_report import ALL_SECTIONS, SECTION_LABELS, build_report
 from ui.pages.base_page import BasePage
 from ui.widgets.card import Card
 from ui.widgets.spinner import Spinner
 from workers import OneshotWorker
-from reports import report_data
-from reports.pdf_report import build_report, SECTION_LABELS, ALL_SECTIONS
 
 
 class ReportPage(BasePage):
@@ -126,9 +123,7 @@ class ReportPage(BasePage):
 
     # -- Styling --
     def _section_option(self, key, label, icon_name):
-        """A clickable row with an icon, label, and a checkbox — nicer than
-        a bare checkbox. Clicking anywhere toggles it."""
-        from ui.widgets.card import Card  # not needed, build a frame
+        """Create a row whose icon, label, or checkbox toggles the option."""
         frame = QFrame()
         frame.setObjectName("SectOpt")
         frame.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -214,8 +209,7 @@ class ReportPage(BasePage):
         w.start()
 
     def _on_data(self, data, sections):
-        # Build PDF to a temp file (still off the UI-blocking path, building
-        # is fast once data is gathered)
+        # Build the PDF in a temporary file.
         try:
             tmp = os.path.join(tempfile.gettempdir(),
                                f"netwer_preview_{datetime.now():%H%M%S}.pdf")
@@ -242,8 +236,7 @@ class ReportPage(BasePage):
                 w.deleteLater()
 
     def _show_loading(self, text):
-        """Replace the preview area with a centered spinner + message so it's
-        obvious the report is being built (not just a small status line)."""
+        """Show a centered progress indicator in the preview area."""
         self._clear_preview()
         self._preview_layout.addStretch()
         spin = Spinner(size=40)
@@ -268,7 +261,6 @@ class ReportPage(BasePage):
 
         self._pdf_doc.load(pdf_path)
         page_count = self._pdf_doc.pageCount()
-        from PyQt6.QtCore import QSizeF
         for i in range(page_count):
             size = self._pdf_doc.pagePointSize(i)
             # Render at ~1.4x for crisp preview
@@ -303,8 +295,9 @@ class ReportPage(BasePage):
             import shutil
             shutil.copyfile(self._temp_pdf, path)
             self._status.setText(f"Saved \u2713  {path}")
-            from app.activity import activity
             import os as _os
+
+            from app.activity import activity
             activity.add("Report saved", _os.path.basename(path), kind="success")
         except Exception as e:
             self._status.setText(f"Save failed: {e}")

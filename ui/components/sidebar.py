@@ -1,17 +1,8 @@
-"""
-NETWER — Sidebar navigation.
-
-Left navigation track: logo, list of pages (with real icons),
-status indicator on the bottom. Emits nvaigate(key) upon page selection.
-"""
-
 from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QFrame
-)
+from PyQt6.QtWidgets import QFrame, QHBoxLayout, QLabel, QVBoxLayout, QWidget
 
-from app.theme import Theme, card_bg, card_border
 from app.resources import Icons
+from app.theme import Theme, card_bg, card_border
 
 
 class NavItem(QFrame):
@@ -156,9 +147,6 @@ class Sidebar(QWidget):
         return brand
 
     def add_section(self, label: str) -> None:
-        """Subtle title of the section which groups items below it
-        (e.g 'Tools' above DNS/Reverse DNS/Traceroute). The empty label
-        adds a bit of padding which serves as a visual separator. """
         if not label:
             spacer = QLabel("")
             spacer.setFixedHeight(10)
@@ -182,9 +170,6 @@ class Sidebar(QWidget):
         self.layout().addWidget(item)
 
     def add_stretch_and_status(self) -> None:
-        # The "All systems operational" status now lives ONLY in the top bar
-        # (top-right). Here we just push the nav items up with a stretch, so
-        # the status pill isn't duplicated at the bottom of the sidebar.
         if getattr(self, "_status_row", None) is not None:
             return
         self.layout().addStretch()
@@ -199,8 +184,6 @@ class Sidebar(QWidget):
             item.set_active(k == key)
 
     def clear_items(self) -> None:
-        """Remove all nav items, sections and the status row so the sidebar
-        can be rebuilt (used on theme change). Keeps the brand + spacer."""
         lay = self.layout()
         # Keep the brand (index 0) and top spacer (index 1); remove the rest.
         while lay.count() > 2:

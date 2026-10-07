@@ -1,18 +1,9 @@
-"""
-NETWER — LoadingOverlay (fullscreen).
+from PyQt6.QtCore import QEasingCurve, QPropertyAnimation, QRectF, Qt, QTimer
+from PyQt6.QtGui import QColor, QPainter, QPen, QPixmap
+from PyQt6.QtWidgets import QGraphicsOpacityEffect, QLabel, QVBoxLayout, QWidget
 
-A full-window loading screen: centered "NETWER" logo, an animated ring
-spinner beneath it, and a status line. Shown over the entire app (sidebar
-included) on startup. When all initial data is ready, it fades out and
-reveals the fully populated application at once.
-"""
-
-from PyQt6.QtCore import Qt, QTimer, QRectF, QPropertyAnimation, QEasingCurve
-from PyQt6.QtGui import QPainter, QColor, QPen, QPixmap
-from PyQt6.QtWidgets import QWidget, QVBoxLayout, QLabel, QGraphicsOpacityEffect
-
-from app.theme import Theme
 from app.resources import LOGO_PATH
+from app.theme import Theme
 
 
 class _Spinner(QWidget):

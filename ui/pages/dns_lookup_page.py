@@ -1,23 +1,19 @@
-"""
-NETWER — DNS Lookup page.
-
-Resolve a domain name to its IP addresses. Enter a hostname, hit Resolve,
-and see the canonical name plus every A (IPv4) and AAAA (IPv6) record the
-resolver returns, each copyable to the clipboard.
-
-The lookup runs in a OneshotWorker around netwer_core.dns_lookup, which
-returns {"ipv4": [...], "ipv6": [...], "canonical": str, "total": int}.
-"""
+"""Resolve domain names and display their IPv4 and IPv6 records."""
 
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton,
-    QFrame, QApplication
+    QApplication,
+    QFrame,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QPushButton,
+    QVBoxLayout,
 )
 
-from app.theme import Theme
-from app.resources import Icons
 from app.activity import activity
+from app.resources import Icons
+from app.theme import Theme
 from ui.pages.base_page import BasePage
 from ui.widgets.card import Card
 from workers import OneshotWorker

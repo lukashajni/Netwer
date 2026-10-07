@@ -1,38 +1,32 @@
-"""
-NETWER — Port Scanner page.
-
-Scan a host's TCP ports in parallel and classify each result the way a real
-scanner does: open (service listening), closed (host refused - reachable but
-nothing there), or filtered (no response - firewall dropping packets). Each
-row shows the port number, the well-known service, its transport protocol,
-and a colored state badge. A summary strip tallies open/closed/filtered.
-
-The scan streams live from netwer_core.port_scan_stream, which pings every
-port at once through a thread pool. The target can be pre-filled from the
-Ping Sweep page (click a device - "Scan ports") via set_target().
-"""
+"""Scan host ports and display their service and reachability status."""
 
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton,
-    QComboBox, QFrame, QScrollArea, QApplication
+    QComboBox,
+    QFrame,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QPushButton,
+    QScrollArea,
+    QVBoxLayout,
+    QWidget,
 )
 
-from app.theme import Theme
-from app.resources import Icons
 from app.activity import activity
 from app.notifications import notifications
+from app.resources import Icons
+from app.theme import Theme
 from ui.pages.base_page import BasePage
 from ui.widgets.card import Card
-from ui.widgets.progress_bar import ProgressBar
 from ui.widgets.host_input import HostInput
+from ui.widgets.progress_bar import ProgressBar
 from workers import StreamWorker
-
 
 # (label shown in dropdown, spec passed to backend)
 PROFILE_OPTIONS = [
     ("Common ports", "common"),
-    ("All known (top ~60)", "top100"),
+    ("All known (top 100)", "top100"),
     ("Web servers", "web"),
     ("Databases", "database"),
     ("Remote access", "remote"),
@@ -58,6 +52,7 @@ class PortScannerPage(BasePage):
         super().__init__(core, parent)
         self._worker = None
         self._running = False
+        self._failed = False
         self._total = 0
         self._results = []          # collected port dicts (for export)
         self._counts = {"open": 0, "closed": 0, "filtered": 0}
@@ -354,8 +349,7 @@ class PortScannerPage(BasePage):
         return row
 
     def _repaint_rows(self):
-        """Rebuild visible rows honoring the show-all toggle and sorting
-        (open first, then closed, then filtered, each by port number)."""
+        """Rebuild visible rows in state and port order."""
         self._clear_rows()
         order = {"open": 0, "closed": 1, "filtered": 2}
         rows = sorted(self._results,
@@ -402,6 +396,7 @@ class PortScannerPage(BasePage):
             self.status_label.setText("Enter a host to scan.")
             return
         self._running = True
+        self._failed = False
         self._results = []
         self._counts = {"open": 0, "closed": 0, "filtered": 0}
         self.btn_scan.setText("  Stop")
@@ -475,12 +470,13 @@ class PortScannerPage(BasePage):
         self.chip_filtered.setText(f"{self._counts['filtered']} filtered")
 
     def _on_error(self, msg):
+        self._failed = True
         self.status_label.setText(str(msg))
         self.status_label.setStyleSheet(
             f"color: {Theme.DANGER}; font-size: {Theme.FONT_SIZE_BODY}px;")
 
     def _on_finished(self):
-        if self._running:
+        if self._running and not self._failed:
             self.progress.set_fraction(1.0)
             n_open = self._counts["open"]
             open_ports = [r["port"] for r in self._results
@@ -515,8 +511,7 @@ class PortScannerPage(BasePage):
         self._stop()
 
     def _set_device_type(self, dtype):
-        """Show a device-type badge (icon + label) once a scan identifies
-        what kind of host this is."""
+        """Display the detected device type."""
         if not hasattr(self, "device_badge"):
             return
         labels = {
@@ -536,6 +531,7 @@ class PortScannerPage(BasePage):
             return
         import os
         from datetime import datetime
+
         from PyQt6.QtWidgets import QFileDialog
         target = self.target_input.text().strip() or "host"
         default = os.path.join(

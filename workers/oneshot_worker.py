@@ -1,10 +1,8 @@
-"""NETWER — Single-execution worker for background tasks."""
 
 from workers.base_worker import BaseWorker
 
 
 class OneshotWorker(BaseWorker):
-    """Executes a function once in a background thread and emits the result."""
 
     def __init__(self, func, *args, parent=None, **kwargs):
         super().__init__(parent)
@@ -19,7 +17,6 @@ class OneshotWorker(BaseWorker):
             if self._cancelled:
                 return
 
-            # Format raw response into a standard payload dictionary
             if isinstance(result, dict) and "error" in result:
                 self.error.emit(str(result["error"]))
             elif isinstance(result, dict):
@@ -33,6 +30,4 @@ class OneshotWorker(BaseWorker):
             if not self._cancelled:
                 self.error.emit(str(e))
         finally:
-            # Always emit done, even when cancelled - pages rely on it to
-            # reset their own state (see BasePage.stop_workers).
             self.done.emit()

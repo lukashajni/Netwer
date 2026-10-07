@@ -1,0 +1,53 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "netwer"
+version = "0.1.0"
+description = "Desktop network monitoring and diagnostics"
+readme = "README.md"
+requires-python = ">=3.13"
+license = "GPL-3.0-only"
+license-files = ["LICENSE"]
+dependencies = [
+    "PyQt6==6.11.0",
+    "pyqtgraph==0.14.0",
+    "qtawesome",
+    "psutil",
+    "reportlab==4.4.10",
+    "numpy",
+]
+authors = [
+    { name = "Lukas Hajneman" },
+    { name = "Jan Sven Bukovski" },
+    { name = "Erik Celjak" },
+]
+classifiers = [
+    "Environment :: Win32 (MS Windows)",
+    "Intended Audience :: End Users/Desktop",
+    "Operating System :: Microsoft :: Windows",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: System :: Networking :: Monitoring",
+]
+
+[project.gui-scripts]
+netwer = "main:main"
+
+[tool.setuptools]
+py-modules = ["main"]
+include-package-data = true
+
+[tool.setuptools.package-data]
+assets = ["**/*.json", "**/*.png", "**/*.glb"]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["app*", "assets*", "core*", "reports*", "ui*", "workers*"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I"]

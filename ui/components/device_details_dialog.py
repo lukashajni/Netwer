@@ -1,22 +1,21 @@
-"""Device details popup.
-
-Opens when a node on the Network Radar (or map) is clicked. Shows what we know
-about the device — name, IP, MAC, vendor, RTT — and runs a live port scan so
-you can see which ports are open/closed on that specific device, right there.
-
-The scan runs on a StreamWorker (background thread) so the UI stays responsive,
-and stops if the dialog is closed early.
-"""
 from __future__ import annotations
 
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QFrame,
-    QScrollArea, QWidget, QGridLayout, QLineEdit,
+    QDialog,
+    QFrame,
+    QGridLayout,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QPushButton,
+    QScrollArea,
+    QVBoxLayout,
+    QWidget,
 )
 
-from app.theme import Theme
 from app.resources import Icons
+from app.theme import Theme
 from workers import StreamWorker
 
 try:
@@ -108,8 +107,6 @@ class DeviceDetailsDialog(QDialog):
             vl.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
             fg.addWidget(kl, i, 0)
             if k == "Name":
-                """ Let the user give the device a friendly name, it's stored by
-                MAC and used everywhere the device appears. """
                 self._name_lbl = vl
                 nrow = QHBoxLayout()
                 nrow.setContentsMargins(0, 0, 0, 0)
@@ -129,9 +126,6 @@ class DeviceDetailsDialog(QDialog):
                 nrow.addStretch()
                 fg.addLayout(nrow, i, 1)
             elif k == "Vendor":
-                """ The vendor is a guess (OUI table / online lookup), so let the
-                user correct it - NETWER remembers the correction for this
-                manufacturer prefix from then on. """
                 self._vendor_lbl = vl
                 vrow = QHBoxLayout()
                 vrow.setContentsMargins(0, 0, 0, 0)
@@ -270,9 +264,6 @@ class DeviceDetailsDialog(QDialog):
 
     # -- Vendor correction (feeds the self-learning DB) --
     def _edit_vendor(self):
-        """Swap the vendor label for an inline editor. Saving teaches NETWER
-        this manufacturer for the device's OUI, so every device sharing that
-        prefix is named correctly from now on - including offline."""
         mac = self._dev.get("mac") or ""
         if len(mac.replace(":", "").replace("-", "")) < 6:
             self._vendor_lbl.setText("No MAC \u2014 can't be taught")

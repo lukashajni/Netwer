@@ -1,26 +1,9 @@
-"""
-NETWER report data collector.
-
-Gathers everything the PDF report needs by calling the backend, based on
-which sections were requested. Runs inside a worker (it makes network
-calls and a device scan, which take seconds), so it must NOT be called
-on the UI thread directly.
-
-Returns a dict shaped for reports.pdf_report.build_report().
-"""
 
 
 def collect(core, sections):
-    """Collect report data for the requested sections.
-
-    core: the netwer_core backend module
-    sections: iterable of section keys ("network", "system", "devices",
-              "connectivity")
-    """
     sections = set(sections)
     data = {"summary": {}}
 
-    # Network configuration (also feeds the summary strip)
     if "network" in sections or "connectivity" in sections:
         eth = core.get_ethernet_info()
         if isinstance(eth, dict) and "error" not in eth:
@@ -36,7 +19,6 @@ def collect(core, sections):
                 "dhcp": "",
                 "link_speed": "",
             }
-            # Enrich with full adapter details (description, DHCP, link speed)
             adapter_name = eth.get("adapter", "")
             if adapter_name and hasattr(core, "get_adapter_details"):
                 details = core.get_adapter_details(adapter_name)
@@ -44,18 +26,16 @@ def collect(core, sections):
                     net["description"] = details.get("description", "")
                     net["dhcp"] = details.get("dhcp", "")
                     net["link_speed"] = details.get("link_speed", "")
-                    # Prefer detailed subnet if base was empty
                     if not net["subnet_mask"]:
                         net["subnet_mask"] = details.get("subnet_mask", "")
             data["network"] = net
 
-    # System information
     if "system" in sections:
         sysinfo = core.get_system_info()
         if isinstance(sysinfo, dict) and "error" not in sysinfo:
-            uptime = (f"{sysinfo.get('days',0)}d "
-                      f"{sysinfo.get('hours',0)}h "
-                      f"{sysinfo.get('minutes',0)}m")
+            uptime = (f"{sysinfo.get('days', 0)}d "
+                      f"{sysinfo.get('hours', 0)}h "
+                      f"{sysinfo.get('minutes', 0)}m")
             data["system"] = {
                 "computer": sysinfo.get("computer", ""),
                 "os": sysinfo.get("os", ""),
@@ -64,21 +44,18 @@ def collect(core, sections):
                 "uptime": uptime,
             }
 
-    # Connectivity test (ping), also feeds summary
     ping_results = None
     if "connectivity" in sections:
         ping_results = core.ping_quick()
         if isinstance(ping_results, list):
             data["connectivity"] = ping_results
 
-    # Connected devices
     if "devices" in sections:
         devs = core.get_top_devices(10)
         if isinstance(devs, dict) and "devices" in devs:
             data["devices"] = devs["devices"]
 
     if "port_scan" in sections:
-        # Pull the most recent port scan from the persistent store.
         try:
             from app.store import store
             last = store.get_last_scan("port_scanner")
@@ -87,7 +64,6 @@ def collect(core, sections):
         except Exception:
             pass
 
-    # Build the summary strip from whatever we have
     _build_summary(core, data, ping_results)
     return data
 
@@ -95,7 +71,6 @@ def collect(core, sections):
 def _build_summary(core, data, ping_results):
     summary = data["summary"]
 
-    # If we didn't already ping for connectivity, do a quick one for summary
     if ping_results is None:
         ping_results = core.ping_quick()
 

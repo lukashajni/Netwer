@@ -1,29 +1,14 @@
-"""
-NETWER — Speed Test page.
-
-Measure download, upload and latency using Ookla's speedtest CLI. Hit Start
-and watch the three big readouts fill in live, with a phase indicator and
-elapsed timer.
-
-Runs in a StreamWorker around netwer_core.speedtest_stream, which yields:
-    {"type": "start", "isp", "server"}
-    {"type": "ping", "ms"}
-    {"type": "download", "mbps"}   (repeated, live)
-    {"type": "upload", "mbps"}     (repeated, live)
-    {"type": "result", "ping", "dl", "ul"}
-or {"error": ...} when speedtest.exe isn't found.
-"""
+"""Measure download, upload, and latency with the speedtest CLI."""
 
 import time
+from threading import Event
 
 from PyQt6.QtCore import Qt, QTimer
-from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QFrame
-)
+from PyQt6.QtWidgets import QFrame, QHBoxLayout, QLabel, QPushButton, QVBoxLayout
 
-from app.theme import Theme
-from app.resources import Icons
 from app.activity import activity
+from app.resources import Icons
+from app.theme import Theme
 from ui.pages.base_page import BasePage
 from ui.widgets.progress_bar import ProgressBar
 from ui.widgets.sparkline import Sparkline
@@ -40,6 +25,8 @@ class SpeedTestPage(BasePage):
         self._running = False
         self._start_time = 0
         self._phase = ""
+        self._cancel_event = None
+        self._cancelled_by_user = False
 
         self._timer = QTimer(self)
         self._timer.setInterval(200)
@@ -190,18 +177,23 @@ class SpeedTestPage(BasePage):
 
     # --Lifecycle --
     def on_leave(self):
+        if self._running:
+            self._cancelled_by_user = True
         self._stop()
         super().on_leave()
 
     # --Run / stop --
     def _toggle(self):
         if self._running:
+            self._cancelled_by_user = True
             self._stop()
         else:
             self._start()
 
     def _start(self):
         self._running = True
+        self._cancelled_by_user = False
+        self._cancel_event = Event()
         self._start_time = time.time()
         self._phase = "Connecting"
         self.btn.setText("  Stop")
@@ -220,7 +212,7 @@ class SpeedTestPage(BasePage):
         self.progress.set_fraction(0.05)
         self._timer.start()
 
-        w = StreamWorker(self.core.speedtest_stream)
+        w = StreamWorker(self.core.speedtest_stream, self._cancel_event)
         w.result.connect(self._on_event)
         w.error.connect(self._on_error)
         w.done.connect(self._on_finished)
@@ -231,6 +223,8 @@ class SpeedTestPage(BasePage):
     def _stop(self):
         if self._worker is not None:
             self._worker.stop()
+        if self._cancel_event is not None:
+            self._cancel_event.set()
         self._timer.stop()
         self._running = False
         self.btn.setText("  Start test")
@@ -308,4 +302,10 @@ class SpeedTestPage(BasePage):
     def _on_finished(self):
         self._timer.stop()
         self._worker = None
+        if self._cancelled_by_user:
+            self.phase_label.setText("Test cancelled")
+            self.progress.set_color(Theme.WARNING)
+            for card in (self.card_dl, self.card_ul, self.card_ping):
+                self._set_card_active(card, False)
+            self._cancelled_by_user = False
         self._stop()

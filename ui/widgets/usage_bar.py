@@ -1,15 +1,6 @@
-"""
-NETWER — UsageBar widget.
-
-A labelled horizontal progress bar for resource usage (CPU / memory / disk).
-Denser than a circular gauge, which suits the "System Information" detail page
-where several readings sit stacked. The fill animates to new values so
-updates read as movement rather than jumps.
-"""
-
-from PyQt6.QtCore import Qt, QPropertyAnimation, QEasingCurve, pyqtProperty, QRectF
-from PyQt6.QtGui import QPainter, QColor
-from PyQt6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel
+from PyQt6.QtCore import QEasingCurve, QPropertyAnimation, QRectF, Qt, pyqtProperty
+from PyQt6.QtGui import QColor, QPainter
+from PyQt6.QtWidgets import QHBoxLayout, QLabel, QVBoxLayout, QWidget
 
 from app.theme import Theme
 

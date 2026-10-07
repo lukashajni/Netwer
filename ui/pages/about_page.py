@@ -1,30 +1,24 @@
-"""
-NETWER — About page.
-
-Brand panel with the rotating 3D globe on the left, project information on
-the right, a feature strip and a footer with links.
-
-The globe is the centrepiece - the real Blender model rendered with
-QtQuick3D, draggable, springing back to its home orientation after three
-idle seconds. If 3D isn't available on the machine (no GPU, software
-rendering), Globe3D quietly falls back to the flat logo - the page still
-looks right rather than breaking.
-"""
+"""About page with project information and branding."""
 
 import os
 import webbrowser
 
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QLabel, QPushButton,
-    QFrame, QMessageBox
+    QFrame,
+    QGridLayout,
+    QHBoxLayout,
+    QLabel,
+    QMessageBox,
+    QPushButton,
+    QVBoxLayout,
+    QWidget,
 )
 
-from app.theme import Theme
 from app.resources import Icons
+from app.theme import Theme
 from ui.pages.base_page import BasePage
 from ui.widgets.globe_3d import Globe3D
-
 
 APP_VERSION = "v4.0"
 AUTHOR = "Lukas Hajneman"
@@ -147,7 +141,7 @@ class AboutPage(BasePage):
             f"padding-top: 8px;")
         lay.addWidget(tagline)
 
-        status = QLabel("\u25CF  All systems operational")
+        status = QLabel("\u25CF  NETWER is running")
         status.setAlignment(Qt.AlignmentFlag.AlignCenter)
         status.setStyleSheet(
             f"color: {Theme.SUCCESS}; font-size: {Theme.FONT_SIZE_TINY}px;"
@@ -239,10 +233,10 @@ class AboutPage(BasePage):
         lay.setContentsMargins(12, 9, 12, 9)
         lay.setSpacing(1)
 
-        l = QLabel(label)
-        l.setStyleSheet(
+        label_widget = QLabel(label)
+        label_widget.setStyleSheet(
             f"color: {Theme.TEXT_MUTED}; font-size: {Theme.FONT_SIZE_TINY}px;")
-        lay.addWidget(l)
+        lay.addWidget(label_widget)
 
         v = QLabel(str(value))
         v.setStyleSheet(
@@ -320,9 +314,7 @@ class AboutPage(BasePage):
 
     # -- Footer actions --
     def _dialog_style(self):
-        """Shared style. The QLabel rules matter - without an explicit
-        transparent background, Qt paints its own panel behind the text and
-        it reads as a separate dark block sitting on the dialog."""
+        """Return dialog styling, including transparent message labels."""
         return (
             f"QMessageBox {{ background: {Theme.BG_CARD};"
             f"border: 1px solid {Theme.BORDER}; }}"
@@ -349,9 +341,9 @@ class AboutPage(BasePage):
         box = QMessageBox(self)
         box.setWindowTitle("Check for Updates")
         box.setText(
-            f"You're running NETWER {APP_VERSION} — the latest version.\n\n"
-            "Update checking against the release feed isn't wired up yet; "
-            "for now, releases are published on GitHub.")
+            f"You're running NETWER {APP_VERSION}.\n\n"
+            "Update checking isn't connected to the release feed yet. "
+            "Releases are published on GitHub.")
         box.setIcon(QMessageBox.Icon.NoIcon)
         box.setStyleSheet(self._dialog_style())
         box.exec()

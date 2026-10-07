@@ -1,33 +1,22 @@
-"""
-NETWER — TopBar.
-
-Full-width bar across the top of the window: brand on the left, then the
-theme switcher, a notifications bell (with unread badge), and a settings
-gear on the right. The bell and gear toggle sliding panels; the theme
-switcher opens a small menu of available themes.
-
-Signals:
-    toggle_notifications — bell clicked
-    toggle_settings      — gear clicked
-    theme_selected(str)  — a theme name was picked from the switcher
-"""
-
-from PyQt6.QtCore import Qt, pyqtSignal, QRectF, QStringListModel
+from PyQt6.QtCore import QRectF, QStringListModel, Qt, QTimer, pyqtSignal
+from PyQt6.QtGui import QAction, QBrush, QColor, QPainter, QRadialGradient
 from PyQt6.QtWidgets import (
-    QWidget, QHBoxLayout, QLabel, QPushButton, QMenu, QLineEdit, QFrame,
-    QCompleter
+    QCompleter,
+    QFrame,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QMenu,
+    QPushButton,
+    QWidget,
 )
-from PyQt6.QtGui import QAction, QPainter, QColor, QRadialGradient, QBrush
 
-from app.theme import Theme, THEMES, current_theme_name, is_dark, card_bg, card_border
 from app.resources import Icons
+from app.theme import THEMES, Theme, card_bg, card_border, current_theme_name, is_dark
 
 
 class _GlowDot(QWidget):
-    """A small status dot with a soft glow/halo around it, like the preview.
-
-    The glow is a radial gradient painted behind a solid dot - no OS shadow,
-    so it renders identically on every platform."""
+    """Draw a status dot with a soft halo."""
 
     def __init__(self, color: str, size: int = 16, parent=None):
         super().__init__(parent)
@@ -94,10 +83,7 @@ class TopBar(QWidget):
         self._search.textEdited.connect(self._on_search_typed)
         lay.addWidget(self._search, 1)
 
-        # Live suggestions. Qt's own QCompleter owns the popup, its lifetime
-        # and the keyboard handling - a hand-rolled Qt.Popup list parented to
-        # the top bar was unstable: it grabs mouse/keyboard input and can
-        # outlive its parent when pages are rebuilt.
+        # QCompleter owns the popup lifecycle and keyboard handling.
         self._suggest_model = QStringListModel([])
         self._completer = QCompleter(self._suggest_model, self._search)
         self._completer.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
@@ -111,7 +97,7 @@ class TopBar(QWidget):
         # callable set by MainWindow: (text) -> list of suggestion dicts
         self.suggestion_provider = None
 
-        # Status pill - a glowing dot + "All systems operational".
+        # Status pill reports the local app state, not network health.
         self._status_pill = QFrame()
         self._status_pill.setObjectName("StatusPill")
         sp = QHBoxLayout(self._status_pill)
@@ -119,7 +105,7 @@ class TopBar(QWidget):
         sp.setSpacing(8)
         self._status_dot = _GlowDot(Theme.SUCCESS)
         sp.addWidget(self._status_dot, 0, Qt.AlignmentFlag.AlignVCenter)
-        self._status_text = QLabel("All systems operational")
+        self._status_text = QLabel("NETWER is running")
         sp.addWidget(self._status_text)
         lay.addWidget(self._status_pill)
 
@@ -187,11 +173,14 @@ class TopBar(QWidget):
 
     def _on_suggestion_activated(self, label):
         item = self._suggest_index.get(label)
-        self._search.clear()
         self._suggest_model.setStringList([])
         self._suggest_index = {}
         if item:
             self.suggestion_chosen.emit(item)
+        # QCompleter may write its accepted label into the line edit after
+        # emitting activated; clear on the next event-loop turn to avoid
+        # leaving the suggestion text in the global search field.
+        QTimer.singleShot(0, self._search.clear)
 
     def _on_search_submit(self):
         popup = self._completer.popup()
