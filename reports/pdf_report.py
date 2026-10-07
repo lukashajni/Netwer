@@ -1,26 +1,13 @@
-"""
-NETWER PDF report builder.
-
-Builds a branded PDF network report from collected data. Which sections
-are included is controlled by a `sections` set, so the Report page can
-offer checkboxes (Network / System / Devices / Connectivity).
-
-Data is gathered by report_data.collect() (separate module, runs in a
-worker); this module only turns that data into a PDF. Keeping generation
-separate from the UI means the same builder could back a CLI or scheduled
-export later.
-"""
+"""Build branded PDF network reports from collected data."""
 
 import os
 from datetime import datetime
 
-from reportlab.lib.pagesizes import A4
-from reportlab.lib.units import mm
 from reportlab.lib import colors
-from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-from reportlab.platypus import (
-    SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, KeepTogether
-)
+from reportlab.lib.pagesizes import A4
+from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
+from reportlab.lib.units import mm
+from reportlab.platypus import KeepTogether, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
 # Brand palette (print-friendly versions of the app theme)
 C_HEADER = colors.HexColor("#111830")
@@ -89,9 +76,7 @@ def _section_title(text):
 
 
 def _device_display_name(dev):
-    """Best available name for a device: real hostname, else the vendor
-    (e.g. 'LG Electronics'), else the IP. Mirrors the dashboard's Top
-    Devices logic so the PDF never prints a bare 'Unknown'."""
+    """Return the best available device name."""
     hostname = (dev.get("hostname") or "").strip()
     if hostname and hostname.lower() not in ("unknown", "?", ""):
         return hostname
@@ -103,9 +88,7 @@ def _device_display_name(dev):
 
 def _kv_table(rows):
     data = [[k, v if v not in (None, "") else "\u2014"] for k, v in rows]
-    # splitByRow=0 forbids the table from breaking across pages. KeepTogether
-    # alone isn't enough, a Table will happily split itself unless told not
-    # to, which is what left half a table stranded on the previous page.
+    # Keep the table intact; KeepTogether alone does not prevent row splitting.
     t = Table(data, colWidths=[45 * mm, None], splitByRow=0, repeatRows=0)
     style = [
         ("FONTNAME", (0, 0), (0, -1), "Helvetica"),
@@ -127,11 +110,7 @@ def _kv_table(rows):
 
 def _grid_table(header, rows, success_col=None, col_widths=None):
     data = [header] + rows
-    # splitByRow=0 forbids the table from breaking across pages. KeepTogether
-    # alone isn't enough, because a Table will still split itself unless told
-    # not to. That's what stranded half a table on the previous page.
-    # repeatRows=1 keeps the header with the rows if a table is ever so long
-    # that ReportLab has no choice but to move it wholesale to a new page.
+    # Keep rows intact and repeat the header if the table moves to another page.
     t = Table(data, colWidths=col_widths, splitByRow=0, repeatRows=1)
     style = [
         ("BACKGROUND", (0, 0), (-1, 0), C_HEADER),
@@ -157,12 +136,7 @@ def _grid_table(header, rows, success_col=None, col_widths=None):
 
 
 def build_report(path, data: dict, sections=None):
-    """Build the PDF at `path`.
-
-    data: dict with keys 'network', 'system', 'devices', 'connectivity',
-          'summary' (each optional).
-    sections: iterable of section keys to include; defaults to all.
-    """
+    """Build a PDF report at path using the supplied data and sections."""
     if sections is None:
         sections = ALL_SECTIONS
     sections = [s for s in ALL_SECTIONS if s in sections]
@@ -183,14 +157,13 @@ def build_report(path, data: dict, sections=None):
         "connectivity status, and connected devices for the scanned system.",
         body), Spacer(1, 6)]
 
-    # Summary strip (always shown if we have summary data)
     summary = data.get("summary", {})
     if summary:
         chip = Table([[
-            Paragraph(f"<b>Internet</b><br/>{summary.get('internet','—')}", small),
-            Paragraph(f"<b>Avg Ping</b><br/>{summary.get('ping','—')}", small),
-            Paragraph(f"<b>Packet Loss</b><br/>{summary.get('loss','—')}", small),
-            Paragraph(f"<b>Devices</b><br/>{summary.get('devices','—')}", small),
+            Paragraph(f"<b>Internet</b><br/>{summary.get('internet', '—')}", small),
+            Paragraph(f"<b>Avg Ping</b><br/>{summary.get('ping', '—')}", small),
+            Paragraph(f"<b>Packet Loss</b><br/>{summary.get('loss', '—')}", small),
+            Paragraph(f"<b>Devices</b><br/>{summary.get('devices', '—')}", small),
         ]], colWidths=[None] * 4)
         chip.setStyle(TableStyle([
             ("BACKGROUND", (0, 0), (-1, -1), C_ROW_ALT),
@@ -205,9 +178,7 @@ def build_report(path, data: dict, sections=None):
 
     if "network" in sections and data.get("network"):
         n = data["network"]
-        # KeepTogether: a section's heading and its table must never be
-        # split across a page break, ReportLab would otherwise strand the
-        # heading at the bottom of one page and the rows on the next.
+        # Keep the section heading with its table across page breaks.
         story.append(KeepTogether([
             _section_title("Network Configuration"),
             _kv_table([
@@ -257,8 +228,8 @@ def build_report(path, data: dict, sections=None):
     if "connectivity" in sections and data.get("connectivity"):
         pings = data["connectivity"]
         rows = [[p.get("label", ""), p.get("ip", ""),
-                 f"{p.get('avg','')} ms", f"{p.get('min','')} ms",
-                 f"{p.get('max','')} ms", f"{p.get('loss','')}%"]
+                  f"{p.get('avg', '')} ms", f"{p.get('min', '')} ms",
+                  f"{p.get('max', '')} ms", f"{p.get('loss', '')}%"]
                 for p in pings]
         story.append(KeepTogether([
             _section_title("Connectivity Test"),
@@ -269,7 +240,6 @@ def build_report(path, data: dict, sections=None):
         ]))
         story.append(Spacer(1, 10))
 
-    # From the last scan run in the Port Scanner
     if "port_scan" in sections and data.get("port_scan"):
         ps = data["port_scan"]
         results = ps.get("results", [])

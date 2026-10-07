@@ -1,16 +1,5 @@
-"""
-NETWER — WiFiSignal widget.
-
-A WiFi glyph drawn with QPainter that reflects connection state:
-  - No adapter / disconnected - gray glyph with a diagonal strike-through
-  - Connected - arcs fill green according to signal strength (0-100%)
-
-Signal strength maps to how many of the three arcs light up, and the
-color shifts (green = strong, amber = medium, red = weak).
-"""
-
-from PyQt6.QtCore import Qt, QRectF, QPointF
-from PyQt6.QtGui import QPainter, QColor, QPen
+from PyQt6.QtCore import QPointF, QRectF, Qt
+from PyQt6.QtGui import QColor, QPainter, QPen
 from PyQt6.QtWidgets import QWidget
 
 from app.theme import Theme

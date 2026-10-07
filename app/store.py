@@ -1,27 +1,8 @@
-"""
-NETWER persistent store.
-
-A tiny JSON-backed key/value store living in the user's config folder, used
-for things that should survive across sessions: app settings (default
-timeouts, worker counts), recent hosts, favorites, and the last scan results
-per feature. Everything is namespaced so one feature can't clobber another.
-
-Location:
-    Windows : %APPDATA%\\NETWER\\netwer_data.json
-    Linux   : ~/.config/NETWER/netwer_data.json
-    macOS   : ~/Library/Application Support/NETWER/netwer_data.json
-
-The store is forgiving on purpose: a corrupt or missing file just resets to
-defaults instead of crashing the app. Writes are atomic (write a temp file,
-then replace) so a crash mid-write can't leave a broken file behind.
-"""
-
+import json
 import os
 import sys
-import json
 import tempfile
 from datetime import datetime
-
 
 APP_NAME = "NETWER"
 DATA_FILE = "netwer_data.json"
@@ -35,11 +16,11 @@ DEFAULT_SETTINGS = {
     "monitor_interval_s": 5,
     "schedule_enabled": False,
     "schedule_interval_min": 10,
+    "offline_mode": True,
 }
 
 
 def _config_dir():
-    """Per-OS config directory, created if missing."""
     if sys.platform.startswith("win"):
         base = os.environ.get("APPDATA") or os.path.expanduser("~")
         path = os.path.join(base, APP_NAME)
@@ -62,7 +43,6 @@ def _data_path():
 
 
 class Store:
-    """Singleton-ish JSON store. Import the module-level `store` instance."""
 
     def __init__(self):
         self._data = {
@@ -70,22 +50,22 @@ class Store:
             "recent_hosts": [],       # list of {"host", "kind", "ts"}
             "favorites": [],          # list of {"host", "label"}
             "last_scans": {},         # feature -> arbitrary result payload
+            "discovery_subnets": None,  # initialized from eligible local adapters
         }
         self._loaded = False
         self.load()
 
-    # Load / save
     def load(self):
         try:
             with open(_data_path(), "r", encoding="utf-8") as f:
                 disk = json.load(f)
             if isinstance(disk, dict):
-                # Merge so new default keys appear for old files.
                 self._data["settings"] = {**DEFAULT_SETTINGS,
                                           **disk.get("settings", {})}
                 self._data["recent_hosts"] = disk.get("recent_hosts", [])
                 self._data["favorites"] = disk.get("favorites", [])
                 self._data["last_scans"] = disk.get("last_scans", {})
+                self._data["discovery_subnets"] = disk.get("discovery_subnets")
         except Exception:
             pass  # missing or corrupt file, keep defaults
         self._loaded = True
@@ -101,7 +81,6 @@ class Store:
         except Exception:
             pass
 
-    # Settings
     def get_setting(self, key, default=None):
         return self._data["settings"].get(
             key, DEFAULT_SETTINGS.get(key, default))
@@ -117,13 +96,11 @@ class Store:
         self._data["settings"] = dict(DEFAULT_SETTINGS)
         self.save()
 
-    # Recent hosts
     def add_recent_host(self, host, kind="ping"):
         host = (host or "").strip()
         if not host:
             return
         recents = self._data["recent_hosts"]
-        # De-dup: drop existing entry for this host, then prepend.
         recents = [r for r in recents if r.get("host") != host]
         recents.insert(0, {"host": host, "kind": kind,
                            "ts": datetime.now().isoformat(timespec="seconds")})
@@ -141,7 +118,6 @@ class Store:
         self._data["recent_hosts"] = []
         self.save()
 
-    # Favorites
     def add_favorite(self, host, label=""):
         host = (host or "").strip()
         if not host:
@@ -164,7 +140,6 @@ class Store:
     def favorites(self):
         return list(self._data["favorites"])
 
-    # Last scan cache
     def set_last_scan(self, feature, payload):
         self._data["last_scans"][feature] = {
             "ts": datetime.now().isoformat(timespec="seconds"),
@@ -175,10 +150,18 @@ class Store:
     def get_last_scan(self, feature):
         return self._data["last_scans"].get(feature)
 
-    # Utility
+    def get_discovery_subnets(self):
+        """Return persisted discovery scopes, or None before first setup."""
+        entries = self._data.get("discovery_subnets")
+        return [dict(entry) for entry in entries] if isinstance(entries, list) else None
+
+    def set_discovery_subnets(self, entries):
+        """Persist configured local and routed IPv4 discovery scopes."""
+        self._data["discovery_subnets"] = [dict(entry) for entry in entries]
+        self.save()
+
     def data_file_path(self):
         return _data_path()
 
 
-# Module-level singleton used across the app.
 store = Store()

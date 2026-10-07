@@ -1,22 +1,19 @@
-"""
-NETWER — Network Information page.
-
-Detailed IP configuration for any network adapter. The user picks an
-adapter from a dropdown, the page shows a compact key/value table with
-all its details (IP, subnet, gateway, DNS, MAC, speed, MTU, DHCP...).
-A Copy button puts the details on the clipboard, "Refresh" re-reads them.
-
-All backend calls go through the worker layer so the UI never blocks.
-"""
+"""Display detailed IP configuration for a selected network adapter."""
 
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QComboBox, QPushButton,
-    QScrollArea, QFrame
+    QComboBox,
+    QFrame,
+    QHBoxLayout,
+    QLabel,
+    QPushButton,
+    QScrollArea,
+    QVBoxLayout,
+    QWidget,
 )
 
-from app.theme import Theme
 from app.resources import Icons
+from app.theme import Theme
 from ui.pages.base_page import BasePage
 from ui.widgets.card import Card
 from ui.widgets.info_table import InfoTable

@@ -1,22 +1,10 @@
-"""
-NETWER background scan scheduler.
-
-Runs a periodic ping sweep of the local network in the background, whatever
-page happens to be open, and raises notifications when a device appears or
-disappears. That's the basis of light-touch monitoring: leave NETWER running
-and it tells you when something joins or leaves your network.
-
-The scheduler is off by default; the user turns it on in Settings and picks
-an interval. The sweep runs in a worker thread so the UI never blocks, the
-result is diffed against the last known set of devices, and notifications go
-out through the settings-aware helpers.
-"""
+"""Periodic background network scans and device-change notifications."""
 
 from PyQt6.QtCore import QObject, QTimer, pyqtSignal
 
-from app.store import store
-from app.notifications import notifications
 from app.activity import activity
+from app.notifications import notifications
+from app.store import store
 from workers import StreamWorker
 
 
@@ -36,7 +24,6 @@ class ScanScheduler(QObject):
         self._timer = QTimer(self)
         self._timer.timeout.connect(self._run_scan)
 
-    # Control
     def start(self):
         """Begin periodic scanning at the interval from Settings."""
         if self._running:
@@ -69,7 +56,6 @@ class ScanScheduler(QObject):
         if self._running:
             self._timer.start(max(1, int(minutes)) * 60 * 1000)
 
-    # Scan cycle
     def _run_scan(self):
         # Don't stack scans if a previous one is still going.
         if self._worker is not None and self._worker.isRunning():

@@ -1,21 +1,10 @@
-"""Network diagnostics: measurements plus a plain-language verdict.
-
-Most tools hand you numbers and leave the interpreting to you. This module runs
-a short battery of checks and then *reasons* about them: it works out where the
-problem actually is (your device, your Wi-Fi, your router, your ISP, or DNS) and
-says so in a sentence a normal person can act on.
-
-The measuring and the reasoning are kept separate on purpose:
-
-* `run_diagnostics_stream()` performs the checks and yields progress, ending
-  with the raw measurements.
-* `analyse(measurements)` is pure logic, no I/O, so the reasoning can be
-  unit-tested against any scenario without touching a real network.
-"""
+"""Measure network health and produce a plain-language diagnosis."""
 from __future__ import annotations
 
+import secrets
 import socket
 import statistics
+import struct
 import time
 
 # Severity levels, worst first.
@@ -59,40 +48,128 @@ def _summarise(rtts):
     }
 
 
-def _time_dns(domain, server=None, timeout=2.0):
+def _time_dns(domain, server=None, timeout=1.0, record_type=1):
     """Resolve a domain and time it. Returns ms, or None on failure.
 
     With `server` set we ask that resolver directly, so we can compare the
-    router/ISP resolver against public ones."""
+    router/ISP resolver against public ones. The OS resolver call has no local
+    timeout control; its duration depends on the system resolver configuration."""
     start = time.perf_counter()
     try:
         if server is None:
-            socket.setdefaulttimeout(timeout)
-            socket.gethostbyname(domain)
+            family = socket.AF_INET if record_type == 1 else socket.AF_INET6
+            socket.getaddrinfo(domain, None, family, socket.SOCK_DGRAM)
         else:
-            _query_dns(domain, server, timeout)
+            _query_dns(domain, server, timeout, record_type)
         return round((time.perf_counter() - start) * 1000, 1)
     except Exception:
         return None
 
 
-def _query_dns(domain, server, timeout=2.0):
-    """Minimal DNS A-record query straight to a given server."""
-    import struct
-    qname = b"".join(bytes([len(p)]) + p.encode("ascii")
-                     for p in domain.split(".")) + b"\x00"
-    packet = (struct.pack(">HHHHHH", 0x1234, 0x0100, 1, 0, 0, 0)
-              + qname + struct.pack(">HH", 1, 1))
-    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+def _query_dns(domain, server, timeout=1.0, record_type=1):
+    """Send one validated A or AAAA DNS query."""
+    if record_type not in (1, 28):
+        raise ValueError("unsupported DNS record type")
+    labels = domain.rstrip(".").split(".")
+    if not labels or any(not label or len(label.encode("idna")) > 63
+                         for label in labels):
+        raise ValueError("invalid DNS name")
+    qname = b"".join(bytes([len(label.encode("idna"))]) + label.encode("idna")
+                     for label in labels) + b"\x00"
+    txid = secrets.randbits(16)
+    packet = (struct.pack(">HHHHHH", txid, 0x0100, 1, 0, 0, 0)
+              + qname + struct.pack(">HH", record_type, 1))
+    try:
+        socket.inet_pton(socket.AF_INET, server)
+        family = socket.AF_INET
+    except OSError:
+        socket.inet_pton(socket.AF_INET6, server)
+        family = socket.AF_INET6
+    with socket.socket(family, socket.SOCK_DGRAM) as s:
         s.settimeout(timeout)
-        s.sendto(packet, (server, 53))
-        data, _ = s.recvfrom(1024)
-    if len(data) < 12:
+        endpoint = (server, 53) if family == socket.AF_INET else (server, 53, 0, 0)
+        s.connect(endpoint)
+        s.send(packet)
+        data = s.recv(1024)
+    if len(data) < 12 or struct.unpack(">H", data[:2])[0] != txid:
         raise ValueError("short DNS reply")
-    answers = struct.unpack(">H", data[6:8])[0]
-    if answers < 1:
+    flags = struct.unpack(">H", data[2:4])[0]
+    questions, answers = struct.unpack(">HH", data[4:8])
+    if not flags & 0x8000 or flags & 0x0200 or flags & 0x000F:
+        raise ValueError("invalid DNS response")
+    if questions != 1:
+        raise ValueError("unexpected DNS question")
+    offset = 12
+    question_name, offset = _read_dns_name(data, offset)
+    if question_name.lower() != domain.rstrip(".").encode("idna").lower():
+        raise ValueError("DNS question does not match")
+    if len(data) < offset + 4 or struct.unpack(">HH", data[offset:offset + 4]) != (record_type, 1):
+        raise ValueError("DNS question type does not match")
+    offset += 4
+    if not answers:
         raise ValueError("no DNS answer")
-    return True
+    aliases = {domain.rstrip(".").encode("idna").lower()}
+    records = []
+    for _ in range(answers):
+        owner, offset = _read_dns_name(data, offset)
+        if len(data) < offset + 10:
+            raise ValueError("incomplete DNS answer")
+        answer_type, answer_class, _, length = struct.unpack(">HHIH", data[offset:offset + 10])
+        offset += 10
+        if len(data) < offset + length:
+            raise ValueError("incomplete DNS answer")
+        if answer_class == 1 and answer_type == 5:
+            target, end = _read_dns_name(data, offset)
+            if end > offset + length:
+                raise ValueError("invalid CNAME record")
+            records.append((owner.lower(), answer_type, target.lower(), length))
+        else:
+            records.append((owner.lower(), answer_type, None, length))
+        offset += length
+    changed = True
+    while changed:
+        changed = False
+        for owner, answer_type, target, _ in records:
+            if answer_type == 5 and owner in aliases and target not in aliases:
+                aliases.add(target)
+                changed = True
+    expected_length = 4 if record_type == 1 else 16
+    if any(owner in aliases and answer_type == record_type and length == expected_length
+           for owner, answer_type, _, length in records):
+        return True
+    raise ValueError("no matching DNS answer")
+
+
+def _read_dns_name(data, offset):
+    """Decode a DNS name, safely following compression pointers."""
+    labels = []
+    cursor = offset
+    resume = None
+    visited = set()
+    while True:
+        if cursor >= len(data):
+            raise ValueError("incomplete DNS name")
+        size = data[cursor]
+        if size & 0xC0 == 0xC0:
+            if cursor + 1 >= len(data):
+                raise ValueError("incomplete DNS pointer")
+            pointer = ((size & 0x3F) << 8) | data[cursor + 1]
+            if pointer >= len(data) or pointer in visited:
+                raise ValueError("invalid DNS pointer")
+            visited.add(pointer)
+            if resume is None:
+                resume = cursor + 2
+            cursor = pointer
+            continue
+        if size & 0xC0:
+            raise ValueError("invalid DNS label")
+        cursor += 1
+        if size == 0:
+            return b".".join(labels), resume if resume is not None else cursor
+        if size > 63 or cursor + size > len(data):
+            raise ValueError("invalid DNS label length")
+        labels.append(data[cursor:cursor + size])
+        cursor += size
 
 
 def run_diagnostics_stream(core, deep=False):
@@ -108,7 +185,6 @@ def run_diagnostics_stream(core, deep=False):
         return {"step": done, "steps": steps, "label": label,
                 "progress": int(100 * done / steps)}
 
-    # 1) Local configuration
     yield {"step": 0, "steps": steps, "label": "Checking your adapter…",
            "progress": 0}
     try:
@@ -125,7 +201,6 @@ def run_diagnostics_stream(core, deep=False):
     m["self_assigned"] = str(m["ip"]).startswith("169.254.")
     yield progress("Checking your adapter…")
 
-    # 2) Wi-Fi quality (if wireless)
     wifi = {}
     try:
         wifi = core.get_wifi_info() or {}
@@ -144,7 +219,6 @@ def run_diagnostics_stream(core, deep=False):
         m["wifi"] = False
     yield progress("Measuring Wi-Fi quality…")
 
-    # 3) Router reachability
     if m["has_gateway"]:
         rtts, loss = _ping_series(core, m["gateway"], count=5, timeout_ms=1000)
         m["router"] = _summarise(rtts)
@@ -156,7 +230,6 @@ def run_diagnostics_stream(core, deep=False):
         m["router_reachable"] = False
     yield progress("Talking to your router…")
 
-    # 4) Internet reachability
     inet_rtts = []
     inet_loss = 100.0
     for _, host in _PUBLIC_DNS:
@@ -170,15 +243,19 @@ def run_diagnostics_stream(core, deep=False):
     m["internet_reachable"] = bool(inet_rtts)
     yield progress("Reaching the internet…")
 
-    # 5) DNS resolution
-    local_times = [t for t in (_time_dns(d) for d in _TEST_DOMAINS)
-                   if t is not None]
-    m["dns_working"] = bool(local_times)
-    m["dns_ms"] = round(statistics.fmean(local_times), 1) if local_times else None
-    m["dns_failures"] = len(_TEST_DOMAINS) - len(local_times)
+    local_v4 = [t for t in (_time_dns(d, record_type=1) for d in _TEST_DOMAINS)
+                if t is not None]
+    local_v6 = [t for t in (_time_dns(d, record_type=28) for d in _TEST_DOMAINS)
+                if t is not None]
+    m["dns_working"] = bool(local_v4)
+    m["dns_ms"] = round(statistics.fmean(local_v4), 1) if local_v4 else None
+    m["dns_failures"] = len(_TEST_DOMAINS) - len(local_v4)
+    m["dns_ipv4_ms"] = round(statistics.fmean(local_v4), 1) if local_v4 else None
+    m["dns_ipv4_failures"] = len(_TEST_DOMAINS) - len(local_v4)
+    m["dns_ipv6_ms"] = round(statistics.fmean(local_v6), 1) if local_v6 else None
+    m["dns_ipv6_failures"] = len(_TEST_DOMAINS) - len(local_v6)
     yield progress("Testing name resolution…")
 
-    # 6) Compare against public resolvers
     best_public = None
     if m["internet_reachable"]:
         results = {}
@@ -203,12 +280,7 @@ def _finding(severity, title, detail, action=""):
 
 
 def analyse(m: dict) -> dict:
-    """Turn raw measurements into a verdict plus ranked findings.
-
-    The order of these checks matters: we look for the *first* thing that
-    actually breaks the chain (adapter, then router, then internet, then
-    DNS), because reporting "DNS is slow" when the cable is unplugged would
-    be nonsense."""
+    """Turn raw measurements into a verdict and ranked findings."""
     findings = []
 
     # Link layer
@@ -337,17 +409,33 @@ def analyse(m: dict) -> dict:
             "That instability is what makes calls robotic.",
             "Often caused by a congested Wi-Fi channel or an overloaded line."))
 
-    # DNS
-    if not m.get("dns_working"):
+    # DNS: keep legacy fields tied to A records; report AAAA independently.
+    ipv4_failures = m.get("dns_ipv4_failures", m.get("dns_failures", 0))
+    if "dns_ipv4_failures" not in m and not m.get("dns_working", True):
+        ipv4_failures = len(_TEST_DOMAINS)
+    ipv6_failures = m.get("dns_ipv6_failures")
+    ipv4_working = ipv4_failures < len(_TEST_DOMAINS)
+    ipv6_working = (ipv6_failures is None or ipv6_failures < len(_TEST_DOMAINS))
+    if not ipv4_working:
+        if ipv6_failures is not None and ipv6_working:
+            findings.append(_finding(
+                WARNING, "IPv4 DNS lookups are failing",
+                "A-record lookups failed for every test domain, but IPv6 DNS is responding.",
+                "Check the resolver's IPv4 configuration."))
+        else:
+            findings.append(_finding(
+                CRITICAL, "Names aren't resolving",
+                "A-record lookups failed for every test domain, and IPv6 DNS is also unavailable.",
+                "Switch your DNS to 1.1.1.1 or 8.8.8.8 in your adapter settings."))
+    elif ipv6_failures is not None and not ipv6_working:
         findings.append(_finding(
-            CRITICAL, "Names aren't resolving",
-            "The internet is reachable by address, but domain names don't "
-            "resolve — which is why pages fail while the connection 'works'.",
-            "Switch your DNS to 1.1.1.1 or 8.8.8.8 in your adapter settings."))
-    else:
+            WARNING, "IPv6 DNS lookups are failing",
+            "AAAA-record lookups failed for every test domain; IPv4 DNS is still responding.",
+            "Check the resolver's IPv6 configuration."))
+    if ipv4_working:
         dns_ms = m.get("dns_ms") or 0
         best = m.get("best_public_dns")
-        if m.get("dns_failures"):
+        if ipv4_failures:
             findings.append(_finding(
                 WARNING, "Some lookups failed",
                 f"{m['dns_failures']} of {len(_TEST_DOMAINS)} test domains "

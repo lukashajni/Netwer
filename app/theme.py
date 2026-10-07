@@ -1,16 +1,4 @@
-"""
-NETWER theme (design tokens).
-
-EVERY color in the app lives here. No other file should carry hardcoded hex
-values, always go through Theme.
-
-The point: when you want a different accent color (say the user picks
-"Dark Blue" over "Purple" in Settings), you change it in ONE place and the
-whole app follows. That's the difference between maintainable code and
-hunting colors across 17 files.
-
-The colors come straight from the approved dashboard mockup.
-"""
+"""Application theme tokens and palette helpers."""
 
 
 class Theme:
@@ -54,10 +42,7 @@ class Theme:
     CHART_FILL_UL = (139, 109, 255, 40)
 
     # Typography
-    # Font stacks with fallbacks. Windows 11 has "Segoe UI Variable",
-    # Windows 10 has "Segoe UI", other systems drop to sans-serif, so the
-    # text stays readable everywhere and not just on Win11. Qt stylesheets
-    # and QFont both understand a comma-separated family list.
+    # Qt stylesheets and QFont accept comma-separated font-family fallbacks.
     FONT_FAMILY = ('"Inter", "Segoe UI Variable Display", "Segoe UI", '
                    '"Helvetica Neue", Arial, sans-serif')
     FONT_MONO = ('"JetBrains Mono", "Cascadia Code", "Cascadia Mono", '
@@ -65,8 +50,7 @@ class Theme:
     # For data values: cleaner, heavier sans.
     FONT_DATA = ('"Inter", "Segoe UI Semibold", "Segoe UI", Arial, sans-serif')
 
-    #: First real family out of each stack, for QFont(...) calls that want
-    #: a single name (Qt substitutes anyway, but this is cleaner).
+    #: First font family in each stack for QFont calls.
     FONT_FAMILY_PRIMARY = "Inter"
     FONT_MONO_PRIMARY = "JetBrains Mono"
 
@@ -83,33 +67,23 @@ class Theme:
     GAP = 14
 
     # UI density / resolution
-    #: Current UI density profile ("compact" / "standard" / "large"), picked
-    #: in Settings from the screen resolution. Drives the sidebar and top bar
-    #: size, spacing and font sizes, see apply_ui_scale().
+    #: Current UI density profile.
     UI_SCALE = "standard"
     SIDEBAR_WIDTH = 230
     TOPBAR_HEIGHT = 60
 
-    # Glass / gradient tokens
-    # Qt composites semi-transparent (rgba) stylesheet backgrounds over the
-    # widget's OWN opaque backing (dark), so real rgba cards come out as dark
-    # boxes with "underlined" looking text. So we use SOLID colors that only
-    # look glassy (a little lighter than the background); they paint cleanly,
-    # no artifacts. The user can switch the glass look on/off in Settings;
-    # off means flat cards (BG_CARD), on means slightly lighter ones with a
-    # stronger edge.
+    # Solid glass-effect colors avoid Qt stylesheet alpha-compositing artifacts.
     GLASS_CARD = "#161d33"          # glassy surface (solid, lighter)
     GLASS_CARD_HOVER = "#1b2440"    # glassy on hover
     GLASS_INPUT = "#0e1424"         # input / pill inside glass
     GLASS_BORDER = "#293355"        # glass edge (more visible than normal)
     GLASS_BORDER_HI = "#3a4a72"     # stronger glass edge
-    #: Gradient for the active nav item and primary buttons (Qt linear grad).
+    #: Gradient used by active navigation items and primary buttons.
     GRAD_ACCENT = ("qlineargradient(x1:0, y1:0, x2:1, y2:1, "
                    "stop:0 #5b8cff, stop:1 #8b6dff)")
     GRAD_ACCENT_SOFT = ("qlineargradient(x1:0, y1:0, x2:1, y2:1, "
                         "stop:0 #26325a, stop:1 #2b2f5a)")
-    #: Whether the glass look is on (Settings toggle). When False, cards use
-    #: the flat BG_CARD and the plain BORDER.
+    #: Whether cards use the glass-effect colors.
     GLASS_ENABLED = True
 
     # Animation durations (ms)
@@ -118,13 +92,7 @@ class Theme:
     ANIM_SLOW = 250
 
 
-# Themes (full palettes) the user picks from in Settings.
-# Each theme defines a COMPLETE set of colors. apply_theme() writes them into
-# Theme.* at runtime, so the whole app follows once it repaints.
-#
-# "mode" says whether a theme is dark or light (used for a few decisions, like
-# the checkmark color). Every theme brings its own accent too, but the user
-# can change that separately through ACCENT_PRESETS.
+# Theme palettes selected in Settings. "mode" is used for light/dark UI choices.
 
 THEMES = {
     "Dark Blue": {
@@ -224,7 +192,7 @@ THEMES = {
     },
 }
 
-# Accent override: changes ONLY the accent colors on top of the chosen theme.
+# Accent overrides applied to the selected theme.
 ACCENT_PRESETS = {
     "Default":   None,   # use the accent from the theme itself
     "Blue":      {"accent": "#4d9bff", "purple": "#b07cff"},
@@ -250,10 +218,7 @@ def is_dark():
     return THEMES.get(_current_theme, {}).get("mode", "dark") == "dark"
 
 
-# UI density / resolution profiles.
-#: Sidebar width, top bar height, spacing, corner radii and font sizes for
-#: each density. "standard" matches the original hand-tuned defaults, so
-#: switching back to it is always exact, never a drift from repeated scaling.
+# UI density profiles; "standard" preserves the base dimensions.
 UI_SCALE_PROFILES = {
     "compact": {
         "SIDEBAR_WIDTH": 200, "TOPBAR_HEIGHT": 54,
@@ -277,10 +242,7 @@ UI_SCALE_PROFILES = {
 
 
 def apply_ui_scale(profile: str) -> None:
-    """Switch the sidebar/topbar size, spacing and font sizes to a density
-    profile. Like apply_theme(), this only mutates Theme.*, so the caller
-    (main window) still has to rebuild the UI (_reskin_all) before widgets
-    built earlier pick the new values up."""
+    """Apply a density profile to the theme tokens."""
     values = UI_SCALE_PROFILES.get(profile, UI_SCALE_PROFILES["standard"])
     Theme.UI_SCALE = profile if profile in UI_SCALE_PROFILES else "standard"
     for key, value in values.items():
@@ -288,8 +250,7 @@ def apply_ui_scale(profile: str) -> None:
 
 
 def card_bg():
-    """Current card background: glass when the effect is on, otherwise the
-    flat BG_CARD. Used in card paintEvents, the sidebar and the top bar."""
+    """Return the configured card background."""
     return Theme.GLASS_CARD if getattr(Theme, "GLASS_ENABLED", True) else Theme.BG_CARD
 
 
@@ -302,8 +263,7 @@ def input_bg():
 
 
 def apply_theme(theme_name: str, accent_name: str = None) -> None:
-    """Write a whole palette into Theme.* at runtime. After calling this
-    the global stylesheet has to be reapplied (main_window does that)."""
+    """Apply a palette to the theme tokens."""
     global _current_theme, _current_accent
     palette = THEMES.get(theme_name)
     if not palette:
@@ -325,9 +285,7 @@ def apply_theme(theme_name: str, accent_name: str = None) -> None:
 
 
 def apply_accent(preset_name: str) -> None:
-    """Override the accent colors on top of the current theme. 'Default'
-    puts back the accent defined in the theme itself (without it the accent
-    choice can't be undone, charts stay stuck on the last color)."""
+    """Apply an accent preset over the current theme."""
     global _current_accent
     _current_accent = preset_name
     preset = ACCENT_PRESETS.get(preset_name)

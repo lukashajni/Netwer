@@ -1,35 +1,27 @@
-"""
-NETWER — Dashboard (full version).
-
-Main monitoring screen. On first entry it triggers the app-wide loading
-screen (owned by MainWindow) while all data is fetched in the background,
-then reveals the fully populated app at once.
-
-Data sources (all through the worker layer, never blocking the UI):
-  - Stat cards   → ping_quick, get_system_info
-  - Live chart   → monitor_stream (streaming)
-  - Net Summary  → get_ethernet_info
-  - WiFi card    → get_wifi_info  (separate card)
-  - Top Devices  → get_top_devices (with extended vendor resolution)
-  - Gauges       → get_system_resources (on a timer)
-  - Uptime       → ticks live via a local QTimer (no restart needed)
-"""
+"""Main dashboard for network and system monitoring."""
 
 import time
 
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QScrollArea, QPushButton
+    QHBoxLayout,
+    QLabel,
+    QProgressBar,
+    QPushButton,
+    QScrollArea,
+    QVBoxLayout,
+    QWidget,
 )
 
-from app.theme import Theme
+from app.formatting import format_speed
 from app.resources import Icons
-from app.formatting import format_speed, scale_for_axis
+from app.theme import Theme
+from core.discovery import get_discovery_service
 from ui.pages.base_page import BasePage
-from ui.widgets.stat_card import StatCard
+from ui.widgets.card import Card, kv_row
 from ui.widgets.gauge import Gauge
 from ui.widgets.live_chart import LiveChart
-from ui.widgets.card import Card, kv_row
+from ui.widgets.stat_card import StatCard
 from workers import OneshotWorker, StreamWorker
 
 
@@ -46,19 +38,15 @@ class DashboardPage(BasePage):
         self._resource_timer.timeout.connect(self._refresh_resources)
         self._resource_worker = None
 
-        # (System-uptime card was replaced by a live "Devices online" count.)
         self._boot_epoch = None
 
-        # Ping refresh - re-check connectivity every 5s so the ping/loss
-        # sparklines keep moving (not just one reading at startup).
+        # Refresh connectivity for the ping and loss sparklines.
         self._ping_timer = QTimer(self)
         self._ping_timer.setInterval(5000)
         self._ping_timer.timeout.connect(self._refresh_internet)
         self._internet_worker = None
 
-        # Live info refresh - re-read WiFi + Network Summary every few seconds
-        # so plugging in a WiFi adapter (or IP changes) shows up immediately,
-        # with no app restart.
+        # Refresh network details to reflect adapter and address changes.
         self._info_timer = QTimer(self)
         self._info_timer.setInterval(4000)
         self._info_timer.timeout.connect(self._refresh_info)
@@ -67,13 +55,19 @@ class DashboardPage(BasePage):
 
         self._loaded_once = False
         self._pending = set()
+        self._devices_scanning = False
+        self._discovery_service = get_discovery_service()
+        self._discovery_worker = None
+        self._discovery_segments = []
+        self._device_signature = None
+        self._discovery_timer = QTimer(self)
+        self._discovery_timer.setInterval(1000)
+        self._discovery_timer.timeout.connect(self._sync_discovery_snapshot)
 
-        # Content - no scrolling - the dashboard is sized to fit the window and
-        # the layout stretches to fill it, so the vertical scrollbar is off.
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setVerticalScrollBarPolicy(
-            Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+            Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         scroll.setHorizontalScrollBarPolicy(
             Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         inner = QWidget()
@@ -221,13 +215,9 @@ class DashboardPage(BasePage):
 
         BOTTOM_HEIGHT = 300
 
-        """ Static network map on the dashboard: Internet - Router - devices,
-        each labelled, so you can read the network at a glance. The animated
-        radar lives in the full-screen "Expand" view. """
         from ui.widgets.network_map import NetworkMap
         self.map_card = Card("Network Map", "network")
         self.map_card.setFixedHeight(BOTTOM_HEIGHT)
-        # "Expand" opens the full-screen topology view.
         self.btn_expand_map = QPushButton("  Expand")
         self.btn_expand_map.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_expand_map.setIcon(Icons.get("network", Theme.ACCENT))
@@ -262,8 +252,29 @@ class DashboardPage(BasePage):
             f"QPushButton:disabled {{ color: {Theme.TEXT_FAINT}; }}")
         self.btn_rescan.clicked.connect(self._rescan_network)
         self.devices_card.header_layout.addWidget(self.btn_rescan)
+        self.btn_cancel_scan = QPushButton("Cancel")
+        self.btn_cancel_scan.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_cancel_scan.setStyleSheet(
+            f"QPushButton {{ background: {Theme.DANGER}; color: white;"
+            "border: none; border-radius: 6px; padding: 3px 10px;"
+            f"font-size: {Theme.FONT_SIZE_TINY}px; }}")
+        self.btn_cancel_scan.clicked.connect(self._cancel_network_scan)
+        self.btn_cancel_scan.hide()
+        self.devices_card.header_layout.addWidget(self.btn_cancel_scan)
+        self._device_progress = QProgressBar()
+        self._device_progress.setRange(0, 100)
+        self._device_progress.setValue(0)
+        self._device_progress.setTextVisible(False)
+        self._device_progress.setFixedHeight(7)
+        self._device_progress.setStyleSheet(
+            f"QProgressBar {{ background: {Theme.GLASS_INPUT}; border: none;"
+            "border-radius: 3px; }}"
+            f"QProgressBar::chunk {{ background: {Theme.ACCENT}; border-radius: 3px; }}")
+        self._device_progress.hide()
+        self.devices_card.content_layout.addWidget(self._device_progress)
         # Scrollable device list so it adapts to any number of devices
-        from PyQt6.QtWidgets import QScrollArea, QFrame as _QFrame
+        from PyQt6.QtWidgets import QFrame as _QFrame
+        from PyQt6.QtWidgets import QScrollArea
         dev_scroll = QScrollArea()
         dev_scroll.setWidgetResizable(True)
         dev_scroll.setFrameShape(_QFrame.Shape.NoFrame)
@@ -273,12 +284,11 @@ class DashboardPage(BasePage):
         self._devices_container = QVBoxLayout(dev_holder)
         self._devices_container.setContentsMargins(0, 0, 0, 0)
         self._devices_container.setSpacing(4)
-        self._devices_placeholder = QLabel("No devices found")
+        self._devices_placeholder = QLabel("Press Rescan to discover devices.")
         self._devices_placeholder.setStyleSheet(
             f"color: {Theme.TEXT_MUTED}; font-size: {Theme.FONT_SIZE_SMALL}px;"
             f"background: transparent;"
         )
-        self._devices_placeholder.hide()
         self._devices_container.addWidget(self._devices_placeholder)
         self._devices_container.addStretch()
         dev_scroll.setWidget(dev_holder)
@@ -332,21 +342,30 @@ class DashboardPage(BasePage):
             self._loaded_once = True
             self._begin_loading()
         else:
-            # Returning to the page - restart every live timer that on_leave
-            # stopped. Missing one here (info/ping) silently kills live
-            # refresh - e.g. a WiFi adapter plugged in later never shows up.
+            # Restart timers stopped by on_leave().
             self._start_monitor()
             self._resource_timer.start()
             self._ping_timer.start()
             self._info_timer.start()
             self._refresh_resources()
             self._refresh_info()
+            self._sync_discovery_snapshot()
+        self._discovery_timer.start()
 
     def on_leave(self):
         self._resource_timer.stop()
         self._ping_timer.stop()
         self._info_timer.stop()
+        self._discovery_timer.stop()
         self._monitor_worker = None
+        if self._devices_scanning:
+            self._devices_placeholder.setText(
+                "Discovery is stopping because Dashboard was left. "
+                "Partial results remain available when the scan finishes.")
+            self._devices_placeholder.setWordWrap(True)
+            self._discovery_service.cancel()
+            if self._discovery_worker is not None:
+                self._discovery_worker.stop()
         super().on_leave()
 
     # -- LOADING PHASE - fetch everything, then reveal (app-wide screen) -- 
@@ -355,9 +374,6 @@ class DashboardPage(BasePage):
             self._window.begin_loading()
             self._window.loading_progress("Checking connectivity…")
 
-        """ Loading waits only on fast tasks. Network scan (get_top_devices)
-        takes 10-30s scanning 254 addresses - we don't block on it. It
-        fills in the background after the app is revealed. """
         self._pending = {"internet", "sysinfo", "summary", "wifi", "resources"}
 
         self._load_internet_status()
@@ -366,8 +382,8 @@ class DashboardPage(BasePage):
         self._load_wifi()
         self._refresh_resources(initial=True)
         self._start_monitor()
-        # Device scan starts but does not gate the reveal.
-        self._load_devices()
+        # Device discovery is opt-in; don't launch a broad subnet sweep at startup.
+        self._sync_discovery_snapshot()
         # Adapter list also loads in background.
         self._load_adapters()
 
@@ -391,8 +407,7 @@ class DashboardPage(BasePage):
         dlg.exec()
 
     def _refresh_info(self):
-        """Periodically re-read WiFi + Ethernet so changes (like plugging in
-        a WiFi adapter) appear live without restarting the app."""
+        """Refresh Wi-Fi and Ethernet details periodically."""
         if self._wifi_worker is None or not self._wifi_worker.isRunning():
             w = OneshotWorker(self.core.get_wifi_info)
             w.result.connect(self._on_wifi)
@@ -460,9 +475,6 @@ class DashboardPage(BasePage):
         w.start()
 
     def _on_sysinfo(self, data: dict):
-        # System info is still fetched (used elsewhere), the uptime card was
-        # replaced by the live "Devices online" count, so there's nothing to
-        # tick here anymore.
         d = data.get("days", 0)
         h = data.get("hours", 0)
         m = data.get("minutes", 0)
@@ -522,8 +534,7 @@ class DashboardPage(BasePage):
         self.wifi_signal.set_signal(pct)
 
     def _signal_to_percent(self, signal) -> float:
-        """Convert a signal reading to 0-100%. Accepts percent strings,
-        dBm values, or plain numbers."""
+        """Convert a percentage, dBm reading, or number to signal strength."""
         try:
             s = str(signal).strip().lower()
             if "%" in s:
@@ -557,83 +568,165 @@ class DashboardPage(BasePage):
                 )
 
     def _rescan_network(self):
-        """Manually re-run the network scan (button in "Top Devices" header).
-        Clears the current list/map and scans again - picks up devices that
-        came online since the last scan."""
-        if getattr(self, "_devices_scanning", False):
+        """Start the configured, bounded subnet discovery operation."""
+        if self._discovery_service.snapshot()["active"]:
             return
         self._devices_scanning = True
         self.btn_rescan.setEnabled(False)
         self.btn_rescan.setText("  Scanning…")
-
-        # Clear existing device rows (keep placeholder + trailing stretch)
-        while self._devices_container.count() > 2:
-            item = self._devices_container.takeAt(0)
-            w = item.widget()
-            if w and w is not self._devices_placeholder:
-                w.setParent(None)
-                w.deleteLater()
-        self._all_devices = []
+        self.btn_cancel_scan.show()
+        self.btn_cancel_scan.setEnabled(True)
+        self._device_progress.setValue(0)
+        self._device_progress.show()
+        self._devices_placeholder.setText("Preparing subnet discovery…")
+        self._devices_placeholder.show()
+        self._device_signature = None
         self._load_devices()
 
     def _load_devices(self):
-        # Runs in background - shows its own inline spinner text.
-        self._devices_placeholder.setText("Scanning local network…")
-        self._devices_placeholder.show()
-        w = OneshotWorker(self.core.get_top_devices, 12)
-        w.result.connect(self._on_devices)
-        w.error.connect(lambda e: self._on_scan_error(e))
+        """Run the shared discovery service without blocking the GUI thread."""
+        self._devices_scanning = True
+        self.btn_rescan.setEnabled(False)
+        self.btn_rescan.setText("  Scanning…")
+        w = StreamWorker(self._discovery_service.scan_stream)
+        w.result.connect(self._on_discovery_event)
+        w.error.connect(self._on_scan_error)
         w.done.connect(self._on_scan_done)
         self.register_worker(w)
+        self._discovery_worker = w
+        self._discovery_timer.start()
         w.start()
 
-    def _on_scan_error(self, err=None):
+    def _cancel_network_scan(self):
+        if not self._devices_scanning:
+            return
+        self.btn_cancel_scan.setEnabled(False)
+        self._devices_placeholder.setText("Cancelling discovery; retaining partial results…")
+        self._discovery_service.cancel()
+        if self._discovery_worker is not None:
+            self._discovery_worker.stop()
+
+    def _on_scan_error(self, err):
         from core.netwer_core import friendly_error
         msg = friendly_error(err) if err else "Couldn't scan the network right now."
         self._devices_placeholder.setText(msg)
         self._devices_placeholder.setWordWrap(True)
         self._devices_placeholder.show()
 
+    def _on_discovery_event(self, event):
+        if event.get("event") == "started":
+            segments = event.get("segments", [])
+            self._devices_placeholder.setText(
+                f"Scanning {len(segments)} subnet(s) · {event.get('total', 0):,} hosts")
+            self._device_progress.setValue(0)
+            return
+        if event.get("event") == "segment":
+            segment = event.get("segment", {})
+            self._devices_placeholder.setText(
+                f"Scanning {segment.get('label', 'subnet')} · {segment.get('cidr', '')}")
+            return
+        if event.get("event") == "progress":
+            total = max(1, int(event.get("total", 1)))
+            scanned = min(total, int(event.get("scanned", 0)))
+            self._device_progress.setValue(round(scanned * 100 / total))
+            self._devices_placeholder.setText(
+                f"{event.get('current_subnet', '')} · {scanned:,}/{total:,} hosts · "
+                f"{event.get('found', 0):,} discovered")
+            return
+        if event.get("online"):
+            self._sync_discovery_snapshot()
+            return
+        if event.get("done"):
+            self._device_progress.setValue(
+                round(int(event.get("scanned", 0)) * 100 /
+                      max(1, int(event.get("total", 1)))))
+            if event.get("cancelled"):
+                self._devices_placeholder.setText(
+                    f"Scan cancelled · {event.get('found', 0)} partial result(s) retained.")
+            else:
+                self._device_progress.setValue(100)
+                count = int(event.get("found", 0))
+                self._devices_placeholder.setText(
+                    f"Scan complete · {count} device(s) found." if count else
+                    "No devices responded or were present in the neighbor cache.")
+            self._devices_placeholder.show()
+            self._sync_discovery_snapshot()
+
     def _on_scan_done(self):
+        snapshot = self._discovery_service.snapshot()
+        self._discovery_worker = None
+        self._discovery_timer.stop()
         self._devices_scanning = False
         self.btn_rescan.setEnabled(True)
         self.btn_rescan.setText("  Rescan")
+        self.btn_cancel_scan.hide()
+        self._sync_discovery_snapshot()
+        if snapshot["status"] == "partial":
+            self._devices_placeholder.setText(
+                f"Scan cancelled · {len(snapshot['devices'])} partial result(s) retained.")
+            self._devices_placeholder.show()
+        elif snapshot["status"] == "complete":
+            count = len(snapshot["devices"])
+            self._devices_placeholder.setText(
+                f"Scan complete · {count} device(s) found." if count else
+                "No devices responded or were present in the neighbor cache.")
+            self._devices_placeholder.show()
+            from app.activity import activity
+            activity.add("Network scan completed", f"{count} devices found", kind="success")
+            from app.notifications import notifications
+            notifications.notify_scan_done("Network scan complete", f"{count} devices found")
+
+    def _sync_discovery_snapshot(self):
+        snapshot = self._discovery_service.snapshot()
+        if snapshot.get("segments"):
+            self._discovery_segments = snapshot["segments"]
+        elif not self._discovery_segments:
+            from core.discovery import configured_subnets
+            self._discovery_segments = configured_subnets()
+            self._discovery_service.set_segments(self._discovery_segments)
+        devices = snapshot.get("devices", [])
+        signature = tuple(sorted((d.get("segment_id", ""), d.get("ip", ""),
+                                  d.get("mac", ""), d.get("reachability", ""),
+                                  d.get("rtt_ms")) for d in devices))
+        if signature == self._device_signature:
+            return
+        self._device_signature = signature
+        self._all_devices = devices
+        for index in range(self._devices_container.count()):
+            item = self._devices_container.itemAt(index)
+            widget = item.widget() if item else None
+            if widget and widget is not self._devices_placeholder:
+                widget.setParent(None)
+                widget.deleteLater()
+        if not devices:
+            self.card_devices.set_value("0" if snapshot.get("status") == "complete" else "—",
+                                        color=Theme.TEXT_MUTED,
+                                        subtitle="On configured subnets")
+            if snapshot.get("status") in ("idle", "complete"):
+                self._devices_placeholder.setText(
+                    "Press Rescan to discover devices." if snapshot.get("status") == "idle"
+                    else "No devices responded or were present in the neighbor cache.")
+                self._devices_placeholder.show()
+            return
+        responding = sum(1 for d in devices if d.get("reachability") == "reachable")
+        cached = len(devices) - responding
+        self.card_devices.set_value(str(len(devices)), color=Theme.WARNING,
+                                    subtitle=f"{responding} responding · {cached} cached")
+        self._devices_placeholder.hide()
+        for dev in devices[:100]:
+            idx = max(0, self._devices_container.count() - 2)
+            self._devices_container.insertWidget(idx, self._device_row(dev))
+        self._maybe_update_map()
 
     def _on_devices(self, data: dict):
         devices = data.get("devices", [])
-        # Update the "Devices online" stat card with the live count (orange).
-        self.card_devices.set_value(str(len(devices)), color=Theme.WARNING,
-                                    subtitle="On your network")
-        if not devices:
-            self.card_devices.set_value("0", color=Theme.TEXT_MUTED,
-                                        subtitle="On your network")
-            self._devices_placeholder.setText("No devices found")
-            self._devices_placeholder.show()
-            return
-        self._devices_placeholder.hide()
-        for dev in devices:
-            # Insert before the placeholder + trailing stretch (last two items)
-            idx = max(0, self._devices_container.count() - 2)
-            self._devices_container.insertWidget(idx, self._device_row(dev))
-        from app.activity import activity
-        activity.add("Network scan completed",
-                     f"{len(devices)} devices found", kind="success")
         self._all_devices = devices
-        self._maybe_update_map()
+        self._device_signature = None
+        self._sync_discovery_snapshot()
 
     def _open_topology(self):
-        # Open the full-screen topology view with the current scan data.
         from ui.components.topology_dialog import TopologyDialog
-        gateway = getattr(self, "_gateway", "") or ""
-        devices = getattr(self, "_all_devices", None) or []
-        router_vendor = ""
-        for d in devices:
-            if d.get("ip") == gateway:
-                router_vendor = d.get("vendor", "") or ""
-                break
-        dlg = TopologyDialog(self.core, gateway, devices, router_vendor,
-                             online=getattr(self, "_internet_online", True),
-                             parent=self)
+        dlg = TopologyDialog(self.core, parent=self)
         dlg.exec()
 
     def _open_device_details(self, device: dict):
@@ -658,8 +751,7 @@ class DashboardPage(BasePage):
 
     @staticmethod
     def device_display_name(dev: dict) -> str:
-        """Delegates to the one canonical implementation so custom names,
-        hostname and vendor rules stay identical everywhere."""
+        """Return the shared display name for a device."""
         from ui.widgets.network_map import device_display_name as _n
         return _n(dev)
 
@@ -678,8 +770,13 @@ class DashboardPage(BasePage):
             vendor_name = "—"
         vendor = QLabel(vendor_name)
         vendor.setStyleSheet(f"color: {Theme.ACCENT}; font-family: {Theme.FONT_DATA}; font-size: {Theme.FONT_SIZE_TINY}px; background: transparent;")
-        status = QLabel("Online")
-        status.setStyleSheet(f"color: {Theme.SUCCESS}; font-size: {Theme.FONT_SIZE_TINY}px; background: transparent;")
+        reachability = dev.get("reachability")
+        status_text, status_color = {
+            "reachable": ("Responding", Theme.SUCCESS),
+            "cached": ("Neighbor cache", Theme.WARNING),
+        }.get(reachability, ("Discovered", Theme.TEXT_MUTED))
+        status = QLabel(status_text)
+        status.setStyleSheet(f"color: {status_color}; font-size: {Theme.FONT_SIZE_TINY}px; background: transparent;")
         row.addWidget(n)
         row.addStretch()
         row.addWidget(ip)
@@ -703,9 +800,8 @@ class DashboardPage(BasePage):
         adapters = data.get("items", data) if isinstance(data, dict) else data
         if not isinstance(adapters, list):
             return
-        current = self.adapter_combo.currentData()
         self.adapter_combo.blockSignals(True)
-        # Keep the Auto entry, add real adapters that are Up
+        # Preserve the Auto entry while refreshing adapter choices.
         for a in adapters:
             if not isinstance(a, dict):
                 continue
@@ -742,9 +838,7 @@ class DashboardPage(BasePage):
         w.start()
 
     def _update_trend(self, card, attr, value):
-        """Show a small ↑/↓ % badge comparing this sample to the previous one.
-        Skips the badge when there's no meaningful previous value (avoids a
-        misleading huge % on the first reading or after idle)."""
+        """Update the trend badge when both samples are meaningful."""
         prev = getattr(self, attr, None)
         setattr(self, attr, value)
         if not prev or prev < 1 or value < 1:

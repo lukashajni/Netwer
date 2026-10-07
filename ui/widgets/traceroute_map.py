@@ -1,27 +1,13 @@
-"""
-NETWER — TracerouteMap widget.
-
-Draws traceroute hops on a world map, natively with QPainter (no web engine
-dependency). Each hop with a known location becomes a dot connected by the
-packet path, the view starts zoomed on the origin and zooms out - city ->
-regional -> world - as the path spans larger distances, so a route that ends
-on another continent ends on a full world view.
-
-Coordinates come from a bundled, simplified world-land dataset
-(assets/world_land.json) projected with a Web-Mercator projection.
-"""
-
 import json
 import math
-
-from PyQt6.QtCore import Qt, QTimer, QPointF, QRectF
-from PyQt6.QtGui import QPainter, QColor, QPen, QBrush, QPolygonF, QFont
-from PyQt6.QtWidgets import QWidget
-
-from app.theme import Theme, is_dark
-from app.resources import ASSETS_DIR
 import os
 
+from PyQt6.QtCore import QPointF, QRectF, Qt, QTimer
+from PyQt6.QtGui import QBrush, QColor, QFont, QPainter, QPen, QPolygonF
+from PyQt6.QtWidgets import QWidget
+
+from app.resources import ASSETS_DIR
+from app.theme import Theme, is_dark
 
 # Major cities used as fixed reference points (shown when zoomed out enough).
 REFERENCE_CITIES = [
@@ -46,8 +32,7 @@ _KIND_COLORS = {
 
 
 def _load_world():
-    """Load country polygons (with borders). Falls back to the old land-only
-    dataset if the country file isn't present."""
+    """Load country polygons, falling back to the land-only dataset."""
     for fname, key in (("world_countries.json", "countries"),
                        ("world_land.json", "polygons")):
         try:
@@ -55,8 +40,6 @@ def _load_world():
             with open(path, "r", encoding="utf-8") as f:
                 data = json.load(f)[key]
             if key == "countries":
-                """ Flatten to a list of rings but remember they're separate
-                countries so we can stroke each outline. """
                 return data
             # Old format: list of rings -> wrap each as a one-ring "country".
             return [[ring] for ring in data]
@@ -128,13 +111,7 @@ class TracerouteMap(QWidget):
 
     # -- Projection --
     def _fit(self, up_to):
-        """Choose center + span (zoom) to frame the hops seen so far.
-
-        Uses a minimum span so a tight cluster (e.g. several hops the offline
-        estimate places at the same European point) doesn't zoom in so far
-        that everything piles onto one pixel and the reference-city labels
-        overlap into a mess.
-        """
+        """Choose a map center and zoom span for the visible hops."""
         pts = [h for h in self._hops[:max(up_to, 1)]
                if h.get("lat") is not None]
         if not pts:
@@ -157,9 +134,6 @@ class TracerouteMap(QWidget):
             self._world_mode = False
             self._span = max(spread * 2.2, 55)
         else:
-            """ Everything is clustered (one country / region, or coarse offline
-            estimates all at one point). Keep a comfortable regional frame
-            rather than zooming to street level - this is what was garbling. """
             self._world_mode = False
             self._span = 42
 
@@ -217,9 +191,6 @@ class TracerouteMap(QWidget):
         located = [h for h in self._hops[:self._visible]
                    if h.get("lat") is not None]
 
-        """ Reference cities (only when zoomed out enough to have room).
-        Skip any label that would overlap one already drawn, so a tight
-        European view doesn't turn into a pile of overlapping names. """
         if self._world_mode or self._span > 30:
             p.setFont(QFont(Theme.FONT_FAMILY_PRIMARY, 7))
             fm = p.fontMetrics()
@@ -266,8 +237,6 @@ class TracerouteMap(QWidget):
             p.setBrush(col)
             p.drawEllipse(pt, r, r)
 
-        """ Hop city labels - skip duplicates and any that would overlap a label
-        already drawn (offline estimates can put several hops at one point). """
         p.setFont(QFont(Theme.FONT_FAMILY_PRIMARY, 8, QFont.Weight.Medium))
         fm = p.fontMetrics()
         seen_cities = set()

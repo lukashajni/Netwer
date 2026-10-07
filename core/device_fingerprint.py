@@ -1,24 +1,3 @@
-"""Device fingerprinting for devices that hide behind a randomized MAC.
-
-Since iOS 14 / Android 10, phones use a *private Wi-Fi address*, a randomized
-MAC, so the OUI table has nothing to look up and the device shows as a bare IP.
-That's most of the "unidentified" nodes on a home network, and most of those are
-Apple devices.
-
-Two techniques that don't depend on the MAC at all:
-
-1. **mDNS (Bonjour) reverse lookup.** Apple devices run Bonjour and answer a
-   reverse PTR query on 224.0.0.251:5353 with their real name, "Lukas-iPhone",
-   "Ana-iPad", "MacBook-Pro". This is the reliable one: it gives us the actual
-   device name, not a guess.
-
-2. **Port signatures.** If mDNS is quiet, a few TCP ports are strong hints:
-   62078 is iOS `lockdownd` (iPhone/iPad sync) and is effectively an iOS
-   fingerprint; 7000 + 5000 mean AirPlay; 548 (AFP) and 88 point at a Mac.
-
-Everything here is best-effort and fast-failing: short timeouts, run in
-parallel, and a miss just leaves the device as it was.
-"""
 from __future__ import annotations
 
 import re
@@ -68,17 +47,16 @@ _NAME_SIGNATURES = (
 
 # mDNS reverse lookup
 def _build_reverse_query(ip: str) -> bytes:
-    """A DNS PTR query for <reversed-ip>.in-addr.arpa, with mDNS's QU bit set
-    so the device answers us directly instead of multicasting."""
     labels = ip.split(".")[::-1] + ["in-addr", "arpa"]
-    qname = b"".join(bytes([len(l)]) + l.encode("ascii") for l in labels) + b"\x00"
+    qname = b"".join(
+        bytes([len(label)]) + label.encode("ascii") for label in labels
+    ) + b"\x00"
     header = struct.pack(">HHHHHH", 0, 0, 1, 0, 0, 0)   # id 0, 1 question
     # QTYPE=PTR(12), QCLASS=IN(1) with the top "unicast response" bit set.
     return header + qname + struct.pack(">HH", 12, 0x8001)
 
 
 def _read_name(data: bytes, offset: int) -> tuple[str, int]:
-    """Read a DNS name, following compression pointers. Returns (name, next)."""
     parts: list[str] = []
     jumped = False
     end = offset
@@ -111,7 +89,6 @@ def _read_name(data: bytes, offset: int) -> tuple[str, int]:
 
 
 def _parse_ptr_answer(data: bytes) -> str | None:
-    """Pull the first PTR target out of a DNS response."""
     try:
         if len(data) < 12:
             return None
@@ -138,10 +115,6 @@ def _parse_ptr_answer(data: bytes) -> str | None:
 
 
 def mdns_hostname(ip: str, timeout: float = 0.7) -> str | None:
-    """Ask the device for its Bonjour name. Returns e.g. 'Lukas-iPhone' or None.
-
-    Sent to the mDNS multicast group; Apple/Android/printers that run Bonjour
-    or Avahi will answer. Anything else just stays silent and we time out."""
     sock = None
     try:
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -176,7 +149,6 @@ def mdns_hostname(ip: str, timeout: float = 0.7) -> str | None:
 
 
 def clean_mdns_name(name: str) -> str:
-    """Turns 'Lukas-iPhone.local.' into 'Lukas-iPhone'."""
     n = (name or "").strip().rstrip(".")
     for suffix in (".local", ".lan", ".home", ".home.arpa"):
         if n.lower().endswith(suffix):
@@ -196,10 +168,6 @@ def _port_open(ip: str, port: int, timeout: float = 0.35) -> bool:
 
 
 def apple_port_signature(ip: str, timeout: float = 0.35) -> tuple[str, str] | None:
-    """Probe a few Apple-specific ports. Returns (vendor, kind) or None.
-
-    Port 62078 is iOS `lockdownd`, present on iPhones and iPads and almost
-    nothing else, so it's the strongest single signal we have."""
     if _port_open(ip, _IOS_LOCKDOWN, timeout):
         return ("Apple", "dev_phone")          # iPhone or iPad
     if _port_open(ip, _AIRPLAY, timeout):
@@ -212,7 +180,6 @@ def apple_port_signature(ip: str, timeout: float = 0.35) -> tuple[str, str] | No
 
 
 def name_signature(hostname: str) -> tuple[str, str] | None:
-    """Map a hostname to (vendor, kind) using well-known naming patterns."""
     h = (hostname or "").lower()
     if not h:
         return None
@@ -226,11 +193,6 @@ def name_signature(hostname: str) -> tuple[str, str] | None:
 # Public entry point
 def identify(ip: str, hostname: str = "", vendor: str = "",
              use_ports: bool = True) -> dict:
-    """Best-effort identification of a device the MAC couldn't name.
-
-    Returns a dict that may contain 'hostname', 'vendor' and 'kind'. Keys are
-    only present when we actually learned something, so callers can update a
-    device dict without clobbering good data with blanks."""
     out: dict = {}
 
     # 1) Ask Bonjour for the real name, by far the best answer.

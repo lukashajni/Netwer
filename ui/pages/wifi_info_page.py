@@ -1,30 +1,23 @@
-"""
-NETWER — WiFi Information page.
-
-Detailed wireless connection info: a top row of headline cards (signal
-strength, network, band/channel, security), full connection details, and a
-scan of nearby networks.
-
-Everything refreshes live on a timer, so plugging in a WiFi adapter (or
-roaming to another AP) shows up without restarting the app. Nearby-network
-scanning is on-demand (it takes seconds and interrupts the radio briefly).
-"""
+"""Display Wi-Fi connection details and scan nearby networks."""
 
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QScrollArea,
-    QFrame
+    QFrame,
+    QHBoxLayout,
+    QLabel,
+    QPushButton,
+    QScrollArea,
+    QVBoxLayout,
+    QWidget,
 )
 
-from app.theme import Theme
-from app.resources import Icons
 from app.activity import activity
+from app.resources import Icons
+from app.theme import Theme
 from ui.pages.base_page import BasePage
 from ui.widgets.card import Card, kv_row
+from ui.widgets.signal_bars import SignalBars, dbm_to_percent, signal_color, signal_quality
 from ui.widgets.wifi_signal import WiFiSignal
-from ui.widgets.signal_bars import (
-    SignalBars, signal_color, signal_quality, dbm_to_percent
-)
 from workers import OneshotWorker
 
 

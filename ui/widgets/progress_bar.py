@@ -1,13 +1,5 @@
-"""
-NETWER — ProgressBar widget.
-
-A thin, theme-styled horizontal progress bar drawn with QPainter, so it
-always fills to the correct fraction of its own current width - no fragile
-fixed-pixel math, and it reflows correctly when the window is resized.
-"""
-
-from PyQt6.QtCore import Qt, QRectF
-from PyQt6.QtGui import QPainter, QColor, QBrush
+from PyQt6.QtCore import QRectF, Qt
+from PyQt6.QtGui import QBrush, QColor, QPainter
 from PyQt6.QtWidgets import QWidget
 
 from app.theme import Theme

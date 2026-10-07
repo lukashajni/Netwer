@@ -1,14 +1,6 @@
-"""
-NETWER — Gauge widget (circular indicator)
-
-Draws circular gauge (CPU / RAM / Disk on dashboard) using QPainter.
-The value is animated to the new position instead of jumping.
-Animation goes via QPropertyAnimation to the custom Qt property "value".
-"""
-
-from PyQt6.QtCore import Qt, QRectF, pyqtProperty, QPropertyAnimation, QEasingCurve
-from PyQt6.QtGui import QPainter, QColor, QPen, QFont
-from PyQt6.QtWidgets import QWidget, QVBoxLayout, QLabel
+from PyQt6.QtCore import QEasingCurve, QPropertyAnimation, QRectF, Qt, pyqtProperty
+from PyQt6.QtGui import QColor, QFont, QPainter, QPen
+from PyQt6.QtWidgets import QLabel, QVBoxLayout, QWidget
 
 from app.theme import Theme
 

@@ -1,19 +1,3 @@
-"""
-Generate the NETWER globe as a single .glb model.
-
-Rebuilds the approved HTML/Three.js prototype as real geometry so QtQuick3D
-just has to load one file, instead of us reassembling the globe from engine
-primitives at runtime (which kept coming out wrong).
-
-The model contains:
-  - a translucent dark core sphere
-  - a blue wireframe shell (meridians + latitude rings) built from thin tori
-  - a purple orbital ring
-  - scattered node dots on the surface
-
-Colours are baked into the mesh as vertex/material colours, so the loader
-doesn't need to reassign materials.
-"""
 
 import math
 import random
@@ -21,8 +5,6 @@ import random
 import numpy as np
 import trimesh
 
-
-# Prototype colours (RGBA 0-255)
 C_CORE = [13, 27, 61, 140]        # #0d1b3d, translucent
 C_WIRE = [77, 155, 255, 200]      # #4d9bff
 C_RING = [138, 124, 255, 165]     # #8a7cff
@@ -53,20 +35,16 @@ def _rot(axis, degrees):
 def build_globe() -> trimesh.Scene:
     meshes = []
 
-    # Core sphere (translucent)
     core = trimesh.creation.icosphere(subdivisions=3, radius=R * 0.96)
     core.visual.vertex_colors = np.tile(C_CORE, (len(core.vertices), 1))
     meshes.append(core)
 
-    # Wireframe shell
     wire_parts = []
 
-    # Meridians: vertical rings rotated around the Y axis
     for i in range(6):
         t = _rot([0, 1, 0], i * 30) @ _rot([1, 0, 0], 90)
         wire_parts.append(_torus(R, WIRE_TUBE, t))
 
-    # Latitude rings: horizontal, shrinking toward the poles
     for lat in (-60, -30, 0, 30, 60):
         rad = R * math.cos(math.radians(lat))
         y = R * math.sin(math.radians(lat))
@@ -77,13 +55,11 @@ def build_globe() -> trimesh.Scene:
     wire.visual.vertex_colors = np.tile(C_WIRE, (len(wire.vertices), 1))
     meshes.append(wire)
 
-    # Orbital ring (purple, tilted)
     ring_t = _rot([1, 0, 0], 75)
     ring = _torus(R * 1.33, RING_TUBE, ring_t, sections=96)
     ring.visual.vertex_colors = np.tile(C_RING, (len(ring.vertices), 1))
     meshes.append(ring)
 
-    # Surface node dots
     rng = random.Random(7)
     dot_parts = []
     dot_colors = []

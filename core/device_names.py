@@ -1,12 +1,3 @@
-"""Custom device names.
-
-Hostnames are often useless ("Unknown", or just the IP again), so NETWER lets
-you name a device yourself, "Mum's laptop", "Printer in the office", and
-remembers it. Names are keyed by MAC address (stable across DHCP lease
-changes); if a device has no usable MAC we fall back to keying on its IP.
-
-Stored as JSON next to the learned-vendor database, so names survive restarts.
-"""
 from __future__ import annotations
 
 import json
@@ -32,7 +23,6 @@ _LOADED = False
 
 
 def _key(device: dict) -> str | None:
-    """Stable key for a device: full MAC when we have one, else the IP."""
     mac = re.sub(r"[^0-9A-Fa-f]", "", (device.get("mac") or "")).upper()
     if len(mac) == 12:
         return "MAC:" + mac
@@ -67,14 +57,12 @@ def _save() -> None:
 
 
 def get(device: dict) -> str | None:
-    """The user's name for this device, or None."""
     load()
     k = _key(device)
     return _NAMES.get(k) if k else None
 
 
 def set_name(device: dict, name: str) -> bool:
-    """Save (or clear, with an empty name) the custom name for a device."""
     k = _key(device)
     if not k:
         return False
