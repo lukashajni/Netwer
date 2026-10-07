@@ -268,7 +268,7 @@ class DashboardPage(BasePage):
         self._device_progress.setFixedHeight(7)
         self._device_progress.setStyleSheet(
             f"QProgressBar {{ background: {Theme.GLASS_INPUT}; border: none;"
-            "border-radius: 3px; }}"
+            "border-radius: 3px; }"
             f"QProgressBar::chunk {{ background: {Theme.ACCENT}; border-radius: 3px; }}")
         self._device_progress.hide()
         self.devices_card.content_layout.addWidget(self._device_progress)
