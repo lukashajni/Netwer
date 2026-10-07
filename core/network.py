@@ -14,6 +14,7 @@ import time
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
+import concurrent.futures
 
 from . import privacy, windows_network
 from .system import PSUTIL_AVAILABLE, _no_window, psutil, run_powershell
@@ -222,22 +223,33 @@ def get_ethernet_info():
             "dns": cfg["dns"], "ip_type": "PRIVATE" if is_private(ip) else "PUBLIC"}
 
 
-def ping_quick():
-    results = []
-    for target in ({"label": "Google DNS", "ip": "8.8.8.8"},
-                   {"label": "Cloudflare", "ip": "1.1.1.1"},
-                   {"label": "Quad9", "ip": "9.9.9.9"}):
-        times, lost = [], 0
-        for _ in range(4):
-            ms = ping_host(target["ip"], 1000)
-            if ms is not None:
-                times.append(ms)
-            else:
-                lost += 1
-        results.append({"label": target["label"], "ip": target["ip"],
-                        **({"avg": round(sum(times) / len(times)), "min": min(times),
-                            "max": max(times), "loss": round(lost / 4 * 100)} if times else {"unreachable": True})})
-    return results
+def ping_quick(timeout_ms=1000, ports=(53,)):
+    """Pings 3 well-known DNS servers once each (4 pings), returns a list
+    of per-server results. Used for the dashboard's "Internet Status" card
+    and the standalone Network Test screen."""
+
+    targets = [
+        {"label": "Google DNS", "ip": "8.8.8.8"},
+        {"label": "Cloudflare", "ip": "1.1.1.1"},
+        {"label": "Quad9", "ip": "9.9.9.9"},
+    ]
+    results = {t["label"]: [] for t in targets}
+    with concurrent.futures.ThreadPoolExecutor(max_workers=12) as pool:
+        pings = {pool.submit(ping_host, t["ip"], timeout_ms): t["label"] for t in targets for _ in range(4)}
+        final = []
+        for future in concurrent.futures.as_completed(pings):
+            label = pings[future]
+            ms = future.result()
+            results[label].append(ms if ms else None)
+
+        for label, times in results.items():
+            final.append({
+                "label": label,
+                "avg": round(sum(times)/len(times)) if all(times) else 0,
+                "min": min(times) if all(times) else 0, "max": max(times)  if all(times) else 0,
+                "loss": round((times.count(None) / 4) * 100)
+            })
+    return final
 
 
 def ping_stability_stream(target="8.8.8.8", count=20):
