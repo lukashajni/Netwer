@@ -92,4 +92,4 @@ def find_best_server(better_scan: bool) -> dict[str, str | int]:
 
     return best_server
 
-   
+find_best_server(better_scan=False)  
