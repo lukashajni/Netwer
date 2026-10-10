@@ -12,6 +12,8 @@ from find_server import *
 
 oneMbps: int = 1000000
 uploadByteAmount: int = 100000000
+worker_amount: int = 5
+
 
 def calculate_speed_in_Mbps(total_bytes: int, elapsed_time: float) -> float:
     return (total_bytes * 8) / (elapsed_time * oneMbps)
@@ -38,10 +40,48 @@ def warmup_test(session: Session, url: str) -> None:
         with session.get(url, headers=None, stream=True) as response:
             # print(f"Warmup: {response.status_code}")
             response.raise_for_status()
+"""Used for determining how big a request is going to be 
+   for the actual upload test"""
+def probe_network_ul(url: str) -> int:
+    # Maximum bytes a server can receive
+    maxRequestSize: int = 1000 * 1000 * 1000 
+    currRequestSize: float = 10000
+    session: Session = requests.Session()
 
-def probe_network(url: str) -> int:
+    while currRequestSize < maxRequestSize:
+        random_data: bytes = os.urandom(int(currRequestSize))
+        start_time: float = time.monotonic()
+        
+        try: 
+            with session.post(url, data=random_data) as response:
+                #print(f"Probing upload: {response.status_code}, currRequestSize: {currRequestSize}")
+                response.raise_for_status()
+        except requests.exceptions.HTTPError:
+            """If the request is too large for the server, set the currRequestSize to the first previous
+            request size and break out of the loop"""
+            currRequestSize = currRequestSize /2
+            break
+        elapsed_time: float = time.monotonic() - start_time
+        """ If the request is received in less than a second, increase currRequestSize,
+        if the currRequestSize is longer than 1 second, exit the loop """
+        if elapsed_time <= 1:
+            currRequestSize *= 1.2
+        else:
+            break
+    
+    """ If someone has an upload speed higher than maxRequestSize, then just
+    set currRequestSize to maxRequestSize (because that is the maximum value
+    a librespeed server accepts) """
+    if currRequestSize > maxRequestSize:
+        currRequestSize = maxRequestSize
+    print(f"upload currRequestSize: {currRequestSize}")
+    return int(currRequestSize)
+
+"""Used for determining how big a request is going to be 
+   for the actual download test"""
+def probe_network_dl(url: str) -> int:
     # Maximum megabytes a server can receive
-    maxRequestSize: int = 1024 
+    maxRequestSize: int = 1000 
     currRequestSize: int = 4
     session: Session = requests.Session()
 
@@ -53,7 +93,7 @@ def probe_network(url: str) -> int:
         total_bytes = 0
 
         with session.get(url, headers=None, stream=True) as response:
-            print(f"Probing: {response.status_code}, currRequestSize: {currRequestSize}")
+            print(f"Probing download: {response.status_code}, currRequestSize: {currRequestSize}")
             response.raise_for_status()
             for chunk in response.iter_content(chunk_size=8192):
                 total_bytes += len(chunk)
@@ -74,9 +114,7 @@ def probe_network(url: str) -> int:
         currRequestSize = maxRequestSize
     #print(f"currRequestSize: {currRequestSize}")
     return currRequestSize
-def download_speed_test(url: str, speed_time: float) -> dict[str,float | int]:
-    megabytes_per_request: int = probe_network(url=url)
-
+def download_worker(worker_queue: "Queue[dict[str,float | int]]", url: str, speed_time: float, megabytes_per_request: int) -> None:
     session: Session = requests.Session()
     session.params.update({
         "ckSize": megabytes_per_request
@@ -84,56 +122,87 @@ def download_speed_test(url: str, speed_time: float) -> dict[str,float | int]:
     warmup_test(session=session, url=url)
 
     start_time: float = time.monotonic()
-    total_bytes: int = 0
+    bytes_received: int = 0
     while time.monotonic() - start_time < speed_time:
         with session.get(url, headers=None, stream=True) as response:
-            print(response.status_code)
+            print(response.status_code, bytes_received)
             response.raise_for_status()
             for chunk in response.iter_content(chunk_size=8192):
                 """ If request time exceeded the speed test time, then just exit from it
                 this is done in order to get the most accurate test as possible """
                 if time.monotonic() - start_time > speed_time:
                     break
-                total_bytes += len(chunk)
+                bytes_received += len(chunk)
 
     elapsed_time: float = time.monotonic() - start_time
-    print(f"Recieved {total_bytes} bytes, elapsed_time: {elapsed_time}")
-    return {"elapsed_time": elapsed_time, "total_bytes": total_bytes}
+
+    worker_queue.put({"elapsed_time": elapsed_time, "bytes_received": bytes_received})
+
+def download_speed_test(url: str, speed_time: float) -> dict[str,float | int]:
+    # I need to probe the the network in order to test how big request the worker can send
+    megabytes_per_request: int = probe_network_dl(url=url)
+
+    total_bytes: int = 0
+    total_elapsed_time: float = 0
+    avg_elapsed_time: float = 0 
+    
+    worker_queue = queue.Queue()
+    dl_workers: list[Thread] = []
+
+    for i in range(worker_amount):
+        dl_worker: Thread = threading.Thread(target=download_worker, args=(worker_queue, url, speed_time, megabytes_per_request))
+        dl_worker.start()
+        dl_workers.append(dl_worker)
+    for worker in dl_workers:
+        worker.join()
+        dl_worker_res =  worker_queue.get()
+        total_elapsed_time += dl_worker_res["elapsed_time"]
+        total_bytes += dl_worker_res["bytes_received"]
+    
+    # I need to calculate the average elapsed time, because I can't guarantee that
+    # a worker is going to be exactly 15 seconds, so in order to get the most precise
+    # measurement I can, I need to get the average of them all
+    avg_elapsed_time = total_elapsed_time / worker_amount
+
+    print(f"Recieved {total_bytes} bytes, avg_elapsed_time: {avg_elapsed_time}")
+    return {"elapsed_time": avg_elapsed_time, "total_bytes": total_bytes}
 
 # This function is used as a thread that returns some data to the main upload_speed_test
-def upload_worker(worker_queue: "Queue[dict[str,float | int]]", url: str, speed_time: int) -> None:
+def upload_worker(worker_queue: "Queue[dict[str,float | int]]", url: str, speed_time: int, bytes_per_request: int) -> None:
     session: Session = requests.Session()
-    random_data: bytes = os.urandom(uploadByteAmount)
-    bytes_received: int = 0
+    # Make this generate random data every time a request is sent
+    random_data: bytes = os.urandom(bytes_per_request)
+    bytes_sent: int = 0
     start_time: float = time.monotonic()    
     
     while time.monotonic() - start_time < speed_time:
         with session.post(url=url, data=random_data) as response:
-            print(response.status_code, bytes_received)
+            print(response.status_code, bytes_sent)
             if response.status_code == 200:
-                bytes_received += uploadByteAmount
+                bytes_sent += bytes_per_request
     
     elapsed_time: float = time.monotonic() - start_time
-    worker_queue.put({"elapsed_time": elapsed_time, "bytes_received": bytes_received})
+    worker_queue.put({"elapsed_time": elapsed_time, "bytes_sent": bytes_sent})
 
 # This function starts all workers and gets the average of all of them to calculate the upload speed
 def upload_speed_test(url: str, speed_time: int) -> dict[str,float | int]:
     total_bytes: int = 0
     total_elapsed_time: float = 0
     avg_elapsed_time: float = 0 
-    worker_amount: int = 5
     
     worker_queue = queue.Queue()
     ul_workers: list[Thread] = []
+    # I need to probe the the network in order to test how big request the worker can send
+    bytes_per_request: int = probe_network_ul(url=url)
     for i in range(worker_amount):
-        ul_worker: Thread = threading.Thread(target=upload_worker, args=(worker_queue, url, speed_time))
+        ul_worker: Thread = threading.Thread(target=upload_worker, args=(worker_queue, url, speed_time, bytes_per_request))
         ul_worker.start()
         ul_workers.append(ul_worker)
     for worker in ul_workers:
         worker.join()
         ul_worker_res =  worker_queue.get()
         total_elapsed_time += ul_worker_res["elapsed_time"]
-        total_bytes += ul_worker_res["bytes_received"]
+        total_bytes += ul_worker_res["bytes_sent"]
     
     # I need to calculate the average elapsed time, because I can't guarantee that
     # a worker is going to be exactly 15 seconds, so in order to get the most precise
