@@ -10,6 +10,16 @@ from concurrent.futures import FIRST_COMPLETED, wait
 
 from . import network, windows_network
 
+import os
+import platform
+import select
+import selectors
+import socket
+import struct
+import time
+ 
+_IS_LINUX = platform.system() == "Linux"
+
 MAX_DISCOVERY_HOSTS = 16_384
 MAX_WORKERS = 128
 ICMP_TIMEOUT_MS = 220
@@ -20,6 +30,135 @@ _EXCLUDED_INTERFACE_WORDS = (
     "container", "bluetooth",
 )
 _VALID_NEIGHBOR_STATES = {4, 5, 6}  # stale, reachable, permanent
+
+def _icmp_checksum(data: bytes) -> int:
+    if len(data) % 2:
+        data += b"\x00"
+    total = sum(struct.unpack("!%dH" % (len(data) // 2), data))
+    total = (total >> 16) + (total & 0xFFFF)
+    total += total >> 16
+    return ~total & 0xFFFF
+ 
+ 
+def linux_icmp_probe(ip: str, timeout_ms: int = 200):
+    """One ICMP echo through an *unprivileged* datagram ICMP socket.
+ 
+    No root and no subprocess. Works when net.ipv4.ping_group_range includes
+    the user's group (the default on Ubuntu, Fedora, Arch, ...). Returns the
+    RTT in ms, None for no reply, or raises OSError if the kernel refuses to
+    create the socket (caller should then fall back to the ping binary).
+    """
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_ICMP)
+    try:
+        sock.setblocking(False)
+        payload = b"netwer"
+        header = struct.pack("!BBHHH", 8, 0, 0, 0, 1)      # echo request
+        csum = _icmp_checksum(header + payload)
+        packet = struct.pack("!BBHHH", 8, 0, csum, 0, 1) + payload
+        start = time.monotonic()
+        sock.sendto(packet, (ip, 0))
+        deadline = start + timeout_ms / 1000.0
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return None
+            ready, _, _ = select.select([sock], [], [], remaining)
+            if not ready:
+                return None
+            data, _addr = sock.recvfrom(1024)
+            if data and data[0] == 0:                      # echo reply
+                return round((time.monotonic() - start) * 1000.0, 1)
+    except BlockingIOError:
+        return None
+    except OSError as exc:
+        # Unreachable / filtered replies are a normal "no" - only a failure
+        # to *create* the socket (handled above the try) should propagate.
+        if getattr(exc, "errno", None) in (65, 101, 113, 111):
+            return None
+        raise
+    finally:
+        sock.close()
+ 
+def linux_neighbor_table():
+    """Same row shape as windows_network.neighbor_table(), read from
+    /proc/net/arp. Only completed entries are returned."""
+    rows = []
+    try:
+        with open("/proc/net/arp", encoding="ascii") as fh:
+            next(fh, None)                                  # header line
+            for line in fh:
+                f = line.split()
+                if len(f) < 6:
+                    continue
+                ip, flags, mac, dev = f[0], int(f[2], 16), f[3].upper(), f[5]
+                if not flags & 0x2 or mac == "00:00:00:00:00:00":
+                    continue                                # incomplete
+                try:
+                    ifindex = socket.if_nametoindex(dev)
+                except OSError:
+                    ifindex = None
+                rows.append({"ip": ip, "mac": mac,
+                             "interface_index": ifindex,
+                             "state": 6 if flags & 0x4 else 5})
+    except OSError as exc:
+        return {"error": str(exc)}
+    return rows
+ 
+_REFUSED = {111, 10061}          # ECONNREFUSED on Linux / Windows
+ 
+ 
+def tcp_probe_concurrent(ip: str, timeout: float, ports):
+    """Race every port at once on one thread.
+ 
+    Open (connect succeeds) AND refused (RST) both prove the host is alive;
+    only silence for the whole `timeout` means "no answer". A dead host
+    therefore costs one timeout, not one per port.
+    """
+    deadline = time.monotonic() + timeout
+    sel = selectors.DefaultSelector()
+    socks = []
+    try:
+        for port in ports:
+            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            s.setblocking(False)
+            err = s.connect_ex((ip, port))
+            if err == 0:
+                s.close()
+                return True, port
+            if err in _REFUSED:
+                s.close()
+                return True, port
+            if err not in (115, 10035):                     # not "in progress"
+                s.close()
+                continue
+            socks.append(s)
+            sel.register(s, selectors.EVENT_WRITE, port)
+ 
+        while socks:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            for key, _ in sel.select(timeout=remaining):
+                s, port = key.fileobj, key.data
+                err = s.getsockopt(socket.SOL_SOCKET, socket.SO_ERROR)
+                sel.unregister(s)
+                socks.remove(s)
+                s.close()
+                if err == 0 or err in _REFUSED:
+                    return True, port
+        return False, None
+    finally:
+        for s in socks:
+            try:
+                sel.unregister(s)
+            except Exception:
+                pass
+            s.close()
+        sel.close()
+
+def _neighbor_table():
+    return (windows_network.neighbor_table() if windows_network._windows()
+            else linux_neighbor_table())
 
 
 def ipv4_host_count(network_range: ipaddress.IPv4Network) -> int:
@@ -242,14 +381,8 @@ def _neighbor_state_name(state: int) -> str:
     return {4: "cached", 5: "reachable", 6: "permanent"}.get(state, "unknown")
 
 
-def _tcp_probe(ip: str, timeout: float) -> tuple[bool, int | None]:
-    for port in TCP_FALLBACK_PORTS:
-        try:
-            with socket.create_connection((ip, port), timeout=timeout):
-                return True, port
-        except OSError:
-            continue
-    return False, None
+def _tcp_probe(ip, timeout):
+    return tcp_probe_concurrent(ip, timeout, TCP_FALLBACK_PORTS)
 
 
 class DiscoveryService:
@@ -289,7 +422,7 @@ class DiscoveryService:
         if event is not None:
             event.set()
 
-    def _record(self, device: dict) -> None:
+    def _record(self, device: dict) -> dict:
         key = (device["segment_id"], device["ip"])
         with self._state_lock:
             previous_source = self._device_sources.get(key)
@@ -301,9 +434,16 @@ class DiscoveryService:
                     self._summary["source_counts"][new_source] += 1
                 self._device_sources[key] = new_source
             current = self._devices.get(key, {})
-            current.update(device)
+            merged = dict(device)
+            if not merged.get("mac") and current.get("mac"):
+                merged["mac"] = current["mac"]
+                merged["vendor"] = current.get("vendor", merged.get("vendor"))
+            if merged.get("rtt_ms") is None and current.get("rtt_ms") is not None:
+                merged["rtt_ms"] = current["rtt_ms"]
+            current.update(merged)
             self._devices[key] = current
             self._summary["found"] = len(self._devices)
+            return dict(current)
 
     def _publish(self, event: dict) -> dict:
         with self._state_lock:
@@ -353,12 +493,15 @@ class DiscoveryService:
                              for address in adapter.get("addresses", [])}
             except Exception:
                 local_ips = set()
+                cfg = network.get_network_config()
+                if isinstance(cfg, dict) and cfg.get("ip"):
+                    local_ips.add(cfg["ip"])
 
             yield self._publish({"event": "started", "generation": generation,
                                  "segments": [dict(item) for item, _ in parsed],
                                  "current_subnet": "", "scanned": 0,
                                  "total": total, "found": 0})
-            neighbors = windows_network.neighbor_table()
+            neighbors = _neighbor_table()
             if not isinstance(neighbors, list):
                 neighbors = []
             seeded = set()
@@ -392,8 +535,8 @@ class DiscoveryService:
                         item, ip_text, row.get("mac", ""), None, "neighbor",
                         _neighbor_state_name(row.get("state", -1)), gateway,
                         local_ips=local_ips)
-                    self._record(device)
-                    yield self._publish({**device, "online": True,
+                    merged = self._record(device)
+                    yield self._publish({**merged, "online": True,
                                          "found": self.snapshot()["summary"]["found"],
                                          "total": total, "scanned": 0})
 
@@ -420,7 +563,13 @@ class DiscoveryService:
                     if cancel_event is not None and cancel_event.is_set():
                         return None
                     try:
-                        rtt = windows_network.icmp_probe(address, timeout_ms)
+                        if windows_network._windows():
+                            rtt = windows_network.icmp_probe(address, timeout_ms)
+                        else:
+                            try:
+                                rtt = linux_icmp_probe(address, timeout_ms)
+                            except OSError:
+                                rtt = network.ping_host(address, timeout_ms)
                     except Exception:
                         rtt = network.ping_host(address, timeout_ms)
                     if rtt is not None:
@@ -465,8 +614,8 @@ class DiscoveryService:
                                     item, address, "", rtt, method,
                                     "reachable", gateway, port,
                                     local_ips=local_ips)
-                                self._record(device)
-                                yield self._publish({**device, "online": True,
+                                merged = self._record(device)
+                                yield self._publish({**merged, "online": True,
                                                      "scanned": scanned,
                                                      "total": total,
                                                      "found": self.snapshot()["summary"]["found"]})
@@ -483,7 +632,7 @@ class DiscoveryService:
 
                 # ICMP requests populate the local ARP cache even for endpoints
                 # that do not answer echo. Reconcile it after each L2 segment.
-                fresh = windows_network.neighbor_table()
+                fresh = _neighbor_table()
                 if isinstance(fresh, list):
                     for row in fresh:
                         try:
@@ -503,15 +652,18 @@ class DiscoveryService:
                         if current and current.get("reachability") == "reachable":
                             current["mac"] = row["mac"]
                             current["vendor"] = self._vendor(row["mac"])
-                            self._record(current)
+                            merged = self._record(current)
+                            yield self._publish({**merged, "online": True,
+                                                "scanned": scanned, "total": total,
+                                                "found": self.snapshot()["summary"]["found"]})
                             continue
                         if key not in seeded and current is None:
                             device = self._make_device(
                                 item, address, row["mac"], None, "neighbor",
                                 _neighbor_state_name(row.get("state", -1)), gateway,
                                 local_ips=local_ips)
-                            self._record(device)
-                            yield self._publish({**device, "online": True,
+                            merged = self._record(device)
+                            yield self._publish({**merged, "online": True,
                                                  "scanned": scanned, "total": total,
                                                  "found": self.snapshot()["summary"]["found"]})
 
@@ -536,7 +688,7 @@ class DiscoveryService:
     def _vendor(mac: str) -> str:
         try:
             from .scan import lookup_vendor
-            return lookup_vendor(mac, allow_online=False)
+            return lookup_vendor(mac, allow_online=True)
         except Exception:
             return "Unknown"
 

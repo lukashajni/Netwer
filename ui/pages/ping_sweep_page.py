@@ -59,6 +59,8 @@ class PingSweepPage(BasePage):
         self._failed = False
         self._cancel_requested = False
         self._devices = []          # collected host dicts (for export)
+        self._device_index = {}     # (segment_id, ip) -> index into self._devices
+        self._row_widgets = {}      # (segment_id, ip) -> row QFrame
         self._total = 254
 
         self._build_toolbar()
@@ -341,8 +343,16 @@ class PingSweepPage(BasePage):
             wake_btn.setEnabled(False)
         rl.addWidget(wake_btn)
 
-        # Insert before the trailing stretch
-        self._rows_layout.insertWidget(self._rows_layout.count() - 1, row)
+        key = (dev.get("segment_id", ""), dev.get("ip", ""))
+        old = self._row_widgets.get(key)
+        if old is not None:
+            pos = self._rows_layout.indexOf(old)
+            self._rows_layout.removeWidget(old)
+            old.deleteLater()
+        else:
+            pos = self._rows_layout.count() - 1      # before the trailing stretch
+        self._rows_layout.insertWidget(pos, row)
+        self._row_widgets[key] = row
 
     def _clear_rows(self):
         while self._rows_layout.count():
@@ -352,6 +362,7 @@ class PingSweepPage(BasePage):
                 w.deleteLater()
         self._rows_layout.addStretch(1)
         self._empty_label = None
+        self._row_widgets = {}
 
     def _scan_ports(self, ip):
         # Jump to the Port Scanner pre-targeted at this device's IP.
@@ -412,6 +423,7 @@ class PingSweepPage(BasePage):
         self._failed = False
         self._cancel_requested = False
         self._devices = []
+        self._device_index = {}
         self.btn_scan.setText("  Stop")
         self.btn_scan.setIcon(Icons.get("stop", "#ffffff"))
         self._style_scan_button(running=True)
@@ -528,10 +540,18 @@ class PingSweepPage(BasePage):
 
         # A discovered host
         if d.get("online"):
-            self._devices.append(d)
-            self._add_device_row(d)
-            # First device found - turn the progress bar green so success
-            # is obvious even before the scan finishes.
+            key = (d.get("segment_id", ""), d.get("ip", ""))
+            idx = self._device_index.get(key)
+            if idx is None:
+                self._device_index[key] = len(self._devices)
+                self._devices.append(d)
+                row_data = d
+            else:
+                # Late events must not wipe known data with empty values
+                row_data = {**self._devices[idx],
+                            **{k: v for k, v in d.items() if v not in (None, "")}}
+                self._devices[idx] = row_data
+            self._add_device_row(row_data)
             self.progress_bar.set_color(Theme.SUCCESS)
             self.count_label.setText(
                 f"<span style='color:{Theme.SUCCESS};'>"
