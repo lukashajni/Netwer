@@ -725,8 +725,18 @@ class DashboardPage(BasePage):
         self._sync_discovery_snapshot()
 
     def _open_topology(self):
+        # Open the full-screen topology view with the current scan data.
         from ui.components.topology_dialog import TopologyDialog
-        dlg = TopologyDialog(self.core, parent=self)
+        gateway = getattr(self, "_gateway", "") or ""
+        devices = getattr(self, "_all_devices", None) or []
+        router_vendor = ""
+        for d in devices:
+            if d.get("ip") == gateway:
+                router_vendor = d.get("vendor", "") or ""
+                break
+        dlg = TopologyDialog(self.core, gateway, devices, router_vendor,
+                             online=getattr(self, "_internet_online", True),
+                             parent=self)
         dlg.exec()
 
     def _open_device_details(self, device: dict):

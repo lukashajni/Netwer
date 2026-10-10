@@ -1,411 +1,303 @@
+"""Full-screen network topology view.
+
+Opens from the Network Radar card on the dashboard. Gives the whole local
+network room to breathe - a large live radar on the left, and a panel on the
+right listing every discovered device with its vendor, IP and response time.
+Clicking a device (in the radar or the list) opens the per-device details with
+its open ports.
+
+It reuses the same NetworkRadar widget as the dashboard, just in "detailed"
+mode where every node is labelled.
+"""
 from __future__ import annotations
 
-from PyQt6.QtCore import Qt, QTimer
+from PyQt6.QtCore import Qt
+from PyQt6.QtGui import QFont
 from PyQt6.QtWidgets import (
-    QComboBox,
-    QDialog,
-    QFrame,
-    QHBoxLayout,
-    QLabel,
-    QLineEdit,
-    QPushButton,
-    QScrollArea,
-    QVBoxLayout,
-    QWidget,
+    QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QFrame,
+    QScrollArea, QWidget, QGraphicsDropShadowEffect,
 )
 
 from app.theme import Theme
-from core.discovery import configured_subnets, get_discovery_service
-from ui.components.device_details_dialog import DeviceDetailsDialog
-from ui.components.subnet_dialog import SubnetConfigurationDialog
-from ui.widgets.topology_map import TopologyGraphView
-from workers import StreamWorker
+from app.resources import Icons
+from ui.widgets.network_radar import NetworkRadar
+
+try:
+    from ui.widgets.network_map import device_display_name, guess_device_icon
+except Exception:                                    # pragma: no cover
+    def device_display_name(dev):
+        return dev.get("hostname") or dev.get("ip", "?")
+
+    def guess_device_icon(dev):
+        return "devices"
 
 
-class _DeviceListRow(QFrame):
-    def __init__(self, device, selected=False, on_select=None, parent=None):
+class _DeviceRow(QFrame):
+    # One clickable device entry in the side panel.
+
+    def __init__(self, dev, on_click, parent=None):
         super().__init__(parent)
-        self.device = device
-        self.on_select = on_select
+        self._dev = dev
+        self._on_click = on_click
+        self.setObjectName("DevRow")
         self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setObjectName("TopologyDeviceListRow")
-        self._set_style(selected)
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(10, 8, 10, 8)
-        layout.setSpacing(9)
-        label = QLabel(device.get("ip", ""))
-        label.setStyleSheet(
-            f"color: {Theme.TEXT_PRIMARY}; font-family: {Theme.FONT_MONO};"
-            "font-size: 11px; background: transparent;")
-        layout.addWidget(label)
-        details = QVBoxLayout()
-        name = QLabel(device.get("hostname") or device.get("vendor") or device.get("ip", ""))
+        self._apply_style(False)
+
+        lay = QHBoxLayout(self)
+        lay.setContentsMargins(11, 9, 11, 9)
+        lay.setSpacing(11)
+
+        icon = QLabel()
+        icon.setPixmap(Icons.pixmap(guess_device_icon(dev), 17,
+                                    self._accent_for(dev)))
+        icon.setFixedWidth(20)
+        lay.addWidget(icon)
+
+        box = QVBoxLayout()
+        box.setSpacing(1)
+        name = QLabel(device_display_name(dev))
         name.setStyleSheet(
-            f"color: {Theme.TEXT_BODY}; font-size: 12px; font-weight: 600;"
-            "background: transparent;")
-        details.addWidget(name)
-        mac = QLabel(device.get("mac") or device.get("vendor") or "No MAC learned")
-        mac.setStyleSheet(
-            f"color: {Theme.TEXT_MUTED}; font-size: 10px; background: transparent;")
-        details.addWidget(mac)
-        layout.addLayout(details, 1)
-        state = QLabel(device.get("reachability", "unknown").replace("_", " "))
-        state.setStyleSheet(
-            f"color: {Theme.ACCENT if device.get('reachability') == 'reachable' else Theme.WARNING};"
-            "font-size: 10px; background: transparent;")
-        layout.addWidget(state)
+            f"color: {Theme.TEXT_PRIMARY}; font-size: 13px; font-weight: 600;"
+            f"background: transparent;")
+        sub = QLabel(dev.get("ip", ""))
+        sub.setStyleSheet(
+            f"color: {Theme.TEXT_MUTED}; font-size: 11.5px;"
+            f"font-family: {Theme.FONT_MONO}; background: transparent;")
+        box.addWidget(name)
+        box.addWidget(sub)
+        lay.addLayout(box)
+        lay.addStretch()
 
-    def _set_style(self, selected):
-        border = Theme.ACCENT if selected else Theme.GLASS_BORDER
+        rtt = dev.get("rtt_ms")
+        if isinstance(rtt, (int, float)) and rtt > 0:
+            t = QLabel(f"{round(rtt)} ms")
+            t.setStyleSheet(
+                f"color: {Theme.SUCCESS}; font-size: 11.5px;"
+                f"font-family: {Theme.FONT_MONO}; background: transparent;")
+            lay.addWidget(t)
+
+    @staticmethod
+    def _accent_for(dev):
+        if dev.get("is_gateway"):
+            return Theme.SUCCESS
+        vendor = (dev.get("vendor") or "").lower()
+        if "private" in vendor or "unknown" in vendor or not vendor:
+            return Theme.DANGER
+        return Theme.ACCENT
+
+    def _apply_style(self, hover):
+        border = Theme.GLASS_BORDER_HI if hover else Theme.GLASS_BORDER
         self.setStyleSheet(
-            f"#TopologyDeviceListRow {{ background: {Theme.GLASS_INPUT};"
-            f"border: 1px solid {border}; border-radius: 8px; }}"
-            f"#TopologyDeviceListRow:hover {{ border-color: {Theme.GLASS_BORDER_HI}; }}")
+            f"#DevRow {{ background: {Theme.GLASS_INPUT};"
+            f"border: 1px solid {border}; border-radius: 11px; }}")
 
-    def mousePressEvent(self, event):
-        if event.button() == Qt.MouseButton.LeftButton and self.on_select:
-            event.accept()
-            self.on_select(self.device)
-            return
-        super().mousePressEvent(event)
+    def enterEvent(self, e):
+        self._apply_style(True)
+        super().enterEvent(e)
+
+    def leaveEvent(self, e):
+        self._apply_style(False)
+        super().leaveEvent(e)
+
+    def mousePressEvent(self, e):
+        if e.button() == Qt.MouseButton.LeftButton:
+            self._on_click(self._dev)
 
 
 class TopologyDialog(QDialog):
-    """Subnet-aware discovery view with a searchable, synchronized device map."""
-
-    def __init__(self, core, parent=None):
+    def __init__(self, core, gateway, devices, router_vendor="", online=True,
+                 parent=None):
         super().__init__(parent)
         self._core = core
-        self._service = get_discovery_service()
-        self._worker = None
-        self._details_dialog = None
-        self._selected_ip = ""
-        self._segments = configured_subnets()
-        self._devices = []
-        self._render_signature = None
+        self._devices = list(devices or [])
+
         self.setWindowTitle("Network Topology")
         self.setModal(True)
-        self.resize(1380, 860)
-        self.setMinimumSize(1050, 680)
         self.setStyleSheet(
-            f"QDialog {{ background: {Theme.BG_APP}; }}"
-            f"QLabel {{ color: {Theme.TEXT_BODY}; background: transparent; }}")
+            f"QDialog {{ background: qlineargradient(x1:0, y1:0, x2:1, y2:1,"
+            f"stop:0 {Theme.BG_SIDEBAR}, stop:0.5 {Theme.BG_APP},"
+            f"stop:1 {Theme.BG_SIDEBAR}); }}"
+            f"QLabel {{ background: transparent; color: {Theme.TEXT_BODY}; }}")
 
         root = QVBoxLayout(self)
-        root.setContentsMargins(20, 18, 20, 18)
-        root.setSpacing(12)
-        root.addLayout(self._build_header())
-        root.addLayout(self._build_summary())
-        root.addLayout(self._build_controls())
+        root.setContentsMargins(26, 22, 26, 24)
+        root.setSpacing(16)
+
+        root.addLayout(self._build_header(gateway, online))
+        root.addLayout(self._build_stats(gateway, online))
 
         body = QHBoxLayout()
-        body.setSpacing(12)
-        map_card = QFrame()
-        map_card.setObjectName("TopologyMapCard")
-        map_card.setStyleSheet(
-            f"#TopologyMapCard {{ background: {Theme.GLASS_CARD};"
-            f"border: 1px solid {Theme.GLASS_BORDER}; border-radius: 14px; }}")
-        map_layout = QVBoxLayout(map_card)
-        map_layout.setContentsMargins(12, 10, 12, 12)
-        map_head = QHBoxLayout()
-        map_head.addWidget(QLabel("Network map"), 1)
-        self.map = TopologyGraphView()
-        for label, callback in (("−", self.map.zoom_out), ("+", self.map.zoom_in),
-                                ("Fit", self.map.fit_graph), ("Reset", self.map.reset_zoom)):
-            button = QPushButton(label)
-            button.clicked.connect(callback)
-            map_head.addWidget(button)
-        map_layout.addLayout(map_head)
-        self.map.device_selected.connect(self._select_device)
-        map_layout.addWidget(self.map, 1)
-        body.addWidget(map_card, 3)
+        body.setSpacing(16)
 
-        list_card = QFrame()
-        list_card.setObjectName("TopologyDeviceCard")
-        list_card.setStyleSheet(
-            f"#TopologyDeviceCard {{ background: {Theme.GLASS_CARD};"
-            f"border: 1px solid {Theme.GLASS_BORDER}; border-radius: 14px; }}")
-        list_layout = QVBoxLayout(list_card)
-        list_layout.setContentsMargins(12, 10, 12, 12)
-        list_layout.setSpacing(7)
-        head = QHBoxLayout()
-        head.addWidget(QLabel("Discovered devices"))
-        head.addStretch()
-        self.device_count = QLabel("0")
-        self.device_count.setStyleSheet(f"color: {Theme.ACCENT}; font-weight: 700;")
-        head.addWidget(self.device_count)
-        list_layout.addLayout(head)
-        self.device_scroll = QScrollArea()
-        self.device_scroll.setWidgetResizable(True)
-        self.device_scroll.setFrameShape(QFrame.Shape.NoFrame)
-        self.device_scroll.setStyleSheet("QScrollArea { background: transparent; border: none; }")
-        host = QWidget()
-        host.setStyleSheet("background: transparent;")
-        self.device_rows = QVBoxLayout(host)
-        self.device_rows.setContentsMargins(1, 1, 4, 1)
-        self.device_rows.setSpacing(5)
-        self.device_scroll.setWidget(host)
-        list_layout.addWidget(self.device_scroll, 1)
-        body.addWidget(list_card, 2)
+        # -- Left: the big radar --
+        radar_card = QFrame()
+        radar_card.setObjectName("RadarCard")
+        radar_card.setStyleSheet(
+            f"#RadarCard {{ background: {Theme.GLASS_CARD};"
+            f"border: 1px solid {Theme.GLASS_BORDER}; border-radius: 16px; }}")
+        rl = QVBoxLayout(radar_card)
+        rl.setContentsMargins(16, 14, 16, 14)
+        rl.setSpacing(10)
+
+        self.radar = NetworkRadar()
+        self.radar.set_detailed(True)
+        self.radar.node_clicked.connect(self._open_details)
+        self.radar.set_topology(gateway, self._devices, router_vendor, online)
+        rl.addWidget(self.radar, 1)
+        rl.addLayout(self._build_legend())
+        body.addWidget(radar_card, 3)
+
+        # -- Right: device list --
+        body.addWidget(self._build_device_panel(), 1)
         root.addLayout(body, 1)
 
-        footer = QHBoxLayout()
-        self.status = QLabel("Ready. Choose subnets and click Scan.")
-        self.status.setStyleSheet(f"color: {Theme.TEXT_SECONDARY}; font-size: 11px;")
-        footer.addWidget(self.status, 1)
-        self.close_button = QPushButton("Close")
-        self.close_button.clicked.connect(self.accept)
-        footer.addWidget(self.close_button)
-        root.addLayout(footer)
+        # -- Footer --
+        foot = QHBoxLayout()
+        hint = QLabel("Click any device \u2014 in the radar or the list \u2014 "
+                      "to see its details and open ports.")
+        hint.setStyleSheet(f"color: {Theme.TEXT_MUTED}; font-size: 12px;")
+        foot.addWidget(hint)
+        foot.addStretch()
+        close = QPushButton("Close")
+        close.setCursor(Qt.CursorShape.PointingHandCursor)
+        close.clicked.connect(self.accept)
+        close.setStyleSheet(
+            f"QPushButton {{ background: {Theme.GRAD_ACCENT}; color: white;"
+            f"border: none; border-radius: {Theme.RADIUS_CONTROL}px;"
+            f"padding: 10px 24px; font-weight: 600; }}")
+        foot.addWidget(close)
+        root.addLayout(foot)
 
-        self._poll = QTimer(self)
-        self._poll.setInterval(750)
-        self._poll.timeout.connect(self._refresh_snapshot)
-        self._refresh_snapshot()
-        QTimer.singleShot(0, self.map.fit_graph)
-        if self._service.snapshot()["active"]:
-            self._set_scanning(True)
-            self._poll.start()
+        self.resize(1180, 760)
 
-    def _build_header(self):
+    # -- Pieces --
+    def _build_header(self, gateway, online):
+        head = QHBoxLayout()
+        head.setSpacing(12)
+
+        tile = QLabel()
+        tile.setFixedSize(42, 42)
+        tile.setObjectName("HeadTile")
+        tile.setStyleSheet(
+            f"#HeadTile {{ background: {Theme.GRAD_ACCENT_SOFT};"
+            f"border: 1px solid {Theme.GLASS_BORDER}; border-radius: 12px; }}")
+        tile.setPixmap(Icons.pixmap("network", 20, Theme.ACCENT))
+        tile.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        head.addWidget(tile)
+
+        box = QVBoxLayout()
+        box.setSpacing(2)
+        t = QLabel("Network Topology")
+        t.setStyleSheet(
+            f"color: {Theme.TEXT_PRIMARY}; font-size: 21px; font-weight: 700;")
+        s = QLabel("Live view of every device on your local network")
+        s.setStyleSheet(f"color: {Theme.TEXT_SECONDARY}; font-size: 13px;")
+        box.addWidget(t)
+        box.addWidget(s)
+        head.addLayout(box)
+        head.addStretch()
+        return head
+
+    def _build_stats(self, gateway, online):
         row = QHBoxLayout()
-        title_box = QVBoxLayout()
-        title = QLabel("Network Topology")
-        title.setStyleSheet(f"color: {Theme.TEXT_PRIMARY}; font-size: 20px; font-weight: 700;")
-        subtitle = QLabel("Live devices grouped by their local or routed IPv4 subnet")
-        subtitle.setStyleSheet(f"color: {Theme.TEXT_SECONDARY}; font-size: 11px;")
-        title_box.addWidget(title)
-        title_box.addWidget(subtitle)
-        row.addLayout(title_box, 1)
-        self.manage_button = QPushButton("Manage subnets")
-        self.manage_button.clicked.connect(self._manage_subnets)
-        row.addWidget(self.manage_button)
-        self.scan_button = QPushButton("Start scan")
-        self.scan_button.clicked.connect(self._toggle_scan)
-        row.addWidget(self.scan_button)
+        row.setSpacing(12)
+        subnet = ".".join(gateway.split(".")[:3]) + ".0/24" if gateway else "\u2014"
+        unknown = sum(1 for d in self._devices
+                      if ("private" in (d.get("vendor") or "").lower()
+                          or "unknown" in (d.get("vendor") or "").lower()))
+        stats = [
+            ("Devices online", str(len(self._devices)), Theme.WARNING),
+            ("Gateway", gateway or "\u2014", Theme.SUCCESS),
+            ("Subnet", subnet, Theme.ACCENT),
+            ("Unidentified", str(unknown),
+             Theme.DANGER if unknown else Theme.TEXT_SECONDARY),
+            ("Internet", "Online" if online else "Offline",
+             Theme.SUCCESS if online else Theme.DANGER),
+        ]
+        for label, value, col in stats:
+            f = QFrame()
+            f.setObjectName("StatTile")
+            f.setStyleSheet(
+                f"#StatTile {{ background: {Theme.GLASS_CARD};"
+                f"border: 1px solid {Theme.GLASS_BORDER};"
+                f"border-radius: 12px; }}")
+            fl = QVBoxLayout(f)
+            fl.setContentsMargins(14, 10, 14, 10)
+            fl.setSpacing(2)
+            k = QLabel(label)
+            k.setStyleSheet(f"color: {Theme.TEXT_MUTED}; font-size: 11.5px;")
+            v = QLabel(value)
+            v.setStyleSheet(
+                f"color: {col}; font-size: 16px; font-weight: 700;"
+                f"font-family: {Theme.FONT_MONO};")
+            fl.addWidget(k)
+            fl.addWidget(v)
+            row.addWidget(f, 1)
         return row
 
-    def _build_summary(self):
+    def _build_legend(self):
         row = QHBoxLayout()
-        row.setSpacing(8)
-        self._summary_values = {}
-        for title in ("Discovered", "Responding", "Neighbor cache", "Local L2", "Routed L3"):
-            card = QFrame()
-            card.setObjectName("TopoSummary")
-            card.setStyleSheet(
-                f"#TopoSummary {{ background: {Theme.GLASS_CARD};"
-                f"border: 1px solid {Theme.GLASS_BORDER}; border-radius: 9px; }}")
-            box = QVBoxLayout(card)
-            box.setContentsMargins(10, 7, 10, 7)
-            key = QLabel(title)
-            key.setStyleSheet(f"color: {Theme.TEXT_MUTED}; font-size: 10px;")
-            val = QLabel("0")
-            val.setStyleSheet(f"color: {Theme.TEXT_PRIMARY}; font-size: 14px; font-weight: 700;")
-            box.addWidget(key)
-            box.addWidget(val)
-            row.addWidget(card, 1)
-            self._summary_values[title] = val
+        row.setSpacing(18)
+        items = [("You / router", Theme.SUCCESS),
+                 ("Active device", Theme.ACCENT),
+                 ("Unidentified", Theme.DANGER),
+                 ("Traffic", Theme.ACCENT_PURPLE)]
+        for text, col in items:
+            dot = QLabel("\u25CF")
+            dot.setStyleSheet(f"color: {col}; font-size: 11px;")
+            lbl = QLabel(text)
+            lbl.setStyleSheet(f"color: {Theme.TEXT_MUTED}; font-size: 12px;")
+            row.addWidget(dot)
+            row.addWidget(lbl)
+            row.addSpacing(6)
+        row.addStretch()
         return row
 
-    def _build_controls(self):
-        row = QHBoxLayout()
-        self.search = QLineEdit()
-        self.search.setPlaceholderText("Search IP, hostname, MAC, vendor, or subnet")
-        self.search.setClearButtonEnabled(True)
-        self.search.textChanged.connect(self._apply_filter)
-        row.addWidget(self.search, 1)
-        self.filter = QComboBox()
-        self.filter.addItems(["All devices", "Responding", "Neighbor cache",
-                              "Gateways", "Unidentified"])
-        self.filter.currentTextChanged.connect(self._apply_filter)
-        row.addWidget(self.filter)
-        return row
+    def _build_device_panel(self):
+        panel = QFrame()
+        panel.setObjectName("DevPanel")
+        panel.setMinimumWidth(300)
+        panel.setStyleSheet(
+            f"#DevPanel {{ background: {Theme.GLASS_CARD};"
+            f"border: 1px solid {Theme.GLASS_BORDER}; border-radius: 16px; }}")
+        pl = QVBoxLayout(panel)
+        pl.setContentsMargins(16, 14, 16, 14)
+        pl.setSpacing(10)
 
-    def _set_scanning(self, active):
-        status = self._service.snapshot()["status"]
-        self.scan_button.setText(
-            "Cancel" if active else
-            ("Rescan" if status in ("complete", "partial") else "Start scan"))
-        self.manage_button.setEnabled(not active)
+        head = QHBoxLayout()
+        t = QLabel("Devices")
+        t.setStyleSheet(
+            f"color: {Theme.TEXT_PRIMARY}; font-size: 14px; font-weight: 600;")
+        head.addWidget(t)
+        head.addStretch()
+        n = QLabel(str(len(self._devices)))
+        n.setStyleSheet(
+            f"color: {Theme.WARNING}; font-size: 13px; font-weight: 700;"
+            f"font-family: {Theme.FONT_MONO};")
+        head.addWidget(n)
+        pl.addLayout(head)
 
-    def _toggle_scan(self):
-        if self._service.snapshot()["active"]:
-            self.status.setText("Cancelling scan and keeping partial results…")
-            self.scan_button.setEnabled(False)
-            self._service.cancel()
-            if self._worker is not None:
-                self._worker.stop()
-            return
-        self._start_scan()
-
-    def _start_scan(self):
-        self._devices = []
-        self._selected_ip = ""
-        self._set_scanning(True)
-        self.scan_button.setEnabled(True)
-        self.status.setText("Starting subnet discovery…")
-        self._worker = StreamWorker(self._service.scan_stream)
-        self._worker.result.connect(self._on_scan_event)
-        self._worker.error.connect(self._on_scan_error)
-        self._worker.done.connect(self._on_scan_done)
-        self._worker.start()
-        self._poll.start()
-
-    def _on_scan_event(self, event):
-        if event.get("event") == "segment":
-            segment = event.get("segment", {})
-            self.status.setText(
-                f"Scanning {segment.get('label', 'subnet')} · {segment.get('cidr', '')} · "
-                f"{event.get('total', 0):,} hosts")
-        elif event.get("event") == "progress":
-            segment = event.get("segment", {})
-            self.status.setText(
-                f"{segment.get('cidr', '')}: {event.get('scanned', 0):,}/"
-                f"{event.get('total', 0):,} hosts · {event.get('found', 0):,} discovered")
-        elif event.get("done"):
-            self.status.setText(
-                f"{'Scan cancelled — partial results' if event.get('cancelled') else 'Scan complete'} · "
-                f"{event.get('found', 0):,} discovered from {len(event.get('segments', []))} subnet(s)")
-        # Coalesce high-volume device/progress signals through the polling timer.
-        # Rebuilding the entire map and list once per discovered host starves the
-        # GUI event loop on large local subnets.
-
-    def _on_scan_error(self, message):
-        self.status.setText(f"Scan error: {message}")
-
-    def _on_scan_done(self):
-        self._worker = None
-        self.scan_button.setEnabled(True)
-        snapshot = self._service.snapshot()
-        self._set_scanning(snapshot["active"])
-        if not snapshot["active"]:
-            self._poll.stop()
-            if snapshot["status"] == "partial":
-                self.status.setText(
-                    f"Scan cancelled · {len(snapshot['devices'])} partial result(s) retained.")
-            elif snapshot["status"] == "complete":
-                self.status.setText(
-                    f"Scan complete · {len(snapshot['devices'])} device(s) in "
-                    f"{len(snapshot['segments'])} subnet(s)")
-        self._refresh_snapshot()
-
-    def _manage_subnets(self):
-        dialog = SubnetConfigurationDialog(self)
-        if dialog.exec():
-            self._segments = configured_subnets()
-            self._refresh_snapshot()
-
-    def _refresh_snapshot(self):
-        snapshot = self._service.snapshot()
-        if snapshot["status"] == "scanning" and snapshot["segments"]:
-            self._segments = snapshot["segments"]
-        elif not self._segments:
-            self._segments = configured_subnets()
-        self._devices = snapshot["devices"]
-        responding = sum(1 for d in self._devices if d.get("reachability") == "reachable")
-        cached = sum(1 for d in self._devices if d.get("reachability") == "cached")
-        self._summary_values["Discovered"].setText(str(len(self._devices)))
-        self._summary_values["Responding"].setText(str(responding))
-        self._summary_values["Neighbor cache"].setText(str(cached))
-        self._summary_values["Local L2"].setText(
-            str(sum(1 for s in self._segments if s.get("kind") == "local" and s.get("enabled", True))))
-        self._summary_values["Routed L3"].setText(
-            str(sum(1 for s in self._segments if s.get("kind") == "routed" and s.get("enabled", True))))
-        signature = (
-            tuple((s.get("id"), s.get("cidr"), s.get("label"), s.get("kind"),
-                   s.get("gateway"), s.get("enabled", True)) for s in self._segments),
-            tuple(sorted((d.get("ip"), d.get("hostname"), d.get("mac"), d.get("vendor"),
-                          d.get("reachability"), d.get("cidr"), d.get("segment"),
-                          d.get("is_gateway"), d.get("is_self")) for d in self._devices)),
-            self.search.text(), self.filter.currentText(), self._selected_ip,
-        )
-        if signature != self._render_signature:
-            self._render_signature = signature
-            self._rebuild_devices()
-
-    def _apply_filter(self, *_):
-        text = self.search.text()
-        kind = self.filter.currentText()
-        self.map.update_graph(
-            self._segments,
-            self._devices,
-            (device.get("ip") for device in self._filtered(text, kind)),
-            self._selected_ip,
-        )
-        self._rebuild_list(text, kind)
-
-    def _filtered(self, text=None, kind=None):
-        text = self.search.text() if text is None else text
-        kind = self.filter.currentText() if kind is None else kind
-        query = (text or "").casefold().strip()
-        out = []
-        for device in self._devices:
-            values = " ".join(str(device.get(k, "")) for k in
-                              ("ip", "hostname", "mac", "vendor", "cidr", "segment")).casefold()
-            if query and query not in values:
-                continue
-            reachability = device.get("reachability")
-            if kind == "Responding" and reachability != "reachable":
-                continue
-            if kind == "Neighbor cache" and reachability != "cached":
-                continue
-            if kind == "Gateways" and not device.get("is_gateway"):
-                continue
-            if (kind == "Unidentified"
-                    and (device.get("vendor") or "Unknown").casefold()
-                    not in ("unknown", "private (randomized)", "")):
-                continue
-            out.append(device)
-        return out
-
-    def _rebuild_devices(self):
-        self.map.update_graph(
-            self._segments,
-            self._devices,
-            (device.get("ip") for device in self._filtered()),
-            self._selected_ip,
-        )
-        self._rebuild_list()
-
-    def _rebuild_list(self, text=None, kind=None):
-        while self.device_rows.count():
-            item = self.device_rows.takeAt(0)
-            widget = item.widget()
-            if widget:
-                widget.setParent(None)
-                widget.deleteLater()
-        devices = sorted(self._filtered(text, kind), key=lambda d: (
-            d.get("cidr", ""), tuple(int(part) for part in d.get("ip", "0.0.0.0").split("."))))
-        self.device_count.setText(str(len(devices)))
-        if not devices:
-            empty = QLabel("No devices match this filter.")
-            empty.setStyleSheet(f"color: {Theme.TEXT_MUTED}; padding: 12px;")
-            self.device_rows.addWidget(empty)
+        area = QScrollArea()
+        area.setWidgetResizable(True)
+        area.setStyleSheet("QScrollArea { background: transparent; border: none; }")
+        inner = QWidget()
+        inner.setStyleSheet("background: transparent;")
+        il = QVBoxLayout(inner)
+        il.setContentsMargins(0, 0, 6, 0)
+        il.setSpacing(8)
+        if self._devices:
+            for dev in self._devices:
+                il.addWidget(_DeviceRow(dev, self._open_details))
         else:
-            for device in devices:
-                row = _DeviceListRow(device, device.get("ip") == self._selected_ip,
-                                     self._select_device)
-                self.device_rows.addWidget(row)
-        self.device_rows.addStretch()
+            empty = QLabel("No devices discovered yet.")
+            empty.setStyleSheet(f"color: {Theme.TEXT_MUTED}; font-size: 12.5px;")
+            il.addWidget(empty)
+        il.addStretch()
+        area.setWidget(inner)
+        pl.addWidget(area, 1)
+        return panel
 
-    def _select_device(self, device):
-        # exec() runs a nested event loop. Ignore any duplicate activation
-        # delivered while a details dialog is already open.
-        if self._details_dialog is not None:
-            return
-        self._selected_ip = device.get("ip", "")
-        self._rebuild_devices()
-        self.map.center_device(self._selected_ip)
-        self._details_dialog = DeviceDetailsDialog(self._core, device, self)
-        try:
-            self._details_dialog.exec()
-        finally:
-            self._details_dialog.deleteLater()
-            self._details_dialog = None
-
-    def closeEvent(self, event):
-        if self._worker is not None:
-            self._service.cancel()
-            self._worker.stop()
-        self._poll.stop()
-        super().closeEvent(event)
+    # -- Actions --
+    def _open_details(self, device: dict):
+        from ui.components.device_details_dialog import DeviceDetailsDialog
+        DeviceDetailsDialog(self._core, device, self).exec()
