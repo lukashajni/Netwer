@@ -177,26 +177,29 @@ def port_scan_custom(ip, port):
 
 
 def lookup_vendor(mac_address, allow_online=False):
-    cleaned = re.sub(r"[^0-9A-Fa-f]", "", mac_address or "").upper()
-    if len(cleaned) < 6:
+    try:
+        cleaned = re.sub(r"[^0-9A-Fa-f]", "", mac_address or "").upper()
+        if len(cleaned) < 6:
+            return "Unknown"
+        prefix = cleaned[:6]
+        taught = vendor_learning.lookup(prefix)
+        if taught:
+            return taught
+        if int(cleaned[1], 16) & 2:
+            return "Private (randomized)"
+        if prefix in OUI_TABLE:
+            return OUI_TABLE[prefix]
+        if prefix in _ONLINE_VENDOR_CACHE:
+            return _ONLINE_VENDOR_CACHE[prefix]
+        if allow_online:
+            name = oui_extended.online_vendor_lookup(mac_address, allow_network=allow_online)
+            _ONLINE_VENDOR_CACHE[prefix] = name or "Unknown"
+            if name:
+                vendor_learning.remember(prefix, name)
+                return name
         return "Unknown"
-    prefix = cleaned[:6]
-    taught = vendor_learning.lookup(prefix)
-    if taught:
-        return taught
-    if int(cleaned[1], 16) & 2:
-        return "Private (randomized)"
-    if prefix in OUI_TABLE:
-        return OUI_TABLE[prefix]
-    if prefix in _ONLINE_VENDOR_CACHE:
-        return _ONLINE_VENDOR_CACHE[prefix]
-    if allow_online:
-        name = oui_extended.online_vendor_lookup(mac_address, allow_network=allow_online)
-        _ONLINE_VENDOR_CACHE[prefix] = name or "Unknown"
-        if name:
-            vendor_learning.remember(prefix, name)
-            return name
-    return "Unknown"
+    except Exception as e:
+        return "Unknown"
 
 
 def teach_vendor(mac_address, vendor):
