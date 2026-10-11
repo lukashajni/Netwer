@@ -109,10 +109,47 @@ def _addresses(head):
     return result
 
 
+_ULA_NETWORK = ipaddress.ip_network("fc00::/7")
+
+
+def _preferred_ipv6(addresses):
+    """Pick the most useful IPv6 address: global, then unique-local, then
+    link-local. The first one the API lists is often just fe80::, which made
+    a perfectly good IPv6 setup look like "no IPv6"."""
+    candidates = []
+    for entry in addresses:
+        raw = entry["address"]
+        if ":" not in raw:
+            continue
+        try:
+            ip = ipaddress.IPv6Address(raw.split("%")[0])
+        except ValueError:
+            continue
+        if ip.is_loopback or ip.is_unspecified or ip.is_multicast:
+            continue
+        rank = 2 if ip.is_link_local else (1 if ip in _ULA_NETWORK else 0)
+        candidates.append((rank, entry))
+    return min(candidates, key=lambda c: c[0])[1] if candidates else None
+
+
 def _preferred_ipv4(addresses):
     ipv4 = [a for a in addresses if ":" not in a["address"]]
     return next((a for a in ipv4 if not ipaddress.IPv4Address(a["address"]).is_link_local),
                 ipv4[0] if ipv4 else None)
+
+
+_LINK_SPEED_UNKNOWN = 0xFFFFFFFFFFFFFFFF
+
+
+def _format_link_speed(*speeds_bps):
+    """Format IP Helper link speeds (bits/s) as e.g. '1 Gbps' or '866.7 Mbps'."""
+    values = [int(v) for v in speeds_bps if v and int(v) != _LINK_SPEED_UNKNOWN]
+    if not values:
+        return ""
+    mbps = max(values) / 1_000_000
+    if mbps >= 1000:
+        return f"{round(mbps / 1000, 2):g} Gbps"
+    return f"{round(mbps, 1):g} Mbps"
 
 
 def _adapters():
@@ -145,6 +182,8 @@ def _adapters():
             items.append({"name": name, "description": item.description or "",
                           "status": "Up" if item.oper_status == 1 else "Down", "mac": mac,
                           "mtu": int(item.mtu), "if_index": int(item.if_index), "addresses": unicast,
+                          "link_speed": _format_link_speed(item.transmit_link_speed,
+                                                           item.receive_link_speed),
                           "gateways": _addresses(item.first_gateway), "dns": _addresses(item.first_dns),
                           "dhcp_enabled": bool(item.flags & IP_ADAPTER_DHCP_ENABLED),
                           "ipv4_metric": int(item.ipv4_metric), "if_type": int(item.if_type)})
@@ -175,7 +214,7 @@ def adapter_details(name):
             if adapter["name"].casefold() == name.casefold():
                 addresses = adapter.pop("addresses")
                 ipv4 = _preferred_ipv4(addresses) or {}
-                ipv6 = next((a for a in addresses if ":" in a["address"]), {})
+                ipv6 = _preferred_ipv6(addresses) or {}
                 adapter.update({"ipv4": ipv4.get("address", ""), "ipv6": ipv6.get("address", ""),
                                 "prefix": ipv4.get("prefix", 0),
                                  "subnet_mask": str(ipaddress.IPv4Network(f"0.0.0.0/{ipv4['prefix']}").netmask) if ipv4 else "",
@@ -208,7 +247,7 @@ def active_network_config():
                 "gateway": gateway or "N/A",
                 "dns": ", ".join(adapter["dns"]) or "N/A", "mac": adapter["mac"] or "N/A",
                 "adapter": adapter["name"],
-                "ipv6": next((a["address"] for a in adapter["addresses"] if ":" in a["address"]), "")}
+                "ipv6": (_preferred_ipv6(adapter["addresses"]) or {}).get("address", "")}
     except Exception as exc:
         return _not_windows() if not _windows() else {"error": str(exc)}
 

@@ -16,22 +16,13 @@ from app.theme import Theme
 
 
 def _device_name(device):
+    """Shared naming rules (custom name, hostname, vendor, device type)."""
     try:
-        from core import device_names
+        from ui.widgets.network_map import device_display_name
 
-        custom = device_names.get(device)
-        if custom:
-            return custom
+        return device_display_name(device)
     except Exception:
-        pass
-    hostname = (device.get("hostname") or "").strip()
-    if hostname and hostname.casefold() not in ("unknown", "?"):
-        if hostname != device.get("ip", ""):
-            return hostname
-    vendor = (device.get("vendor") or "").strip()
-    if vendor.casefold() not in ("", "unknown", "private", "private (randomized)"):
-        return vendor.replace(" (private address)", "")
-    return device.get("ip", "?")
+        return device.get("hostname") or device.get("ip", "?")
 
 
 class _DeviceItem(QGraphicsEllipseItem):

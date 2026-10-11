@@ -90,20 +90,7 @@ The bundled Ookla Speedtest CLI is used by default. The application also checks 
 ```text
 NETWER/
 ├── main.py                 # Application entry point
-├── core/                   # Networking and diagnostic logic
-    ├── device_names.py
-    ├── discovery.py
-    ├── netwer_core.py
-    ├── network.py
-    ├── oui_extended.py
-    ├── privacy.py
-    ├── scan.py
-    ├── system.py
-    ├── wifi.py
-    ├── windows_network.py
-    ├── diagnostics.py       
-    ├── vendor_learning.py
-    └── device_fingerprint.py            
+├── core/                   # Networking and diagnostic logic          
 ├── ui/
 │   ├── pages/              # 12 application pages
 │   ├── widgets/            # Radar, graphs, gauges, cards
@@ -111,7 +98,7 @@ NETWER/
 ├── app/                   # Themes, settings, resolution handling
 ├── workers/               # Background workers
 ├── docs/
-    ├── screenshots        
+│   ├── screenshots        
 ├── reports/               # PDF report generation
 └── tests/                 # Automated tests
 ```

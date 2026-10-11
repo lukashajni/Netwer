@@ -1,6 +1,7 @@
 """Measure network health and produce a plain-language diagnosis."""
 from __future__ import annotations
 
+import ipaddress
 import secrets
 import socket
 import statistics
@@ -48,25 +49,23 @@ def _summarise(rtts):
     }
 
 
-def _time_dns(domain, server=None, timeout=1.0, record_type=1):
-    """Resolve a domain and time it. Returns ms, or None on failure.
-
-    With `server` set we ask that resolver directly, so we can compare the
-    router/ISP resolver against public ones. The OS resolver call has no local
-    timeout control; its duration depends on the system resolver configuration."""
+def _time_dns(domain, server=None, timeout=1.0, record_type=1,
+              allow_empty=False):
+    """Resolve a domain and time it. Returns ms, or None on failure."""
     start = time.perf_counter()
     try:
         if server is None:
             family = socket.AF_INET if record_type == 1 else socket.AF_INET6
             socket.getaddrinfo(domain, None, family, socket.SOCK_DGRAM)
         else:
-            _query_dns(domain, server, timeout, record_type)
+            _query_dns(domain, server, timeout, record_type, allow_empty)
         return round((time.perf_counter() - start) * 1000, 1)
     except Exception:
         return None
 
 
-def _query_dns(domain, server, timeout=1.0, record_type=1):
+def _query_dns(domain, server, timeout=1.0, record_type=1, allow_empty=False,
+               port=53):
     """Send one validated A or AAAA DNS query."""
     if record_type not in (1, 28):
         raise ValueError("unsupported DNS record type")
@@ -87,7 +86,7 @@ def _query_dns(domain, server, timeout=1.0, record_type=1):
         family = socket.AF_INET6
     with socket.socket(family, socket.SOCK_DGRAM) as s:
         s.settimeout(timeout)
-        endpoint = (server, 53) if family == socket.AF_INET else (server, 53, 0, 0)
+        endpoint = (server, port) if family == socket.AF_INET else (server, port, 0, 0)
         s.connect(endpoint)
         s.send(packet)
         data = s.recv(1024)
@@ -107,6 +106,8 @@ def _query_dns(domain, server, timeout=1.0, record_type=1):
         raise ValueError("DNS question type does not match")
     offset += 4
     if not answers:
+        if allow_empty:
+            return True
         raise ValueError("no DNS answer")
     aliases = {domain.rstrip(".").encode("idna").lower()}
     records = []
@@ -136,6 +137,8 @@ def _query_dns(domain, server, timeout=1.0, record_type=1):
     expected_length = 4 if record_type == 1 else 16
     if any(owner in aliases and answer_type == record_type and length == expected_length
            for owner, answer_type, _, length in records):
+        return True
+    if allow_empty:
         return True
     raise ValueError("no matching DNS answer")
 
@@ -172,9 +175,61 @@ def _read_dns_name(data, offset):
         cursor += size
 
 
+def _ipv6_scope(address):
+    """Classify an IPv6 address: global, ula, link-local or none."""
+    if not address:
+        return "none"
+    try:
+        ip = ipaddress.IPv6Address(str(address).split("%")[0])
+    except ValueError:
+        return "none"
+    if ip.is_loopback or ip.is_unspecified or ip.is_multicast:
+        return "none"
+    if ip.is_link_local:
+        return "link-local"
+    if ip in ipaddress.ip_network("fc00::/7"):
+        return "ula"
+    return "global"
+
+
+def _configured_dns_servers(cfg):
+    """IPv4 resolvers from the active adapter's configuration."""
+    servers = []
+    for part in str(cfg.get("dns", "")).replace(";", ",").split(","):
+        part = part.strip()
+        try:
+            socket.inet_pton(socket.AF_INET, part)
+        except OSError:
+            continue
+        servers.append(part)
+    return servers
+
+
+def _time_aaaa(domain, servers):
+    """Time an AAAA lookup."""
+    t = _time_dns(domain, record_type=28)
+    if t is not None:
+        return t
+    for server in servers:
+        t = _time_dns(domain, server, record_type=28, allow_empty=True)
+        if t is not None:
+            return t
+    return None
+
+
+def _ipv6_internet_ok(timeout=1.5):
+    """True when a TCP connection over IPv6 to a public host succeeds."""
+    for host in ("2606:4700:4700::1111", "2001:4860:4860::8888"):
+        try:
+            with socket.create_connection((host, 443), timeout=timeout):
+                return True
+        except OSError:
+            continue
+    return False
+
+
 def run_diagnostics_stream(core, deep=False):
-    """Run the checks, yielding {'step', 'label', 'progress'} updates and
-    finally {'done': True, 'measurements': {...}, 'report': {...}}."""
+    """Run the checks."""
     m = {}
     steps = 6
     done = 0
@@ -199,6 +254,9 @@ def run_diagnostics_stream(core, deep=False):
     m["has_ip"] = bool(m["ip"]) and m["ip"] not in ("N/A", "")
     m["has_gateway"] = bool(m["gateway"]) and m["gateway"] not in ("N/A", "")
     m["self_assigned"] = str(m["ip"]).startswith("169.254.")
+    m["ipv6"] = str(cfg.get("ipv6", "") or "").split("%")[0]
+    m["ipv6_scope"] = _ipv6_scope(m["ipv6"])
+    m["has_ipv6"] = m["ipv6_scope"] in ("global", "ula")
     yield progress("Checking your adapter…")
 
     wifi = {}
@@ -245,8 +303,11 @@ def run_diagnostics_stream(core, deep=False):
 
     local_v4 = [t for t in (_time_dns(d, record_type=1) for d in _TEST_DOMAINS)
                 if t is not None]
-    local_v6 = [t for t in (_time_dns(d, record_type=28) for d in _TEST_DOMAINS)
+    dns_servers = _configured_dns_servers(cfg)
+    local_v6 = [t for t in (_time_aaaa(d, dns_servers) for d in _TEST_DOMAINS)
                 if t is not None]
+    m["ipv6_internet"] = (_ipv6_internet_ok()
+                          if m["ipv6_scope"] == "global" else None)
     m["dns_working"] = bool(local_v4)
     m["dns_ms"] = round(statistics.fmean(local_v4), 1) if local_v4 else None
     m["dns_failures"] = len(_TEST_DOMAINS) - len(local_v4)
@@ -428,10 +489,28 @@ def analyse(m: dict) -> dict:
                 "A-record lookups failed for every test domain, and IPv6 DNS is also unavailable.",
                 "Switch your DNS to 1.1.1.1 or 8.8.8.8 in your adapter settings."))
     elif ipv6_failures is not None and not ipv6_working:
+        scope = m.get("ipv6_scope")
+        if scope is None or scope == "global":
+            # Only worth a warning when IPv6 is really in use (or when an
+            # older measurement didn't record the address at all).
+            detail = ("AAAA-record lookups failed for every test domain; "
+                      "IPv4 DNS is still responding.")
+            if scope == "global" and m.get("ipv6"):
+                detail = (f"This computer has an IPv6 address ({m['ipv6']}), "
+                          "but AAAA-record lookups failed for every test "
+                          "domain; IPv4 DNS is still responding.")
+            findings.append(_finding(
+                WARNING, "IPv6 DNS lookups are failing", detail,
+                "Check the resolver's IPv6 configuration."))
+        # With only a link-local or unique-local address (or none) IPv6 isn't in use on this network,
+        # so missing AAAA answers are not a problem.
+    if m.get("ipv6_scope") == "global" and m.get("ipv6_internet") is False:
         findings.append(_finding(
-            WARNING, "IPv6 DNS lookups are failing",
-            "AAAA-record lookups failed for every test domain; IPv4 DNS is still responding.",
-            "Check the resolver's IPv6 configuration."))
+            INFO, "IPv6 isn't reaching the internet",
+            f"This computer has an IPv6 address ({m.get('ipv6', '')}), but a test "
+            "connection over IPv6 failed. Sites fall back to IPv4, so most "
+            "things keep working.",
+            "If your provider offers IPv6, check the IPv6 settings on the router."))
     if ipv4_working:
         dns_ms = m.get("dns_ms") or 0
         best = m.get("best_public_dns")

@@ -126,7 +126,10 @@ class NetworkRadar(QWidget):
                 lo, hi = (0.72, 0.86) if self._detailed else (0.60, 0.72)
                 base = max(lo, min(hi, lo + rtt / 600.0))
             vendor = (dev.get("vendor") or "").lower()
-            identified = bool(dev.get("kind")) or "(private address)" in vendor
+            # Discovery now tags every host; "dev_generic" means it could not
+            # tell what the host is, so that still counts as unidentified.
+            identified = (dev.get("kind") not in (None, "", "dev_generic")
+                          or "(private address)" in vendor)
             is_unknown = (not identified
                           and ("private" in vendor or "unknown" in vendor
                                or not vendor))

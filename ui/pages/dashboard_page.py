@@ -56,6 +56,7 @@ class DashboardPage(BasePage):
         self._loaded_once = False
         self._pending = set()
         self._devices_scanning = False
+        self._silent_scan = False
         self._discovery_service = get_discovery_service()
         self._discovery_worker = None
         self._discovery_segments = []
@@ -250,7 +251,7 @@ class DashboardPage(BasePage):
             f"padding: 3px 12px; font-size: {Theme.FONT_SIZE_TINY}px; }}"
             f"QPushButton:hover {{ border-color: {Theme.ACCENT}; color: {Theme.TEXT_BODY}; }}"
             f"QPushButton:disabled {{ color: {Theme.TEXT_FAINT}; }}")
-        self.btn_rescan.clicked.connect(self._rescan_network)
+        self.btn_rescan.clicked.connect(self._on_rescan_clicked)
         self.devices_card.header_layout.addWidget(self.btn_rescan)
         self.btn_cancel_scan = QPushButton("Cancel")
         self.btn_cancel_scan.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -382,8 +383,10 @@ class DashboardPage(BasePage):
         self._load_wifi()
         self._refresh_resources(initial=True)
         self._start_monitor()
-        # Device discovery is opt-in; don't launch a broad subnet sweep at startup.
+        # Fill Top Devices and the Network Map right away; Rescan stays
+        # available for a manual refresh.
         self._sync_discovery_snapshot()
+        self._start_startup_scan()
         # Adapter list also loads in background.
         self._load_adapters()
 
@@ -567,6 +570,15 @@ class DashboardPage(BasePage):
                     f"font-size: {Theme.FONT_SIZE_SMALL}px; background: transparent;"
                 )
 
+    def _on_rescan_clicked(self):
+        self._silent_scan = False
+        self._rescan_network()
+
+    def _start_startup_scan(self):
+        """Run the first device scan automatically, without a toast popup."""
+        self._silent_scan = True
+        self._rescan_network()
+
     def _rescan_network(self):
         """Start the configured, bounded subnet discovery operation."""
         if self._discovery_service.snapshot()["active"]:
@@ -625,6 +637,11 @@ class DashboardPage(BasePage):
             self._devices_placeholder.setText(
                 f"Scanning {segment.get('label', 'subnet')} · {segment.get('cidr', '')}")
             return
+        if event.get("event") == "enriching":
+            self._device_progress.setValue(100)
+            self._devices_placeholder.setText("Identifying devices…")
+            self._devices_placeholder.show()
+            return
         if event.get("event") == "progress":
             total = max(1, int(event.get("total", 1)))
             scanned = min(total, int(event.get("scanned", 0)))
@@ -673,8 +690,10 @@ class DashboardPage(BasePage):
             self._devices_placeholder.show()
             from app.activity import activity
             activity.add("Network scan completed", f"{count} devices found", kind="success")
-            from app.notifications import notifications
-            notifications.notify_scan_done("Network scan complete", f"{count} devices found")
+            if not self._silent_scan:
+                from app.notifications import notifications
+                notifications.notify_scan_done("Network scan complete", f"{count} devices found")
+            self._silent_scan = False
 
     def _sync_discovery_snapshot(self):
         snapshot = self._discovery_service.snapshot()
@@ -684,20 +703,27 @@ class DashboardPage(BasePage):
             from core.discovery import configured_subnets
             self._discovery_segments = configured_subnets()
             self._discovery_service.set_segments(self._discovery_segments)
-        devices = snapshot.get("devices", [])
-        signature = tuple(sorted((d.get("segment_id", ""), d.get("ip", ""),
-                                  d.get("mac", ""), d.get("reachability", ""),
-                                  d.get("rtt_ms")) for d in devices))
+        devices = sorted(snapshot.get("devices", []), key=self._device_sort_key)
+        signature = tuple((d.get("segment_id", ""), d.get("ip", ""),
+                           d.get("mac", ""), d.get("reachability", ""),
+                           d.get("rtt_ms"), d.get("hostname", ""),
+                           d.get("kind", "")) for d in devices)
         if signature == self._device_signature:
             return
         self._device_signature = signature
         self._all_devices = devices
+
+        # Collect first, then remove
+        stale = []
         for index in range(self._devices_container.count()):
             item = self._devices_container.itemAt(index)
             widget = item.widget() if item else None
             if widget and widget is not self._devices_placeholder:
-                widget.setParent(None)
-                widget.deleteLater()
+                stale.append(widget)
+        for widget in stale:
+            self._devices_container.removeWidget(widget)
+            widget.setParent(None)
+            widget.deleteLater()
         if not devices:
             self.card_devices.set_value("0" if snapshot.get("status") == "complete" else "—",
                                         color=Theme.TEXT_MUTED,
@@ -717,6 +743,16 @@ class DashboardPage(BasePage):
             idx = max(0, self._devices_container.count() - 2)
             self._devices_container.insertWidget(idx, self._device_row(dev))
         self._maybe_update_map()
+
+    @staticmethod
+    def _device_sort_key(dev: dict):
+        """Router first, then by IP address (numerically)."""
+        try:
+            import ipaddress
+            ip = int(ipaddress.ip_address(dev.get("ip", "0.0.0.0")))
+        except ValueError:
+            ip = 0
+        return (not dev.get("is_gateway"), ip)
 
     def _on_devices(self, data: dict):
         devices = data.get("devices", [])
@@ -771,7 +807,12 @@ class DashboardPage(BasePage):
         row = QHBoxLayout(w)
         row.setContentsMargins(0, 3, 0, 3)
         name = self.device_display_name(dev)
-        n = QLabel(str(name)[:18])
+        from ui.widgets.network_map import guess_device_icon
+        icon = QLabel()
+        icon.setFixedSize(18, 18)
+        icon.setPixmap(Icons.pixmap(guess_device_icon(dev), 16, Theme.TEXT_SECONDARY))
+        icon.setStyleSheet("background: transparent;")
+        n = QLabel(str(name)[:22])
         n.setStyleSheet(f"color: {Theme.TEXT_BODY}; font-family: {Theme.FONT_DATA}; font-size: {Theme.FONT_SIZE_SMALL}px; background: transparent;")
         ip = QLabel(dev.get("ip", ""))
         ip.setStyleSheet(f"color: {Theme.TEXT_MUTED}; font-family: {Theme.FONT_MONO}; font-size: {Theme.FONT_SIZE_TINY}px; background: transparent;")
@@ -787,6 +828,8 @@ class DashboardPage(BasePage):
         }.get(reachability, ("Discovered", Theme.TEXT_MUTED))
         status = QLabel(status_text)
         status.setStyleSheet(f"color: {status_color}; font-size: {Theme.FONT_SIZE_TINY}px; background: transparent;")
+        row.addWidget(icon)
+        row.addSpacing(6)
         row.addWidget(n)
         row.addStretch()
         row.addWidget(ip)

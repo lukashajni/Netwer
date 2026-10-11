@@ -22,6 +22,8 @@ _IS_LINUX = platform.system() == "Linux"
 
 MAX_DISCOVERY_HOSTS = 16_384
 MAX_WORKERS = 128
+ENRICH_WORKERS = 16
+ENRICH_BUDGET_S = 8.0
 ICMP_TIMEOUT_MS = 220
 TCP_FALLBACK_PORTS = (443, 80, 22, 445, 135)
 _EXCLUDED_INTERFACE_WORDS = (
@@ -487,15 +489,20 @@ class DiscoveryService:
                 self._summary = {"scanned": 0, "total": total, "found": 0,
                                  "source_counts": {"icmp": 0, "tcp": 0, "neighbor": 0}}
                 generation = self._generation
+            local_ips = set()
+            local_macs = {}      # ARP never lists this PC, so read its own MACs
             try:
-                local_ips = {address["address"]
-                             for adapter in windows_network._adapters()
-                             for address in adapter.get("addresses", [])}
+                for adapter in windows_network._adapters():
+                    for address in adapter.get("addresses", []):
+                        local_ips.add(address["address"])
+                        if adapter.get("mac"):
+                            local_macs[address["address"]] = adapter["mac"]
             except Exception:
-                local_ips = set()
                 cfg = network.get_network_config()
                 if isinstance(cfg, dict) and cfg.get("ip"):
                     local_ips.add(cfg["ip"])
+                    if cfg.get("mac") and cfg["mac"] != "N/A":
+                        local_macs[cfg["ip"]] = cfg["mac"]
 
             yield self._publish({"event": "started", "generation": generation,
                                  "segments": [dict(item) for item, _ in parsed],
@@ -534,7 +541,7 @@ class DiscoveryService:
                     device = self._make_device(
                         item, ip_text, row.get("mac", ""), None, "neighbor",
                         _neighbor_state_name(row.get("state", -1)), gateway,
-                        local_ips=local_ips)
+                        local_ips=local_ips, local_macs=local_macs)
                     merged = self._record(device)
                     yield self._publish({**merged, "online": True,
                                          "found": self.snapshot()["summary"]["found"],
@@ -613,7 +620,7 @@ class DiscoveryService:
                                 device = self._make_device(
                                     item, address, "", rtt, method,
                                     "reachable", gateway, port,
-                                    local_ips=local_ips)
+                                    local_ips=local_ips, local_macs=local_macs)
                                 merged = self._record(device)
                                 yield self._publish({**merged, "online": True,
                                                      "scanned": scanned,
@@ -661,11 +668,15 @@ class DiscoveryService:
                             device = self._make_device(
                                 item, address, row["mac"], None, "neighbor",
                                 _neighbor_state_name(row.get("state", -1)), gateway,
-                                local_ips=local_ips)
+                                local_ips=local_ips, local_macs=local_macs)
                             merged = self._record(device)
                             yield self._publish({**merged, "online": True,
                                                  "scanned": scanned, "total": total,
                                                  "found": self.snapshot()["summary"]["found"]})
+
+            if not cancelled:
+                yield from self._enrich_devices(cancel_event, scanned, total)
+                cancelled = bool(cancel_event is not None and cancel_event.is_set())
 
             with self._state_lock:
                 self._active = False
@@ -684,6 +695,53 @@ class DiscoveryService:
                 self._cancel_event = None
             self._scan_lock.release()
 
+    def _enrich_devices(self, cancel_event, scanned, total):
+        """Give every discovered host a real name and a device type.
+
+        Runs after probing, in parallel and within a time budget, so a host
+        that never answers (a name lookup can hang) cannot stall the scan.
+        Each result is published as it arrives.
+        """
+        from . import device_fingerprint
+
+        devices = self.snapshot()["devices"]
+        if not devices:
+            return
+        yield self._publish({"event": "enriching", "scanned": scanned,
+                             "total": total, "found": len(devices)})
+        pool = concurrent.futures.ThreadPoolExecutor(
+            max_workers=min(ENRICH_WORKERS, len(devices)))
+        futures = {pool.submit(device_fingerprint.enrich_device, dict(d)): d
+                   for d in devices}
+        pending = set(futures)
+        deadline = time.monotonic() + ENRICH_BUDGET_S
+        try:
+            while pending:
+                if cancel_event is not None and cancel_event.is_set():
+                    break
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    break
+                done, pending = wait(pending, timeout=min(0.2, remaining),
+                                     return_when=FIRST_COMPLETED)
+                for future in done:
+                    base = futures[future]
+                    try:
+                        info = future.result()
+                    except Exception:
+                        info = {}
+                    if not info:
+                        continue
+                    update = {"segment_id": base["segment_id"], "ip": base["ip"],
+                              "source": base.get("source", "neighbor")}
+                    update.update(info)
+                    merged = self._record(update)
+                    yield self._publish({**merged, "online": True,
+                                         "scanned": scanned, "total": total,
+                                         "found": self.snapshot()["summary"]["found"]})
+        finally:
+            pool.shutdown(wait=False, cancel_futures=True)
+
     @staticmethod
     def _vendor(mac: str) -> str:
         try:
@@ -693,13 +751,23 @@ class DiscoveryService:
             return "Unknown"
 
     def _make_device(self, segment, ip, mac, rtt, method, reachability,
-                     gateway, open_port=None, local_ips=None):
-        vendor = self._vendor(mac) if _valid_mac(mac) else "Unknown"
+                     gateway, open_port=None, local_ips=None, local_macs=None):
         local_ips = local_ips or set()
+        is_self = ip in local_ips
+        if is_self and not mac and local_macs:
+            mac = local_macs.get(ip, "")
+        vendor = self._vendor(mac) if _valid_mac(mac) else "Unknown"
+        hostname, kind = ip, ""
+        if is_self:
+            # No lookups needed for this PC: we know its name and type.
+            from . import device_fingerprint
+            hostname = device_fingerprint.usable_name(
+                socket.gethostname(), ip) or ip
+            kind = device_fingerprint.classify_kind({"ip": ip, "is_self": True})
         device = {
-            "ip": ip, "hostname": ip, "mac": mac or "", "vendor": vendor,
+            "ip": ip, "hostname": hostname, "mac": mac or "", "vendor": vendor,
             "rtt_ms": rtt, "is_gateway": bool(gateway and ip == gateway),
-            "is_self": ip in local_ips, "kind": "", "online": True,
+            "is_self": is_self, "kind": kind, "online": True,
             "reachability": reachability, "source": method,
             "segment_id": segment["id"], "segment": segment.get("label", segment["cidr"]),
             "cidr": segment["cidr"], "scope": segment["kind"],

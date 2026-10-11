@@ -269,6 +269,9 @@ class HealthPage(BasePage):
             ("Jitter", fmt(internet.get("jitter"), " ms")),
             ("DNS A", fmt(m.get("dns_ipv4_ms"), " ms")),
             ("DNS AAAA", fmt(m.get("dns_ipv6_ms"), " ms")),
+            ("IPv6", {"global": "Active", "ula": "Local only",
+                      "link-local": "Link-local only"}.get(
+                          m.get("ipv6_scope"), "None")),
         ]
         if m.get("wifi"):
             cells.append(("Wi-Fi signal", fmt(m.get("signal"), "%")))

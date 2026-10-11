@@ -77,13 +77,14 @@ def _section_title(text):
 
 def _device_display_name(dev):
     """Return the best available device name."""
+    ip = (dev.get("ip") or "").strip()
     hostname = (dev.get("hostname") or "").strip()
-    if hostname and hostname.lower() not in ("unknown", "?", ""):
+    if hostname and hostname != ip and hostname.lower() not in ("unknown", "?", ""):
         return hostname
     vendor = (dev.get("vendor") or "").strip()
     if vendor and vendor.lower() != "unknown":
-        return vendor
-    return dev.get("ip", "") or "—"
+        return f"{vendor} Router" if dev.get("is_gateway") else vendor
+    return "Router" if dev.get("is_gateway") else (ip or "—")
 
 
 def _kv_table(rows):
@@ -244,28 +245,36 @@ def build_report(path, data: dict, sections=None):
         ps = data["port_scan"]
         results = ps.get("results", [])
         target = ps.get("target", "")
+        tname = (ps.get("target_name") or "").strip()
         dtype = ps.get("device_type", "")
         counts = ps.get("counts", {})
-        subtitle = (f"Target {target}"
-                    + (f"  ·  detected as {dtype}" if dtype else "")
+        error = ps.get("error", "")
+        who = f"{tname} ({target})" if tname and tname != target else target
+        subtitle = (f"Target {who}"
+                    + (f"  ·  detected as {dtype}" if dtype and not error else "")
                     + (f"  ·  {counts.get('open', 0)} open, "
+                       f"{counts.get('closed', 0)} closed, "
                        f"{counts.get('filtered', 0)} filtered"
-                       if counts else ""))
+                       if counts and not error else ""))
         rows = [[str(r.get("port", "")), r.get("service", ""),
                  r.get("protocol", "TCP"),
                  (r.get("banner", "") or "")[:40]]
                 for r in results]
-        if rows:
-            story.append(KeepTogether([
-                _section_title("Port Scan"),
-                Paragraph(subtitle, small),
-                Spacer(1, 4),
-                _grid_table(
-                    ["Port", "Service", "Protocol", "Version / Banner"],
-                    rows,
-                    col_widths=[18 * mm, 40 * mm, 24 * mm, 66 * mm]),
-            ]))
-            story.append(Spacer(1, 10))
+        if error:
+            body_flow = Paragraph(f"Port scan failed: {error}", small)
+        elif rows:
+            body_flow = _grid_table(
+                ["Port", "Service", "Protocol", "Version / Banner"],
+                rows, col_widths=[18 * mm, 40 * mm, 24 * mm, 66 * mm])
+        else:
+            body_flow = Paragraph("No open ports were found on this device.", small)
+        story.append(KeepTogether([
+            _section_title("Port Scan"),
+            Paragraph(subtitle, small),
+            Spacer(1, 4),
+            body_flow,
+        ]))
+        story.append(Spacer(1, 10))
 
     doc.build(story, onFirstPage=_header_footer, onLaterPages=_header_footer)
     return path

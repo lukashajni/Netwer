@@ -245,6 +245,7 @@ def ping_quick(timeout_ms=1000, ports=(53,)):
         for label, times in results.items():
             final.append({
                 "label": label,
+                "ip": next(t["ip"] for t in targets if t["label"] == label),
                 "avg": round(sum(times)/len(times)) if all(times) else 0,
                 "min": min(times) if all(times) else 0, "max": max(times)  if all(times) else 0,
                 "loss": round((times.count(None) / 4) * 100)
@@ -562,6 +563,18 @@ def _prefix_to_mask(prefix):
         return ""
 
 
+def _psutil_link_speed(name):
+    """Fallback link speed from psutil (Mbps) when the native API gives none."""
+    try:
+        stat = psutil.net_if_stats().get(name) if PSUTIL_AVAILABLE else None
+        if stat and stat.speed:
+            mbps = float(stat.speed)
+            return f"{round(mbps / 1000, 2):g} Gbps" if mbps >= 1000 else f"{mbps:g} Mbps"
+    except Exception:
+        pass
+    return ""
+
+
 def get_adapter_details(adapter_name):
     if not adapter_name:
         return {"error": "No adapter name given"}
@@ -572,7 +585,8 @@ def get_adapter_details(adapter_name):
                 return data
             prefix = data.get("prefix", 0)
             return {"name": data.get("name", adapter_name), "description": data.get("description", ""),
-                    "status": data.get("status", ""), "mac": data.get("mac", ""), "link_speed": "",
+                    "status": data.get("status", ""), "mac": data.get("mac", ""),
+                    "link_speed": data.get("link_speed") or _psutil_link_speed(data.get("name", adapter_name)),
                     "ipv4": data.get("ipv4", ""), "ipv6": data.get("ipv6", ""),
                     "subnet_mask": _prefix_to_mask(prefix) if prefix else "", "prefix": prefix,
                     "gateway": data.get("gateway", ""), "dns": data.get("dns", ""),

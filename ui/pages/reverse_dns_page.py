@@ -73,7 +73,7 @@ class ReverseDnsPage(BasePage):
 
     def _stat(self, label, color):
         card = Card("", "")
-        card.setFixedHeight(72)
+        card.setMinimumHeight(88)
         lbl = QLabel(label)
         lbl.setStyleSheet(
             f"color: {Theme.TEXT_SECONDARY}; font-size: {Theme.FONT_SIZE_TINY}px;"

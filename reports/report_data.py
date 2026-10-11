@@ -1,6 +1,32 @@
 
 
-def collect(core, sections):
+def run_port_scan(core, target, profile="common", target_name=""):
+    """Scan one host and return the payload used by the PDF port-scan section."""
+    from app.store import store
+
+    timeout = store.get_setting("portscan_timeout_ms", 600)
+    results, counts, error = [], {"open": 0, "closed": 0, "filtered": 0}, ""
+    for event in core.port_scan_stream(target, profile, timeout):
+        if event.get("error"):
+            error = event["error"]
+            break
+        if "state" in event:
+            counts[event["state"]] = counts.get(event["state"], 0) + 1
+            if event["state"] == "open":
+                results.append(event)
+    results.sort(key=lambda r: r["port"])
+    dtype = core.detect_device_type(open_ports=[r["port"] for r in results],
+                                    hostname=target_name or target)
+    payload = {"target": target, "target_name": target_name,
+               "device_type": dtype, "results": results,
+               "counts": counts, "error": error}
+    if not error:
+        store.set_last_scan("port_scanner", payload)
+    return payload
+
+
+def collect(core, sections, port_target="", port_profile="common",
+            port_target_name=""):
     sections = set(sections)
     data = {"summary": {}}
 
@@ -56,13 +82,25 @@ def collect(core, sections):
             data["devices"] = devs["devices"]
 
     if "port_scan" in sections:
-        try:
-            from app.store import store
-            last = store.get_last_scan("port_scanner")
-            if last and last.get("payload"):
-                data["port_scan"] = last["payload"]
-        except Exception:
-            pass
+        if port_target:
+            # Scan the device picked in the report options.
+            try:
+                data["port_scan"] = run_port_scan(
+                    core, port_target, port_profile, port_target_name)
+            except Exception as exc:
+                data["port_scan"] = {"target": port_target,
+                                     "target_name": port_target_name,
+                                     "results": [], "counts": {},
+                                     "error": str(exc)}
+        else:
+            # No device chosen: fall back to the last scan from the Port Scanner.
+            try:
+                from app.store import store
+                last = store.get_last_scan("port_scanner")
+                if last and last.get("payload"):
+                    data["port_scan"] = last["payload"]
+            except Exception:
+                pass
 
     _build_summary(core, data, ping_results)
     return data

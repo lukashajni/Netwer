@@ -1,16 +1,4 @@
-"""
-NETWER — NetworkMap widget (rebuilt on real layouts, not hand-painted math).
-
-Architecture: Internet / Router / Devices are real child widgets arranged
-by Qt's layout engine (QVBoxLayout + QHBoxLayout), the same system that
-lays out the whole Dashboard. Qt guarantees these never overlap, no matter
-the widget's size - no more fragile pixel arithmetic.
-
-Connector lines are drawn in NetworkMap's own paintEvent, which Qt always
-renders behind child widgets. That means the icons are structurally
-guaranteed to sit on top of the lines - a line can never visually cross a
-logo, by construction, not by careful coordinate tuning.
-"""
+"""NETWER — NetworkMap widget"""
 
 from PyQt6.QtCore import Qt, pyqtSignal, QPoint, QPointF
 from PyQt6.QtGui import QPainter, QColor, QPen
@@ -21,57 +9,20 @@ from app.resources import Icons
 
 
 def guess_device_icon(dev: dict) -> str:
-    """Pick an icon name based on hostname/vendor hints.
-    A kind determined by fingerprinting (Bonjour name / port signature) is
-    more reliable than guessing from text, so trust it first. """
+    """Pick an icon name for a device."""
     kind = (dev.get("kind") or "").strip()
     if kind.startswith("dev_"):
         return kind
-
-    text = f"{dev.get('hostname','')} {dev.get('vendor','')}".lower()
-
-    def has(*words):
-        return any(w in text for w in words)
-
-    if has("router", "mikrotik", "gateway", "ubiquiti", "tp-link", "netgear",
-           "asus", "fritz", "openwrt", "d-link", "zyxel", "cisco", "unifi"):
-        return "dev_router"
-    if has("tv", "television", "bravia", "roku", "chromecast", "firetv",
-           "shield", "appletv", "vizio", "samsung tv", "lg tv"):
-        return "dev_tv"
-    if has("watch", "band"):
-        return "dev_watch"
-    if has("ipad", "tablet", "tab-"):
-        return "dev_tablet"
-    if has("phone", "iphone", "android", "galaxy", "pixel", "xiaomi",
-           "redmi", "oneplus", "huawei", "oppo", "vivo", "mobile"):
-        return "dev_phone"
-    if has("laptop", "notebook", "macbook", "thinkpad", "ideapad"):
-        return "dev_laptop"
-    if has("nas", "synology", "qnap", "storage", "server", "truenas",
-           "western digital", "seagate"):
-        return "dev_nas"
-    if has("printer", "print", "canon", "epson", "brother", "laserjet",
-           "officejet"):
-        return "dev_printer"
-    if has("playstation", "ps4", "ps5", "xbox", "nintendo", "switch"):
-        return "dev_console"
-    if has("camera", "cam", "hikvision", "dahua", "axis", "cctv", "ring"):
-        return "dev_camera"
-    if has("echo", "alexa", "sonos", "speaker", "homepod"):
-        return "dev_speaker"
-    if has("esp", "espressif", "tuya", "sonoff", "shelly", "bulb", "lifx",
-           "nest", "hue", "smart", "iot", "wemo"):
-        return "dev_iot"
-    if has("desktop", "pc-", "-pc", "windows", "asrock", "msi", "gigabyte"):
-        return "dev_pc"
-    return "dev_generic"
+    try:
+        from core import device_fingerprint
+        return device_fingerprint.classify_kind(dev)
+    except Exception:
+        return "dev_generic"
 
 
 def device_display_name(dev: dict) -> str:
     """Best available name, in order: a name the user gave the device, its real
-    hostname, a real manufacturer, else the IP.
-    A name the user typed always wins."""
+    hostname, a real manufacturer, else what kind of device it is."""
     try:
         from core import device_names
         custom = device_names.get(dev)
@@ -90,17 +41,16 @@ def device_display_name(dev: dict) -> str:
         # "Apple (private address)" is useful detail, but as a "name" the
         # manufacturer alone reads better under an icon.
         return vendor.replace(" (private address)", "")
-    return dev.get("ip", "?")
+    try:
+        from core.device_fingerprint import KIND_LABELS
+        label = KIND_LABELS.get(guess_device_icon(dev))
+    except Exception:
+        label = None
+    return label or "Unknown device"
 
 
 class _LabeledIcon(QWidget):
-    """Icon with title (+ optional subtitle) to its right.
-
-    Layout trick: the node is symmetric around its ICON. Empty space of the
-    same width as the text block is reserved on the left, so when the node
-    is centered in the map, the ICON lands exactly on the map's centerline -
-    the same centerline the device row centers on.
-    """
+    """Icon with title (+ optional subtitle) to its right."""
 
     TEXT_WIDTH = 120   # room for "MikroTik" + an IP address
 
@@ -171,10 +121,7 @@ class _LabeledIcon(QWidget):
 
 
 class _DeviceNode(QWidget):
-    """Icon centered above a name + IP, stacked below - used for devices.
-
-    Clicking one asks the map to open that device's details, so the static map
-    stays as useful as the radar."""
+    """Icon centered above a name + IP, stacked below - used for devices."""
 
     def __init__(self, icon_name, icon_color, name, ip, icon_size=28,
                  device=None, on_click=None, parent=None):
@@ -304,9 +251,7 @@ class NetworkMap(QWidget):
         self.update()
 
     def paintEvent(self, event):
-        """ Lines are painted here, in the parent's paintEvent - Qt always
-        composites child widgets (the icons) on top of this, so a line
-        can never visually cover an icon, regardless of layout size. """
+        """Lines are painted here, in the parent's paintEvent"""
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
 
