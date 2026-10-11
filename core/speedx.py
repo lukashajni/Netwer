@@ -240,22 +240,4 @@ def ping_test(url: str) -> float:
     the most accurate representation possible (probably not, but it will work nonetheless)"""
     return calculate_median(elapsed_time_array) * 1000
     
-def stream_speed_test():
-    best_server: dict[str, str | int] = find_server.find_best_server(better_scan=False)
-    set_best_server(best_server)
-    download_url: str = f"{best_server["server"]}{best_server["dlURL"]}" 
-    upload_url: str = f"{best_server["server"]}{best_server["ulURL"]}"
-    
-    ping_in_ms = ping_test(download_url)
-    print(f"ping: {ping_in_ms}ms")
 
-    test_dict_upload: dict[str,float | int] = upload_speed_test(url=download_url,speed_time=15)
-    ul_speed_in_Mbps: float = calculate_speed_in_Mbps(test_dict_upload["total_bytes"], test_dict_upload["elapsed_time"])
-    print(f"Upload speed: {ul_speed_in_Mbps}Mbps")
-
-
-    test_dict: dict[str,float | int] = download_speed_test(url=download_url,speed_time=15)
-    dl_speed_in_Mbps: float = calculate_speed_in_Mbps(test_dict["total_bytes"], test_dict["elapsed_time"])
-    print(f"Download speed: {dl_speed_in_Mbps}Mbps")
-
-stream_speed_test()

@@ -220,7 +220,7 @@ class SpeedTestPage(BasePage):
         self.progress.set_fraction(0.05)
         self._timer.start()
 
-        w = StreamWorker(self.core.speedtest_stream)
+        w = StreamWorker(self.core.stream_speed_test)
         w.result.connect(self._on_event)
         w.error.connect(self._on_error)
         w.done.connect(self._on_finished)

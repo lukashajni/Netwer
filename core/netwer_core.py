@@ -30,6 +30,7 @@ import urllib.request
 from pathlib import Path
 from datetime import datetime
 from core import speedx
+from core import find_server
 
 try:
     import psutil
@@ -2783,6 +2784,37 @@ def speedtest_stream():
                        "ul": round(event["upload"]["bandwidth"] * 8 / 1_048_576, 2)}
     except Exception as e:
         yield {"error": str(e)}
+
+def stream_speed_test():
+    best_server: dict[str, str | int] = find_server.find_best_server(better_scan=False)
+    speedx.set_best_server(best_server)
+    
+    yield {"type": "start", "isp": "Unknown", "server": best_server["server"] }
+
+    download_url: str = f"{best_server["server"]}{best_server["dlURL"]}" 
+    upload_url: str = f"{best_server["server"]}{best_server["ulURL"]}"
+    
+    ping_in_ms = speedx.ping_test(download_url)
+    #print(f"ping: {ping_in_ms}ms")
+    yield {"type": "ping", "ms": round(ping_in_ms, 1) }
+
+
+    test_dict_upload: dict[str,float | int] = speedx.upload_speed_test(url=download_url,speed_time=15)
+    ul_speed_in_Mbps: float = speedx.calculate_speed_in_Mbps(test_dict_upload["total_bytes"], test_dict_upload["elapsed_time"])
+    print(f"Upload speed: {ul_speed_in_Mbps}Mbps")
+    yield {"type": "upload", "mbps": round(ul_speed_in_Mbps, 2)}
+
+    test_dict: dict[str,float | int] = speedx.download_speed_test(url=download_url,speed_time=15)
+    dl_speed_in_Mbps: float = speedx.calculate_speed_in_Mbps(test_dict["total_bytes"], test_dict["elapsed_time"])
+    print(f"Download speed: {dl_speed_in_Mbps}Mbps")
+    yield {"type": "download", "mbps": round(dl_speed_in_Mbps, 2)}
+
+    yield {"type": "result",
+           "ping": round(ping_in_ms, 1),
+           "dl": round(dl_speed_in_Mbps, 2),
+           "ul": round(ul_speed_in_Mbps, 2)
+          }
+
 
 
 # Save report
