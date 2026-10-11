@@ -29,6 +29,7 @@ import subprocess
 import urllib.request
 from pathlib import Path
 from datetime import datetime
+from core import speedx
 
 try:
     import psutil
@@ -2745,6 +2746,7 @@ def find_speedtest_exe():
 
 
 def speedtest_stream():
+    speedx.download_speed_test("test", 15)
     exe = find_speedtest_exe()
     if not exe:
         yield {"error": "speedtest.exe not found"}

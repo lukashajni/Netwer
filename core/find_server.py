@@ -1,13 +1,15 @@
 import requests
 import json
 import time
+from pathlib import Path
 
 class ServerListFileNotFound(Exception):
     pass
 
 def check_best_server_file() -> dict[str, str | int]:
+    best_server_file_path = Path(__file__).resolve().parent / "best_server.json"
     try:
-        with open("best_server.json", "r") as best_server_fp:
+        with open(best_server_file_path, "r") as best_server_fp:
             data = json.load(best_server_fp)
         return data
     except:
@@ -30,12 +32,13 @@ def construct_ping_server(server_dict: dict[str,str | int], base_url: str, ping_
     return new_server_url
 
 def find_server_list():
-  try:
-    with open("server-list.json", "r") as servers_file:
-        data = json.load(servers_file)
-        return data
-  except:
-    raise ServerListFileNotFound("Server list file 'server-list.json' couldn't be found in the same directory as this file")
+    server_file_path = Path(__file__).resolve().parent / "server-list.json"
+    try:
+        with open(server_file_path, "r") as servers_file:
+            data = json.load(servers_file)
+            return data
+    except:
+        raise ServerListFileNotFound("Server list file 'server-list.json' couldn't be found in the same directory as this file")
    
 def find_best_server(better_scan: bool) -> dict[str, str | int]:
     best_server_from_file: dict[str, str | int] = check_best_server_file()

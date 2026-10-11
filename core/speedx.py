@@ -8,7 +8,8 @@ import json
 from requests import Session
 import threading
 from threading import Thread
-from find_server import *
+from pathlib import Path
+from core import find_server
 
 oneMbps: int = 1000000
 uploadByteAmount: int = 100000000
@@ -18,18 +19,26 @@ worker_amount: int = 5
 def calculate_speed_in_Mbps(total_bytes: int, elapsed_time: float) -> float:
     return (total_bytes * 8) / (elapsed_time * oneMbps)
 
-
+def calculate_median(median_arr: list) -> float | int:
+    median_arr.sort()
+    median_arr_len = len(median_arr)
+    if (len(median_arr) % 2 == 0):
+        # Take the two numbers in the middle and calculate their average
+        return (median_arr[int(median_arr_len / 2)] + median_arr[int(median_arr_len / 2) - 1]) / 2
+    # If the length of the median array is an odd number, just return the number in the middle
+    return median_arr[int(median_arr_len / 2)] 
 """This function is used to set the best server in the 'best_server.json' file (in order not to find 
     the best server each time a speed test runs"""
 def set_best_server(best_server: dict[str, str | int]) -> None:
+    best_server_file_path = Path(__file__).resolve().parent / "best_server.json"
     try:
-        with open("best_server.json", "r") as best_server_fp:
+        with open(best_server_file_path, "r") as best_server_fp:
             data = json.load(best_server_fp)
     
         print(f"best server: {data["server"]}")
     # In any other case, clear the file and write the best_server to it
     except:
-        with open("best_server.json","w") as best_server_fp:
+        with open(best_server_file_path,"w") as best_server_fp:
             json.dump(best_server, best_server_fp, indent=4)
         print("Best server was not found, writing a new best_server to it")
 
@@ -213,18 +222,40 @@ def upload_speed_test(url: str, speed_time: int) -> dict[str,float | int]:
     print(f"avg_elapsed_time: {avg_elapsed_time}, total_bytes sent: {total_bytes}" )
     return {"elapsed_time": avg_elapsed_time, "total_bytes": total_bytes}
 
+def ping_test(url: str) -> float:
+    session: Session = requests.Session()
+    warmup_test(session, url)
+    
+    elapsed_time_array: list(float) = []
 
-best_server: dict[str, str | int] = find_best_server(better_scan=False)
-set_best_server(best_server)
-download_url: str = f"{best_server["server"]}{best_server["dlURL"]}" 
-upload_url: str = f"{best_server["server"]}{best_server["ulURL"]}"
+    for i in range(10):
+        # perf counter should give a more detailed accurate time (in floating point terms)
+        start_time: float = time.perf_counter()
+        with session.get(url=url, timeout=5) as response:
+            response.raise_for_status()
+        
+        elapsed_time_array.append(time.perf_counter() - start_time)
+    
+    """ I need to return the median of he elapsed time because that will be
+    the most accurate representation possible (probably not, but it will work nonetheless)"""
+    return calculate_median(elapsed_time_array) * 1000
+    
+def stream_speed_test():
+    best_server: dict[str, str | int] = find_server.find_best_server(better_scan=False)
+    set_best_server(best_server)
+    download_url: str = f"{best_server["server"]}{best_server["dlURL"]}" 
+    upload_url: str = f"{best_server["server"]}{best_server["ulURL"]}"
+    
+    ping_in_ms = ping_test(download_url)
+    print(f"ping: {ping_in_ms}ms")
 
-test_dict_upload: dict[str,float | int] = upload_speed_test(url=download_url,speed_time=15)
-ul_speed_in_Mbps: float = calculate_speed_in_Mbps(test_dict_upload["total_bytes"], test_dict_upload["elapsed_time"])
-print(f"Upload speed: {ul_speed_in_Mbps}Mbps")
+    test_dict_upload: dict[str,float | int] = upload_speed_test(url=download_url,speed_time=15)
+    ul_speed_in_Mbps: float = calculate_speed_in_Mbps(test_dict_upload["total_bytes"], test_dict_upload["elapsed_time"])
+    print(f"Upload speed: {ul_speed_in_Mbps}Mbps")
 
 
-test_dict: dict[str,float | int] = download_speed_test(url=download_url,speed_time=15)
-dl_speed_in_Mbps: float = calculate_speed_in_Mbps(test_dict["total_bytes"], test_dict["elapsed_time"])
-print(f"Download speed: {dl_speed_in_Mbps}Mbps")
+    test_dict: dict[str,float | int] = download_speed_test(url=download_url,speed_time=15)
+    dl_speed_in_Mbps: float = calculate_speed_in_Mbps(test_dict["total_bytes"], test_dict["elapsed_time"])
+    print(f"Download speed: {dl_speed_in_Mbps}Mbps")
 
+stream_speed_test()
