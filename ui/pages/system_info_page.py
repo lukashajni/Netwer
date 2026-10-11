@@ -1,17 +1,10 @@
-"""
-NETWER — System Information page.
+"""Display system details and live resource usage."""
 
-Hardware and OS details plus live resource usage. Static details (CPU model,
-core count, OS build) are fetched once, live usage (CPU/RAM/Disk) updates on
-a timer using horizontal bars - a denser read than the dashboard's gauges,
-which suits a detail page.
-"""
+from PyQt6.QtCore import QTimer
+from PyQt6.QtWidgets import QHBoxLayout, QLabel
 
-from PyQt6.QtCore import Qt, QTimer
-from PyQt6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel
-
-from app.theme import Theme
 from app.resources import Icons
+from app.theme import Theme
 from ui.pages.base_page import BasePage
 from ui.widgets.card import Card, kv_row
 from ui.widgets.usage_bar import UsageBar
@@ -122,7 +115,7 @@ class SystemInfoPage(BasePage):
 
     # -- Lifecycle -- 
     def preload(self):
-        """Učitaj hardverske/OS detalje u pozadini pri pokretanju."""
+        """Load hardware and operating-system details in the background."""
         if not self._loaded_once:
             self._loaded_once = True
             self._load_details()
@@ -184,7 +177,9 @@ class SystemInfoPage(BasePage):
         if boot:
             self._boot_epoch = boot
         else:
-            days = d.get("days", 0); hours = d.get("hours", 0); mins = d.get("minutes", 0)
+            days = d.get("days", 0)
+            hours = d.get("hours", 0)
+            mins = d.get("minutes", 0)
             self._boot_epoch = time.time() - (days * 86400 + hours * 3600 + mins * 60)
         self._tick_uptime()
         self._uptime_timer.start()

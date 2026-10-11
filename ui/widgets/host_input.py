@@ -1,24 +1,10 @@
-"""
-NETWER — HostInput widget.
-
-A QLineEdit for entering a host/IP, augmented with:
-  - a history dropdown (recent + favorited hosts, from the persistent store)
-  - a star toggle to favorite/unfavorite the current host
-
-Drop-in replacement for the plain QLineEdit used on the scan pages. Emits
-"submitted" when the user presses Enter, and exposes text()/setText() so the
-existing page code keeps working.
-"""
-
 from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtWidgets import (
-    QWidget, QHBoxLayout, QLineEdit, QPushButton, QMenu
-)
 from PyQt6.QtGui import QAction
+from PyQt6.QtWidgets import QHBoxLayout, QLineEdit, QMenu, QPushButton, QWidget
 
-from app.theme import Theme
 from app.resources import Icons
 from app.store import store
+from app.theme import Theme
 
 
 class HostInput(QWidget):

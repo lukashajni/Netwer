@@ -132,10 +132,10 @@ class TestDeviceDisplayName(unittest.TestCase):
             self.fn({"hostname": "Unknown", "vendor": "LG Electronics",
                      "ip": "192.168.1.254"}), "LG Electronics")
 
-    def test_all_unknown_falls_back_to_ip(self):
+    def test_all_unknown_never_shows_a_bare_ip(self):
         self.assertEqual(
             self.fn({"hostname": "Unknown", "vendor": "Unknown",
-                     "ip": "192.168.1.77"}), "192.168.1.77")
+                     "ip": "192.168.1.77"}), "Unknown device")
 
 
 class TestStore(unittest.TestCase):
@@ -587,7 +587,7 @@ class TestCustomDeviceNames(unittest.TestCase):
         from ui.widgets.network_map import device_display_name
         dev = {"ip": "192.168.0.45", "mac": "0A:39:82:6C:B8:B6",
                "hostname": "", "vendor": "Private (randomized)"}
-        self.assertEqual(device_display_name(dev), "192.168.0.45")
+        self.assertEqual(device_display_name(dev), "Phone")
         self._dn.set_name(dev, "Printer")
         self.assertEqual(device_display_name(dev), "Printer")
 
@@ -1032,3 +1032,362 @@ class TestStartupSidebarBuild(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+class TestDeviceNamesAndKinds(unittest.TestCase):
+    """Discovery naming and type detection (pure parts, no network)."""
+
+    def _kind(self, **dev):
+        from core import device_fingerprint as fp
+        dev.setdefault("ip", "192.168.88.50")
+        return fp.classify_kind(dev)
+
+    def test_lg_electronics_is_a_tv(self):
+        self.assertEqual(self._kind(vendor="LG Electronics"), "dev_tv")
+
+    def test_hostname_beats_vendor(self):
+        self.assertEqual(self._kind(vendor="Samsung Electronics",
+                                    hostname="Galaxy-S23"), "dev_phone")
+        self.assertEqual(self._kind(vendor="Unknown",
+                                    hostname="Living-Room-TV"), "dev_tv")
+
+    def test_computers_servers_and_phones(self):
+        self.assertEqual(self._kind(vendor="ASRock", hostname="DESKTOP-FKRBQ25"),
+                         "dev_pc")
+        self.assertEqual(self._kind(vendor="Unknown", hostname="LAPTOP-8DK2"),
+                         "dev_laptop")
+        self.assertEqual(self._kind(vendor="Unknown", hostname="ubuntu-server"),
+                         "dev_server")
+        self.assertEqual(self._kind(vendor="Raspberry Pi"), "dev_server")
+        self.assertEqual(self._kind(vendor="Private (randomized)"), "dev_phone")
+
+    def test_gateway_is_router_and_self_is_a_computer(self):
+        self.assertEqual(self._kind(vendor="Unknown", is_gateway=True),
+                         "dev_router")
+        self.assertIn(self._kind(is_self=True), ("dev_pc", "dev_laptop"))
+
+    def test_word_matching_avoids_false_hits(self):
+        self.assertEqual(self._kind(vendor="Unknown", hostname="banana"),
+                         "dev_generic")
+        self.assertEqual(self._kind(vendor="Unknown", hostname="network-switch"),
+                         "dev_generic")
+        self.assertEqual(self._kind(vendor="Unknown", hostname="octv"),
+                         "dev_generic")
+
+    def test_ports_identify_devices(self):
+        from core import device_fingerprint as fp
+        self.assertEqual(fp.classify_kind({"ip": "x", "vendor": "Apple"},
+                                          ports={62078}), "dev_phone")
+        self.assertEqual(fp.classify_kind({"ip": "x", "vendor": "Unknown"},
+                                          ports={3001}), "dev_tv")
+        self.assertEqual(fp.classify_kind({"ip": "x", "vendor": "Unknown"},
+                                          ports={9100}), "dev_printer")
+
+    def test_upnp_description_identifies_tv(self):
+        from core import device_fingerprint as fp
+        xml = (b'<root xmlns="urn:schemas-upnp-org:device-1-0"><device>'
+               b'<deviceType>urn:schemas-upnp-org:device:MediaRenderer:1'
+               b'</deviceType><friendlyName>[LG] webOS TV OLED55C1'
+               b'</friendlyName><manufacturer>LG Electronics</manufacturer>'
+               b'</device></root>')
+        info = fp._parse_upnp_description(xml)
+        self.assertEqual(info["friendly_name"], "[LG] webOS TV OLED55C1")
+        self.assertEqual(fp.classify_kind({"ip": "x", "vendor": "Unknown"},
+                                          upnp=info), "dev_tv")
+
+    def test_upnp_description_rejects_entities(self):
+        from core import device_fingerprint as fp
+        self.assertEqual(fp._parse_upnp_description(
+            b'<!DOCTYPE a [<!ENTITY b "c">]><root/>'), {})
+
+    def test_usable_name_drops_useless_names(self):
+        from core import device_fingerprint as fp
+        ip = "192.168.88.1"
+        self.assertEqual(fp.usable_name("lgwebostv.lan", ip), "lgwebostv")
+        self.assertEqual(fp.usable_name("DESKTOP-ABC.local.", ip), "DESKTOP-ABC")
+        for useless in ("", "router", "192-168-88-1", ip,
+                        "1.88.168.192.in-addr.arpa"):
+            self.assertEqual(fp.usable_name(useless, ip), "")
+
+    def test_netbios_reply_gives_computer_name(self):
+        import struct
+        from core import device_fingerprint as fp
+        self.assertEqual(len(fp._nbstat_query()), 50)
+        reply = (struct.pack(">HHHHHH", 0x4E57, 0x8400, 0, 1, 0, 0)
+                 + b"\x20" + b"CK" + b"A" * 30 + b"\x00"
+                 + struct.pack(">HHIH", 0x21, 1, 0, 38) + bytes([2])
+                 + b"MYPC-NAME".ljust(15) + b"\x00" + struct.pack(">H", 0x0400)
+                 + b"WORKGROUP".ljust(15) + b"\x00" + struct.pack(">H", 0x8400)
+                 + b"\x00" * 6)
+        self.assertEqual(fp._parse_nbstat(reply), "MYPC-NAME")
+        self.assertIsNone(fp._parse_nbstat(b"\xff" * 30))
+        self.assertIsNone(fp._parse_nbstat(b""))
+
+    def test_open_ports_sees_a_listener(self):
+        import socket
+        from core import device_fingerprint as fp
+        srv = socket.socket()
+        srv.bind(("127.0.0.1", 0))
+        srv.listen(5)
+        try:
+            port = srv.getsockname()[1]
+            self.assertIn(port, fp.open_ports("127.0.0.1", (port, 1), 0.5))
+        finally:
+            srv.close()
+
+    def test_enrich_device_uses_name_lookup_and_kind(self):
+        from core import device_fingerprint as fp
+        orig = (fp._lookup_name, fp.upnp_info, fp.open_ports)
+        fp._lookup_name = lambda ip: ("lgwebostv", "mdns")
+        fp.upnp_info = lambda ip: {}
+        fp.open_ports = lambda ip: set()
+        try:
+            out = fp.enrich_device({"ip": "192.168.88.254",
+                                    "vendor": "LG Electronics"})
+        finally:
+            fp._lookup_name, fp.upnp_info, fp.open_ports = orig
+        self.assertEqual(out["hostname"], "lgwebostv")
+        self.assertEqual(out["kind"], "dev_tv")
+
+    def test_display_name_never_falls_back_to_a_bare_ip(self):
+        import os
+        os.environ["QT_QPA_PLATFORM"] = "offscreen"
+        from ui.widgets.network_map import device_display_name
+        self.assertEqual(device_display_name(
+            {"ip": "192.168.88.253", "hostname": "192.168.88.253",
+             "vendor": "Unknown", "is_self": True}) in
+            ("Computer", "Laptop"), True)
+        self.assertEqual(device_display_name(
+            {"ip": "192.168.88.9", "hostname": "", "vendor": "Unknown"}),
+            "Unknown device")
+        self.assertEqual(device_display_name(
+            {"ip": "192.168.88.254", "hostname": "lgwebostv",
+             "vendor": "LG Electronics"}), "lgwebostv")
+
+
+class TestDiscoveryEnrichment(unittest.TestCase):
+    def test_enrichment_publishes_names_and_keeps_counts(self):
+        import threading
+        from core import device_fingerprint as fp
+        from core.discovery import DiscoveryService
+        svc = DiscoveryService()
+        for ip, src in (("192.168.88.254", "icmp"), ("192.168.88.253", "icmp")):
+            svc._record({"segment_id": "s", "ip": ip, "hostname": ip,
+                         "mac": "", "vendor": "Unknown", "source": src,
+                         "reachability": "reachable", "kind": ""})
+        orig = fp.enrich_device
+        fp.enrich_device = lambda d: {"hostname": "name-" + d["ip"].split(".")[-1],
+                                      "kind": "dev_tv"}
+        try:
+            events = list(svc._enrich_devices(threading.Event(), 254, 254))
+        finally:
+            fp.enrich_device = orig
+        self.assertEqual(events[0]["event"], "enriching")
+        by_ip = {d["ip"]: d for d in svc.snapshot()["devices"]}
+        self.assertEqual(by_ip["192.168.88.254"]["hostname"], "name-254")
+        self.assertEqual(by_ip["192.168.88.253"]["kind"], "dev_tv")
+        self.assertEqual(by_ip["192.168.88.253"]["reachability"], "reachable")
+        self.assertEqual(svc.snapshot()["summary"]["source_counts"]["icmp"], 2)
+
+    def test_own_pc_gets_its_name_and_mac(self):
+        from core.discovery import DiscoveryService
+        svc = DiscoveryService()
+        seg = {"id": "s", "label": "Ethernet", "cidr": "192.168.88.0/24",
+               "kind": "local"}
+        dev = svc._make_device(seg, "192.168.88.253", "", 1.0, "icmp",
+                               "reachable", "192.168.88.1",
+                               local_ips={"192.168.88.253"},
+                               local_macs={"192.168.88.253": "00:1A:2B:3C:4D:5E"})
+        self.assertTrue(dev["is_self"])
+        self.assertEqual(dev["mac"], "00:1A:2B:3C:4D:5E")
+        self.assertNotEqual(dev["hostname"], "192.168.88.253")
+        self.assertIn(dev["kind"], ("dev_pc", "dev_laptop"))
+
+
+class TestTopDevicesList(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        import os
+        os.environ["QT_QPA_PLATFORM"] = "offscreen"
+        from PyQt6.QtWidgets import QApplication
+        cls._app = QApplication.instance() or QApplication([])
+
+    def _page(self):
+        # The module-level activity log is a QObject; earlier tests that tear
+        # down their QApplication delete it. Recreate it if that happened.
+        from PyQt6 import sip
+        import app.activity as act
+        import ui.widgets.recent_activity as recent
+        if sip.isdeleted(act.activity):
+            act.activity = act.ActivityLog()
+            recent.activity = act.activity
+        from ui.pages.dashboard_page import DashboardPage
+        import core.netwer_core as nc
+        page = DashboardPage(nc)
+
+        class Stub:
+            def __init__(self):
+                self.devices = []
+            def snapshot(self):
+                return {"status": "complete", "segments": [{"id": "s"}],
+                        "devices": [dict(d) for d in self.devices],
+                        "summary": {}, "active": False}
+        page._discovery_service = Stub()
+        return page
+
+    @staticmethod
+    def _rows(page):
+        from PyQt6.QtWidgets import QLabel
+        lay = page._devices_container
+        count = 0
+        for i in range(lay.count()):
+            w = lay.itemAt(i).widget()
+            if w is not None and w is not page._devices_placeholder:
+                count += 1
+        return count
+
+    def test_resync_does_not_leave_duplicate_rows(self):
+        page = self._page()
+        devs = [
+            {"segment_id": "s", "ip": "192.168.88.1", "mac": "AA", "vendor": "MikroTik",
+             "reachability": "reachable", "hostname": "MikroTik", "is_gateway": True},
+            {"segment_id": "s", "ip": "192.168.88.254", "mac": "BB",
+             "vendor": "LG Electronics", "reachability": "reachable",
+             "hostname": "lgwebostv"},
+            {"segment_id": "s", "ip": "192.168.88.253", "mac": "CC",
+             "vendor": "Unknown", "reachability": "reachable",
+             "hostname": "DESKTOP-ABC", "is_self": True},
+        ]
+        stub = page._discovery_service
+        # Several syncs while devices trickle in, like a real scan.
+        for n in (1, 2, 3, 3):
+            stub.devices = devs[:n]
+            page._sync_discovery_snapshot()
+        self.assertEqual(self._rows(page), 3)
+        stub.devices = devs[:2] + [dict(devs[2], hostname="renamed")]
+        page._sync_discovery_snapshot()
+        self.assertEqual(self._rows(page), 3)
+
+    def test_list_is_router_first_then_by_ip(self):
+        page = self._page()
+        devs = [{"ip": "192.168.88.254"}, {"ip": "192.168.88.9"},
+                {"ip": "192.168.88.1", "is_gateway": True}]
+        ordered = sorted(devs, key=page._device_sort_key)
+        self.assertEqual([d["ip"] for d in ordered],
+                         ["192.168.88.1", "192.168.88.9", "192.168.88.254"])
+
+    def test_startup_scan_is_silent_and_manual_rescan_is_not(self):
+        page = self._page()
+        started = []
+        page._rescan_network = lambda: started.append(page._silent_scan)
+        page._start_startup_scan()
+        page._on_rescan_clicked()
+        self.assertEqual(started, [True, False])
+
+
+class TestIPv6Health(unittest.TestCase):
+    def _m(self, **kw):
+        m = dict(has_ip=True, ip="192.168.88.253", gateway="192.168.88.1",
+                 has_gateway=True, self_assigned=False, wifi=False,
+                 router_reachable=True,
+                 router={"avg": 2, "loss": 0, "jitter": 1},
+                 internet_reachable=True,
+                 internet={"avg": 18, "loss": 0, "jitter": 3},
+                 dns_working=True, dns_ms=25, dns_failures=0,
+                 dns_ipv4_failures=0, dns_ipv6_failures=0,
+                 best_public_dns=None)
+        m.update(kw)
+        return m
+
+    def test_scope_classification(self):
+        from core import diagnostics as d
+        self.assertEqual(d._ipv6_scope("2a01:598:abcd::1"), "global")
+        self.assertEqual(d._ipv6_scope("fd00:1234::5"), "ula")
+        self.assertEqual(d._ipv6_scope("fe80::1%12"), "link-local")
+        self.assertEqual(d._ipv6_scope(""), "none")
+        self.assertEqual(d._ipv6_scope("::1"), "none")
+
+    def test_real_ipv6_failure_mentions_the_address(self):
+        from core import diagnostics as d
+        r = d.analyse(self._m(dns_ipv6_failures=3, ipv6="2a01:598::7",
+                              ipv6_scope="global", ipv6_internet=True))
+        f = [x for x in r["findings"] if "IPv6 DNS" in x["title"]]
+        self.assertEqual(len(f), 1)
+        self.assertIn("2a01:598::7", f[0]["detail"])
+
+    def test_missing_aaaa_without_usable_ipv6_is_not_a_problem(self):
+        from core import diagnostics as d
+        for scope in ("link-local", "ula", "none"):
+            r = d.analyse(self._m(dns_ipv6_failures=3, ipv6="",
+                                  ipv6_scope=scope))
+            self.assertEqual(r["severity"], d.GOOD, scope)
+
+    def test_ipv6_address_that_cannot_reach_internet_is_info_only(self):
+        from core import diagnostics as d
+        r = d.analyse(self._m(ipv6="2a01:598::7", ipv6_scope="global",
+                              ipv6_internet=False))
+        self.assertEqual(r["severity"], d.INFO)
+
+    def test_old_measurements_without_ipv6_info_still_warn(self):
+        from core import diagnostics as d
+        r = d.analyse(self._m(dns_ipv6_failures=3))
+        self.assertTrue(any("IPv6 DNS" in x["title"] for x in r["findings"]))
+
+    def test_aaaa_falls_back_to_the_adapters_own_resolver(self):
+        from core import diagnostics as d
+        calls = []
+        orig = d._time_dns
+
+        def fake(domain, server=None, timeout=1.0, record_type=1,
+                 allow_empty=False):
+            calls.append((server, allow_empty))
+            return None if server is None else 4.2
+        d._time_dns = fake
+        try:
+            self.assertEqual(d._time_aaaa("github.com", ["192.168.88.1"]), 4.2)
+        finally:
+            d._time_dns = orig
+        self.assertEqual(calls, [(None, False), ("192.168.88.1", True)])
+
+    def test_empty_aaaa_answer_counts_as_resolver_working(self):
+        import socket, struct, threading
+        from core import diagnostics as d
+        srv = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        srv.bind(("127.0.0.1", 0))
+        port = srv.getsockname()[1]
+
+        def serve():
+            data, addr = srv.recvfrom(512)
+            # echo id + question, flags: response, NOERROR, zero answers
+            srv.sendto(data[:2] + struct.pack(">HHHHH", 0x8180, 1, 0, 0, 0)
+                       + data[12:], addr)
+        threading.Thread(target=serve, daemon=True).start()
+        try:
+            self.assertTrue(d._query_dns("github.com", "127.0.0.1", 1.0, 28,
+                                         allow_empty=True, port=port))
+        finally:
+            srv.close()
+        # and the strict mode still treats it as a failure
+        srv2 = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        srv2.bind(("127.0.0.1", 0))
+        port2 = srv2.getsockname()[1]
+
+        def serve2():
+            data, addr = srv2.recvfrom(512)
+            srv2.sendto(data[:2] + struct.pack(">HHHHH", 0x8180, 1, 0, 0, 0)
+                        + data[12:], addr)
+        threading.Thread(target=serve2, daemon=True).start()
+        try:
+            with self.assertRaises(ValueError):
+                d._query_dns("github.com", "127.0.0.1", 1.0, 28, port=port2)
+        finally:
+            srv2.close()
+
+    def test_preferred_ipv6_prefers_global_over_link_local(self):
+        from core import windows_network as wn
+        addrs = [{"address": "fe80::1%12", "prefix": 64},
+                 {"address": "fd00::5", "prefix": 64},
+                 {"address": "2a01:598::7", "prefix": 64},
+                 {"address": "192.168.88.253", "prefix": 24}]
+        self.assertEqual(wn._preferred_ipv6(addrs)["address"], "2a01:598::7")
+        self.assertEqual(wn._preferred_ipv6(addrs[:2])["address"], "fd00::5")
+        self.assertEqual(wn._preferred_ipv6(addrs[:1])["address"], "fe80::1%12")
+        self.assertIsNone(wn._preferred_ipv6(addrs[3:]))

@@ -1,28 +1,12 @@
-"""
-NETWER icons (central registry).
-
-All of the app's icons are defined here, the same way colors live in
-theme.py. We use qtawesome (Font Awesome 6), real vector icons that take
-their color from the theme and scale without going fuzzy.
-
-Usage:
-    from app.resources import Icons
-    label.setPixmap(Icons.pixmap("dashboard", 16, Theme.ACCENT))
-    button.setIcon(Icons.get("wifi", Theme.TEXT_SECONDARY))
-
-The icon names are ours (e.g. "dashboard") and map to Font Awesome names
-in _MAP. That way, changing how an icon looks is a one-line edit in one
-place.
-"""
+"""Central registry for theme-aware application icons."""
 
 import os
 
 import qtawesome as qta
-from PyQt6.QtGui import QIcon, QPixmap
 from PyQt6.QtCore import Qt
+from PyQt6.QtGui import QIcon, QPixmap
 
 from app.theme import Theme
-
 
 # Project root (two levels above app/resources.py)
 _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -44,9 +28,7 @@ def logo_pixmap(size: int = 44) -> QPixmap:
 
 
 class Icons:
-    # Our name -> Font Awesome 6 solid name
     _MAP = {
-        # Navigation
         "dashboard": "fa6s.house",
         "network": "fa6s.network-wired",
         "wifi": "fa6s.wifi",
@@ -67,7 +49,6 @@ class Icons:
         "sun": "fa6s.sun",
         "bell": "fa6s.bell",
         "about": "fa6s.circle-info",
-        # Dashboard cards
         "internet": "fa6s.globe",
         "download": "fa6s.download",
         "upload": "fa6s.upload",
@@ -76,7 +57,6 @@ class Icons:
         "summary": "fa6s.list",
         "devices": "fa6s.laptop",
         "resources": "fa6s.server",
-        # Statuses / misc
         "check": "fa6s.circle-check",
         "checkmark": "fa6s.check",
         "warning": "fa6s.triangle-exclamation",
@@ -101,12 +81,12 @@ class Icons:
         "route": "fa6s.route",
         "list": "fa6s.list-ul",
         "terminal": "fa6s.terminal",
-        # Device types (for Network Map)
         "dev_pc": "fa6s.desktop",
         "dev_laptop": "fa6s.laptop",
         "dev_phone": "fa6s.mobile-screen",
-        "dev_tv": "mdi.television",
+        "dev_tv": "fa6s.tv",
         "dev_nas": "fa6s.hard-drive",
+        "dev_server": "fa6s.server",
         "dev_printer": "fa6s.print",
         "dev_router": "mdi.router-wireless",
         "dev_console": "fa6s.gamepad",
@@ -116,7 +96,6 @@ class Icons:
         "dev_watch": "mdi.watch",
         "dev_tablet": "fa6s.tablet-screen-button",
         "dev_generic": "fa6s.microchip",
-        # Aliases used by detect_device_type() keys.
         "dev_computer": "fa6s.desktop",
         "dev_media": "fa6s.photo-film",
     }

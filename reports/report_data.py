@@ -1,26 +1,35 @@
-"""
-NETWER report data collector.
-
-Gathers everything the PDF report needs by calling the backend, based on
-which sections were requested. Runs inside a worker (it makes network
-calls and a device scan, which take seconds), so it must NOT be called
-on the UI thread directly.
-
-Returns a dict shaped for reports.pdf_report.build_report().
-"""
 
 
-def collect(core, sections):
-    """Collect report data for the requested sections.
+def run_port_scan(core, target, profile="common", target_name=""):
+    """Scan one host and return the payload used by the PDF port-scan section."""
+    from app.store import store
 
-    core: the netwer_core backend module
-    sections: iterable of section keys ("network", "system", "devices",
-              "connectivity")
-    """
+    timeout = store.get_setting("portscan_timeout_ms", 600)
+    results, counts, error = [], {"open": 0, "closed": 0, "filtered": 0}, ""
+    for event in core.port_scan_stream(target, profile, timeout):
+        if event.get("error"):
+            error = event["error"]
+            break
+        if "state" in event:
+            counts[event["state"]] = counts.get(event["state"], 0) + 1
+            if event["state"] == "open":
+                results.append(event)
+    results.sort(key=lambda r: r["port"])
+    dtype = core.detect_device_type(open_ports=[r["port"] for r in results],
+                                    hostname=target_name or target)
+    payload = {"target": target, "target_name": target_name,
+               "device_type": dtype, "results": results,
+               "counts": counts, "error": error}
+    if not error:
+        store.set_last_scan("port_scanner", payload)
+    return payload
+
+
+def collect(core, sections, port_target="", port_profile="common",
+            port_target_name=""):
     sections = set(sections)
     data = {"summary": {}}
 
-    # Network configuration (also feeds the summary strip)
     if "network" in sections or "connectivity" in sections:
         eth = core.get_ethernet_info()
         if isinstance(eth, dict) and "error" not in eth:
@@ -36,7 +45,6 @@ def collect(core, sections):
                 "dhcp": "",
                 "link_speed": "",
             }
-            # Enrich with full adapter details (description, DHCP, link speed)
             adapter_name = eth.get("adapter", "")
             if adapter_name and hasattr(core, "get_adapter_details"):
                 details = core.get_adapter_details(adapter_name)
@@ -44,18 +52,16 @@ def collect(core, sections):
                     net["description"] = details.get("description", "")
                     net["dhcp"] = details.get("dhcp", "")
                     net["link_speed"] = details.get("link_speed", "")
-                    # Prefer detailed subnet if base was empty
                     if not net["subnet_mask"]:
                         net["subnet_mask"] = details.get("subnet_mask", "")
             data["network"] = net
 
-    # System information
     if "system" in sections:
         sysinfo = core.get_system_info()
         if isinstance(sysinfo, dict) and "error" not in sysinfo:
-            uptime = (f"{sysinfo.get('days',0)}d "
-                      f"{sysinfo.get('hours',0)}h "
-                      f"{sysinfo.get('minutes',0)}m")
+            uptime = (f"{sysinfo.get('days', 0)}d "
+                      f"{sysinfo.get('hours', 0)}h "
+                      f"{sysinfo.get('minutes', 0)}m")
             data["system"] = {
                 "computer": sysinfo.get("computer", ""),
                 "os": sysinfo.get("os", ""),
@@ -64,30 +70,38 @@ def collect(core, sections):
                 "uptime": uptime,
             }
 
-    # Connectivity test (ping), also feeds summary
     ping_results = None
     if "connectivity" in sections:
         ping_results = core.ping_quick()
         if isinstance(ping_results, list):
             data["connectivity"] = ping_results
 
-    # Connected devices
     if "devices" in sections:
         devs = core.get_top_devices(10)
         if isinstance(devs, dict) and "devices" in devs:
             data["devices"] = devs["devices"]
 
     if "port_scan" in sections:
-        # Pull the most recent port scan from the persistent store.
-        try:
-            from app.store import store
-            last = store.get_last_scan("port_scanner")
-            if last and last.get("payload"):
-                data["port_scan"] = last["payload"]
-        except Exception:
-            pass
+        if port_target:
+            # Scan the device picked in the report options.
+            try:
+                data["port_scan"] = run_port_scan(
+                    core, port_target, port_profile, port_target_name)
+            except Exception as exc:
+                data["port_scan"] = {"target": port_target,
+                                     "target_name": port_target_name,
+                                     "results": [], "counts": {},
+                                     "error": str(exc)}
+        else:
+            # No device chosen: fall back to the last scan from the Port Scanner.
+            try:
+                from app.store import store
+                last = store.get_last_scan("port_scanner")
+                if last and last.get("payload"):
+                    data["port_scan"] = last["payload"]
+            except Exception:
+                pass
 
-    # Build the summary strip from whatever we have
     _build_summary(core, data, ping_results)
     return data
 
@@ -95,7 +109,6 @@ def collect(core, sections):
 def _build_summary(core, data, ping_results):
     summary = data["summary"]
 
-    # If we didn't already ping for connectivity, do a quick one for summary
     if ping_results is None:
         ping_results = core.ping_quick()
 

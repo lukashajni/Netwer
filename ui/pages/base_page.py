@@ -1,27 +1,6 @@
-"""
-NETWER — BasePage.
+"""Shared base class for pages, including headers and worker lifecycle."""
 
-Common basis of all 17 pages. Each page (Dashboard, Ping,
-Port Scanner...) inherits this and the time automatically gets:
-
-  1. Unique life cycle: on_enter() / on_leave()
-     - on_enter() is called when the user opens the page - you start it there
-       loading data, timers, live workers.
-     - on_leave() is called when the user leaves the page - there automatically
-       all workers and timers stop. This separate thread leakage and
-       unnecessary consumption of resources (e.g. for the monitor to continue rotating in
-       background when you are not looking at it).
-
-  2. Management of workers: register_worker()
-     - When the site starts a worker, it registers it here. on_leave() him
-       then it can stop without manually remembering each page.
-
-  3. Title + subtitle in a unique style (header).
-
-"""
-
-from PyQt6.QtCore import Qt
-from PyQt6.QtWidgets import QWidget, QVBoxLayout, QLabel
+from PyQt6.QtWidgets import QLabel, QVBoxLayout, QWidget
 
 from app.theme import Theme
 
@@ -32,23 +11,16 @@ class BasePage(QWidget):
     PAGE_SUBTITLE = ""
 
     def __init__(self, core, parent=None, embedded=False):
-        """
-        core — module netwer_core (backend). The page never calls the backend
-               directly in the main thread, it only uses it to hand over to the worker
-               a function reference.
-        embedded — when True, the page does not draw its own title/subtitle
-               (used when nested in a container like DNS Tools
-               which has its own common header + tabs).
-        """
+        """Initialize a page, optionally without its own header."""
         super().__init__(parent)
         self.core = core
         self._embedded = embedded
         self._workers = []  # Active workers for this page 
-        self._window = None  # reference to MainWindow (for loading cordination)
+        self._window = None  # MainWindow reference for loading coordination.
 
         self.setStyleSheet("background: transparent;")
 
-        # Outer layout — sublcasses add content to self.body_layout
+        # Subclasses add page content to this layout.
         self._root = QVBoxLayout(self)
         margins = (0, 0, 0, 0) if embedded else (24, 20, 24, 20)
         self._root.setContentsMargins(*margins)
@@ -81,15 +53,13 @@ class BasePage(QWidget):
             )
             self._root.addWidget(sub)
 
-    # -- Upravljanje workerima --
+    # -- Worker management --
     def set_window(self, window) -> None:
-        """The MainWindow initializes itself here so that the page can report
-        loading progress (for the fullscreen loading screen)."""
+        """Set the window used to report loading progress."""
         self._window = window
 
     def register_worker(self, worker) -> None:
-        """Register the worker so that on_leave() can automatically stop it.
-        It also removes it from the list when it finishes normally."""
+        """Track a worker until it finishes or the page is left."""
         self._workers.append(worker)
         worker.done.connect(lambda: self._unregister_worker(worker))
 
@@ -98,15 +68,10 @@ class BasePage(QWidget):
             self._workers.remove(worker)
 
     def stop_workers(self) -> None:
-        """Stop and neatly shut down all active workers for this site."""
+        """Stop and shut down this page's active workers."""
         for worker in list(self._workers):
-            # Disconnect result/error FIRST so a payload queued just before
-            # stop() can't fire back into a widget we're about to delete
-            # (that race segfaults on theme rebuild). `done` is left
-            # connected on purpose: pages rely on it to clear their own
-            # worker reference and re-enable their button, so cancelling
-            # mid-run (e.g. navigating away and back) doesn't leave the
-            # page permanently stuck thinking a worker is still running.
+            # Prevent queued payloads from reaching widgets during teardown.
+            # Keep `done` connected so pages can reset their worker state.
             for sig in ("result", "error"):
                 s = getattr(worker, sig, None)
                 if s is not None:
@@ -121,21 +86,13 @@ class BasePage(QWidget):
 
     # -- Lifecycle (Subclasses override as needed.) --
     def preload(self) -> None:
-        """Trigger a one-time data load in the background upon application startup, 
-           before the user navigates to the page. This ensures the data is already 
-           ready when the page is clicked, avoiding a loading spinner upon the 
-           initial visit. Default: none (subclasses with a slow one-time load 
-           override this). The method must be safe to call while the page is not 
-           visible and must be idempotent (a second call must not duplicate the work).
-        """
+        """Start any one-time background loading required by the page."""
         pass
 
     def on_enter(self) -> None:
-        """Called when the user opens the page. Subclasses initiate
-        data loading here."""
+        """Load or refresh page data when the page is opened."""
         pass
 
     def on_leave(self) -> None:
-        """Called when the user leaves the page. Always shuts down workers.
-        Subclasses that override this must call super().on_leave()."""
+        """Stop page workers when leaving; overrides should call this method."""
         self.stop_workers()

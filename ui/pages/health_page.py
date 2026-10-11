@@ -1,30 +1,25 @@
-"""
-NETWER — Network Health page.
-
-One button that answers the question people actually have: "why is my internet
-being weird?". It runs a short battery of checks (adapter, Wi-Fi, router,
-internet, DNS) and then states, in plain language, where the problem is and
-what to do about it - rather than leaving you to interpret raw numbers.
-
-The checks run in a StreamWorker so the window stays responsive, the reasoning
-lives in core/diagnostics.py.
-"""
+"""Run network checks and present their results as actionable findings."""
 
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QFrame,
-    QScrollArea, QProgressBar, QGridLayout,
+    QFrame,
+    QGridLayout,
+    QHBoxLayout,
+    QLabel,
+    QProgressBar,
+    QPushButton,
+    QScrollArea,
+    QVBoxLayout,
+    QWidget,
 )
 
-from app.theme import Theme
-from app.resources import Icons
 from app.activity import activity
+from app.resources import Icons
+from app.theme import Theme
+from core import diagnostics as diag
 from ui.pages.base_page import BasePage
 from ui.widgets.card import Card
 from workers import StreamWorker
-
-from core import diagnostics as diag
-
 
 _SEVERITY_STYLE = {
     diag.CRITICAL: (Theme.DANGER, "\u2715"),
@@ -272,7 +267,11 @@ class HealthPage(BasePage):
             ("Internet", fmt(internet.get("avg"), " ms")),
             ("Internet loss", fmt(internet.get("loss"), "%")),
             ("Jitter", fmt(internet.get("jitter"), " ms")),
-            ("DNS", fmt(m.get("dns_ms"), " ms")),
+            ("DNS A", fmt(m.get("dns_ipv4_ms"), " ms")),
+            ("DNS AAAA", fmt(m.get("dns_ipv6_ms"), " ms")),
+            ("IPv6", {"global": "Active", "ula": "Local only",
+                      "link-local": "Link-local only"}.get(
+                          m.get("ipv6_scope"), "None")),
         ]
         if m.get("wifi"):
             cells.append(("Wi-Fi signal", fmt(m.get("signal"), "%")))

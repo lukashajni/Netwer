@@ -1,22 +1,19 @@
-"""
-NETWER — Reverse DNS page.
-
-Find the hostname behind an IP address (PTR lookup). Enter an IP, hit
-Lookup, and see the resolved hostname plus any aliases the resolver returns.
-
-Runs in a OneshotWorker around netwer_core.reverse_dns, which returns
-{"ip": str, "hostname": str, "aliases": [...]} or {"error": ...}.
-"""
+"""Look up hostnames and aliases for IP addresses using reverse DNS."""
 
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
-    QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton, QFrame,
-    QApplication
+    QApplication,
+    QFrame,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QPushButton,
+    QVBoxLayout,
 )
 
-from app.theme import Theme
-from app.resources import Icons
 from app.activity import activity
+from app.resources import Icons
+from app.theme import Theme
 from ui.pages.base_page import BasePage
 from ui.widgets.card import Card
 from workers import OneshotWorker
@@ -76,7 +73,7 @@ class ReverseDnsPage(BasePage):
 
     def _stat(self, label, color):
         card = Card("", "")
-        card.setFixedHeight(72)
+        card.setMinimumHeight(88)
         lbl = QLabel(label)
         lbl.setStyleSheet(
             f"color: {Theme.TEXT_SECONDARY}; font-size: {Theme.FONT_SIZE_TINY}px;"

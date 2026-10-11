@@ -1,28 +1,34 @@
-# Python
+# Python artifacts
 __pycache__/
 *.py[cod]
 *.egg-info/
 .Python
 
-# Virtualna okruzenja
+# Virtual environments
 venv/
 env/
 .venv/
+
+# Build and distribution artifacts
+build/
+dist/
+
+# Ruff cache
+.ruff_cache/
 
 # IDE
 .vscode/
 .idea/
 *.swp
 
-# OS
+# Operating system files
 Thumbs.db
 .DS_Store
 
-# NETWER izlazi (generirani izvjestaji, ne pripadaju u repo)
-*.pdf
+# Generated application reports
 reports_output/
 *.log
 
-# NETWER runtime data (persistent store, generated icon cache)
+# Runtime data and generated icon cache
 netwer_data.json
 netwer_icons/

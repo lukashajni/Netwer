@@ -1,18 +1,3 @@
-"""
-NETWER extended OUI vendor table, plus an optional online fallback.
-
-The core module ships a tiny OUI table. This extends it with a large set
-of the most common IT / networking / consumer-electronics manufacturers so
-LAN devices resolve to a real vendor instead of "Unknown".
-
-For MACs still not found locally, online_vendor_lookup() can query a free
-API, opt-in, runs inside a worker (never blocks the UI).
-
-Note: OUI prefixes are the first 6 hex chars (24-bit block). Big vendors
-own many blocks; we include the common ones. Not exhaustive (IEEE lists
-30k+), but covers the vast majority of real-world home/office devices.
-"""
-
 EXTENDED_OUI = {
     # PC / motherboard / component makers
     "9C6B00": "ASRock", "70850C": "ASRock", "BC5FF4": "ASRock", "D05099": "ASRock",
@@ -28,7 +13,7 @@ EXTENDED_OUI = {
     "7C7A91": "Intel", "8C1645": "Intel", "5CE0C5": "Intel", "E4A471": "Intel",
     "34F39A": "Intel", "001500": "Intel", "0015FF": "Intel", "606720": "Intel",
     "A4C494": "Intel", "F8633F": "Intel", "50EB71": "Intel",
-    "52540D": "Realtek", "00E04C": "Realtek", "525400": "Realtek", "001367": "Realtek",
+    "52540D": "Realtek", "00E04C": "Realtek", "001367": "Realtek",
     "001018": "Broadcom", "000AF7": "Broadcom", "001BE9": "Broadcom",
     "8CFDF0": "Qualcomm", "9CB6D0": "Qualcomm", "00A0C6": "Qualcomm",
     # Apple
@@ -56,7 +41,7 @@ EXTENDED_OUI = {
     "40B0FA": "LG", "001E75": "LG", "C4438F": "LG", "001256": "LG", "0021FB": "LG",
     "10683F": "LG", "344DF7": "LG", "A039F7": "LG",
     "F017A8": "Google", "001A11": "Google", "3C5AB4": "Google", "F4F5D8": "Google",
-    "A47733": "Google", "6466B3": "Google", "1CF29A": "Google", "94EB2C": "Google",
+    "A47733": "Google", "1CF29A": "Google", "94EB2C": "Google",
     "50EC50": "Sony", "FCF152": "Sony", "3C0771": "Sony", "0013A9": "Sony",
     "001A80": "Sony", "0024BE": "Sony", "104FA8": "Sony", "30F9ED": "Sony",
     # Routers / networking gear
@@ -145,8 +130,6 @@ EXTENDED_OUI = {
 
 
 def _clean_oui_table(raw):
-    """Normalize prefixes: strip spaces, uppercase, keep only valid 6-hex
-    entries. Guards against typos in the table above."""
     import re
     clean = {}
     for prefix, vendor in raw.items():
@@ -162,11 +145,7 @@ EXTENDED_OUI = _clean_oui_table(EXTENDED_OUI)
 
 
 
-# Curated bulk additions (v41)
-# A hand-picked set of widely-used OUI prefixes for the manufacturers
-# people actually see on a home network. This is a practical subset,
-# not the full IEEE registry, anything missing still resolves via the
-# online lookup and is then remembered by core/vendor_learning.py.
+# Curated additions for commonly encountered manufacturers.
 BULK_OUI = {
     "00000F": "Xerox",
     "0000AA": "Xerox",
@@ -671,11 +650,12 @@ EXTENDED_OUI.update(BULK_OUI)
 EXTENDED_OUI = _clean_oui_table(EXTENDED_OUI)
 
 
-def online_vendor_lookup(mac_address, timeout=3):
-    """Query a free API for a vendor name. Returns name or None.
-    ONLY call from a worker thread, since it makes a network request."""
-    import urllib.request
+def online_vendor_lookup(mac_address, timeout=3, allow_network=None):
+    from core.privacy import is_offline_mode
+    if is_offline_mode() or allow_network is False:
+        return None
     import re
+    import urllib.request
     cleaned = re.sub(r"[^0-9A-Fa-f]", "", mac_address or "")
     if len(cleaned) < 6:
         return None

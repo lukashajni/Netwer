@@ -1,14 +1,3 @@
-"""
-NETWER notification center.
-
-A tiny in-memory pub/sub for app notifications (host down, scan complete,
-new device, etc.). Widgets push notifications; the TopBar bell and the
-Notifications panel subscribe to render them and the unread count.
-
-Separate from the activity feed (which is a dashboard widget): this is the
-global, cross-page notification stream shown in the slide-in panel.
-"""
-
 from datetime import datetime
 
 
@@ -30,7 +19,6 @@ class NotificationCenter:
         self._max = 50
 
     def subscribe(self, callback):
-        """callback() is called whenever notifications change."""
         self._listeners.append(callback)
 
     def _emit(self):
@@ -45,19 +33,15 @@ class NotificationCenter:
         del self._items[self._max:]
         self._emit()
 
-    # Settings-aware helpers.
-    # These respect the on/off toggles in Settings, so a disabled category
-    # produces no notification. Pages should call these instead of push()
-    # for the three toggleable categories.
     def notify_host_down(self, host, up):
         from app.store import store
         if not store.get_setting("notify_host_down", True):
             return
         if up:
-            self.push(f"Host recovered", f"{host} is reachable again",
+            self.push("Host recovered", f"{host} is reachable again",
                       kind="success")
         else:
-            self.push(f"Host unreachable", f"{host} stopped responding",
+            self.push("Host unreachable", f"{host} stopped responding",
                       kind="error")
 
     def notify_scan_done(self, title, detail=""):
@@ -88,5 +72,4 @@ class NotificationCenter:
         self._emit()
 
 
-# Module-level singleton.
 notifications = NotificationCenter()

@@ -1,36 +1,29 @@
-"""
-NETWER — Ping Sweep page.
-
-Discover every device on the local network - enter a subnet (defaults to the
-auto-detected local /24), pick a per-host timeout, and hit "Scan". Hosts appear
-live in the table as they answer, a progress bar tracks how far the sweep has
-gotten and how many devices were found, and the result can be exported to a
-plain-text (.txt) report that opens cleanly in Notepad.
-
-The sweep runs in a StreamWorker around netwer_core.ping_sweep_stream, which
-pings the whole range in parallel (like Advanced/Angry IP Scanner) and yields
-one dict per host plus periodic progress updates. Leaving the page cancels the
-worker via the BasePage lifecycle.
-"""
+"""Discover devices on the local network with a streamed ping sweep."""
 
 import os
 from datetime import datetime
 
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton,
-    QComboBox, QFrame, QScrollArea
+    QComboBox,
+    QFrame,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QPushButton,
+    QScrollArea,
+    QVBoxLayout,
+    QWidget,
 )
 
-from app.theme import Theme
-from app.resources import Icons
 from app.activity import activity
 from app.notifications import notifications
+from app.resources import Icons
+from app.theme import Theme
 from ui.pages.base_page import BasePage
 from ui.widgets.card import Card
 from ui.widgets.progress_bar import ProgressBar
 from workers import StreamWorker
-
 
 TIMEOUT_OPTIONS = [
     ("Timeout: 100 ms", 100),
@@ -41,8 +34,7 @@ TIMEOUT_OPTIONS = [
 
 
 def _device_display_name(dev: dict) -> str:
-    """Delegates to the canonical implementation (ui.widgets.network_map) so a
-    custom name the user set shows up here too."""
+    """Return the shared display name for a discovered device."""
     from ui.widgets.network_map import device_display_name as _n
     return _n(dev)
 
@@ -64,7 +56,11 @@ class PingSweepPage(BasePage):
 
         self._worker = None
         self._running = False
+        self._failed = False
+        self._cancel_requested = False
         self._devices = []          # collected host dicts (for export)
+        self._device_index = {}     # (segment_id, ip) -> index into self._devices
+        self._row_widgets = {}      # (segment_id, ip) -> row QFrame
         self._total = 254
 
         self._build_toolbar()
@@ -164,8 +160,6 @@ class PingSweepPage(BasePage):
         top.addWidget(self.count_label)
         lay.addLayout(top)
 
-        """ Progress bar (custom widget, resize-safe). Turns green once
-        the first device is found so success is visible at a glance. """
         self.progress_bar = ProgressBar(height=8)
         lay.addWidget(self.progress_bar)
 
@@ -329,6 +323,8 @@ class PingSweepPage(BasePage):
 
         # Wake-on-LAN action (only shown when we know the MAC).
         mac_addr = (dev.get("mac") or "").strip()
+        mac_hex = "".join(ch for ch in mac_addr if ch in "0123456789abcdefABCDEF")
+        has_valid_mac = len(mac_hex) == 12
         wake_btn = QPushButton()
         wake_btn.setIcon(Icons.get("power", Theme.TEXT_SECONDARY))
         wake_btn.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -338,17 +334,25 @@ class PingSweepPage(BasePage):
             f"QPushButton:hover {{ background: {Theme.BG_ELEVATED};"
             f"border-radius: 5px; }}"
             f"QPushButton:disabled {{ }}")
-        if mac_addr:
+        if has_valid_mac:
             wake_btn.setToolTip(f"Wake this device (send magic packet to {mac_addr})")
             wake_btn.clicked.connect(
                 lambda _=False, mac=mac_addr, name=name: self._wake(mac, name))
         else:
-            wake_btn.setToolTip("Wake-on-LAN unavailable (MAC unknown)")
+            wake_btn.setToolTip("Wake-on-LAN unavailable (no valid MAC address)")
             wake_btn.setEnabled(False)
         rl.addWidget(wake_btn)
 
-        # Insert before the trailing stretch
-        self._rows_layout.insertWidget(self._rows_layout.count() - 1, row)
+        key = (dev.get("segment_id", ""), dev.get("ip", ""))
+        old = self._row_widgets.get(key)
+        if old is not None:
+            pos = self._rows_layout.indexOf(old)
+            self._rows_layout.removeWidget(old)
+            old.deleteLater()
+        else:
+            pos = self._rows_layout.count() - 1      # before the trailing stretch
+        self._rows_layout.insertWidget(pos, row)
+        self._row_widgets[key] = row
 
     def _clear_rows(self):
         while self._rows_layout.count():
@@ -358,6 +362,7 @@ class PingSweepPage(BasePage):
                 w.deleteLater()
         self._rows_layout.addStretch(1)
         self._empty_label = None
+        self._row_widgets = {}
 
     def _scan_ports(self, ip):
         # Jump to the Port Scanner pre-targeted at this device's IP.
@@ -399,19 +404,26 @@ class PingSweepPage(BasePage):
 
     # -- Lifecycle --
     def on_leave(self):
+        if self._running:
+            self._cancel_requested = True
         self._stop()
         super().on_leave()
 
     # -- Run / stop --
     def _toggle(self):
         if self._running:
+            self._cancel_requested = True
+            self.progress_label.setText("Cancelling scan…")
             self._stop()
         else:
             self._start()
 
     def _start(self):
         self._running = True
+        self._failed = False
+        self._cancel_requested = False
         self._devices = []
+        self._device_index = {}
         self.btn_scan.setText("  Stop")
         self.btn_scan.setIcon(Icons.get("stop", "#ffffff"))
         self._style_scan_button(running=True)
@@ -448,10 +460,16 @@ class PingSweepPage(BasePage):
         self.btn_export.setEnabled(len(self._devices) > 0)
 
     def _on_error(self, msg: str):
+        self._failed = True
         self.progress_label.setText(self.core.friendly_error(msg))
 
     def _on_finished(self):
-        if self._running:
+        if self._cancel_requested:
+            self.progress_label.setText(
+                f"Scan cancelled — {len(self._devices)} partial result(s) retained.")
+            self.count_label.setText(f"{len(self._devices)} found · partial")
+            self._cancel_requested = False
+        elif self._running and not self._failed:
             found = len(self._devices)
             self._set_progress(100)
             self.progress_label.setText("Scan complete")
@@ -469,8 +487,7 @@ class PingSweepPage(BasePage):
         self._stop()
 
     def _check_new_devices(self):
-        """Compare this sweep's devices against the set we've seen before
-        (persisted). Notify for any genuinely new device on the network."""
+        """Notify when the sweep discovers a previously unseen device."""
         from app.store import store
         known = set(store.get_setting("known_device_macs", []) or [])
         new_devices = []
@@ -495,28 +512,46 @@ class PingSweepPage(BasePage):
 
     # -- Stream events --
     def _on_event(self, d: dict):
-        # Network announced at the start of the sweep
-        if "network" in d and not d.get("online"):
-            net = d["network"]
-            self.progress_label.setText(f"Scanning {net}.1 – 254")
+        if d.get("event") == "started":
+            self._total = max(1, int(d.get("total", 1)))
+            self.progress_label.setText(
+                f"Preparing {len(d.get('segments', []))} configured subnet(s)…")
+            self.count_label.setText(f"0 / {self._total:,} · 0 found")
+            return
+        if d.get("event") == "segment":
+            segment = d.get("segment", {})
+            self.progress_label.setText(
+                f"Scanning {segment.get('label', 'subnet')} · {segment.get('cidr', '')}")
             return
 
         # Progress ticks
-        if "scanned" in d and not d.get("online") and not d.get("done"):
-            self._set_progress(min(100, round(d["scanned"] / self._total * 100)))
+        if d.get("event") == "progress" or (
+                "scanned" in d and not d.get("online") and not d.get("done")):
+            total = max(1, int(d.get("total", self._total)))
+            self._total = total
+            scanned = int(d.get("scanned", 0))
+            self._set_progress(min(100, round(scanned / total * 100)))
             found = len(self._devices)
             found_html = (f"<span style='color:{Theme.SUCCESS};'>{found} found</span>"
                           if found else f"{found} found")
-            self.count_label.setText(
-                f"{d['scanned']} / {self._total}  \u00b7  {found_html}")
+            subnet = d.get("current_subnet") or d.get("segment", {}).get("cidr", "")
+            self.count_label.setText(f"{subnet} · {scanned:,} / {total:,}  ·  {found_html}")
             return
 
         # A discovered host
         if d.get("online"):
-            self._devices.append(d)
-            self._add_device_row(d)
-            # First device found - turn the progress bar green so success
-            # is obvious even before the scan finishes.
+            key = (d.get("segment_id", ""), d.get("ip", ""))
+            idx = self._device_index.get(key)
+            if idx is None:
+                self._device_index[key] = len(self._devices)
+                self._devices.append(d)
+                row_data = d
+            else:
+                # Late events must not wipe known data with empty values
+                row_data = {**self._devices[idx],
+                            **{k: v for k, v in d.items() if v not in (None, "")}}
+                self._devices[idx] = row_data
+            self._add_device_row(row_data)
             self.progress_bar.set_color(Theme.SUCCESS)
             self.count_label.setText(
                 f"<span style='color:{Theme.SUCCESS};'>"

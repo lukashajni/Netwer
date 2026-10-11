@@ -1,34 +1,38 @@
-"""
-NETWER — Report page.
-
-Generate a branded PDF network report. The user picks which sections to
-include (checkboxes), clicks Generate to build a preview shown inside the
-app, then Save PDF to write it wherever they choose.
-
-Data collection + PDF building run in a worker (they hit the network and
-scan devices), so the UI never freezes.
-"""
+"""Generate, preview, and save a PDF network report."""
 
 import os
 import tempfile
 from datetime import datetime
 
 from PyQt6.QtCore import Qt
-from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QCheckBox, QPushButton,
-    QScrollArea, QFrame
-)
 from PyQt6.QtGui import QPixmap
 from PyQt6.QtPdf import QPdfDocument
+from PyQt6.QtWidgets import (
+    QCheckBox,
+    QComboBox,
+    QFrame,
+    QHBoxLayout,
+    QLabel,
+    QPushButton,
+    QScrollArea,
+    QVBoxLayout,
+    QWidget,
+)
 
-from app.theme import Theme
 from app.resources import Icons
+from app.theme import Theme
+from reports import report_data
+from reports.pdf_report import (
+    ALL_SECTIONS,
+    SECTION_LABELS,
+    _device_display_name,
+    build_report,
+)
 from ui.pages.base_page import BasePage
+from ui.pages.port_scanner_page import PROFILE_OPTIONS
 from ui.widgets.card import Card
 from ui.widgets.spinner import Spinner
 from workers import OneshotWorker
-from reports import report_data
-from reports.pdf_report import build_report, SECTION_LABELS, ALL_SECTIONS
 
 
 class ReportPage(BasePage):
@@ -40,6 +44,7 @@ class ReportPage(BasePage):
 
         self._temp_pdf = None
         self._pdf_doc = QPdfDocument(self)
+        self._devices_loading = False
 
         row = QHBoxLayout()
         row.setSpacing(Theme.GAP)
@@ -69,6 +74,7 @@ class ReportPage(BasePage):
                                           section_icons.get(key, "report"))
             options_card.content_layout.addWidget(option)
 
+        self._build_port_scan_options(options_card)
         options_card.content_layout.addSpacing(10)
 
         self.btn_generate = QPushButton("  Generate Preview")
@@ -124,11 +130,103 @@ class ReportPage(BasePage):
         row.addWidget(preview_card, 1)
         self.body_layout.addLayout(row)
 
+    # -- Port scan target --
+    def _build_port_scan_options(self, card):
+        """Device + profile pickers shown while the Port Scan section is on."""
+        self._ps_box = QFrame()
+        self._ps_box.setObjectName("PsOpts")
+        self._ps_box.setStyleSheet(
+            "#PsOpts { background: transparent; border: none; }"
+            "#PsOpts QLabel { background: transparent; border: none; }")
+        lay = QVBoxLayout(self._ps_box)
+        lay.setContentsMargins(2, 6, 2, 0)
+        lay.setSpacing(6)
+
+        caption = QLabel("Port scan target")
+        caption.setStyleSheet(
+            f"color: {Theme.TEXT_SECONDARY}; font-size: {Theme.FONT_SIZE_TINY}px;")
+        lay.addWidget(caption)
+
+        self.ps_target = QComboBox()
+        self.ps_target.setEditable(True)
+        self.ps_target.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
+        self.ps_target.lineEdit().setPlaceholderText(
+            "Pick a device or type an IP / host")
+        self.ps_target.setStyleSheet(self._combo_style())
+        lay.addWidget(self.ps_target)
+
+        self.ps_profile = QComboBox()
+        for label, spec in PROFILE_OPTIONS:
+            if spec != "__custom__":
+                self.ps_profile.addItem(label, spec)
+        self.ps_profile.setStyleSheet(self._combo_style())
+        lay.addWidget(self.ps_profile)
+
+        card.content_layout.addWidget(self._ps_box)
+        port_check = self._checks["port_scan"]
+        port_check.toggled.connect(self._ps_box.setVisible)
+        self._ps_box.setVisible(port_check.isChecked())
+
+    def _combo_style(self):
+        return (
+            f"QComboBox {{ background: {Theme.GLASS_INPUT}; color: {Theme.TEXT_BODY};"
+            f"border: 1px solid {Theme.BORDER}; border-radius: 8px;"
+            f"padding: 7px 10px; font-size: {Theme.FONT_SIZE_SMALL}px; }}"
+            f"QComboBox:focus {{ border-color: {Theme.GLASS_BORDER_HI}; }}"
+            f"QComboBox::drop-down {{ border: none; width: 22px; }}"
+            f"QComboBox QAbstractItemView {{ background: {Theme.BG_ELEVATED};"
+            f"color: {Theme.TEXT_BODY}; selection-background-color: {Theme.ACCENT};"
+            f"border: 1px solid {Theme.BORDER_STRONG}; outline: none; }}")
+
+    def on_enter(self):
+        super().on_enter()
+        self._load_devices()
+
+    def _load_devices(self):
+        if self._devices_loading:
+            return
+        self._devices_loading = True
+        w = OneshotWorker(self.core.get_top_devices, 512)
+        w.result.connect(self._on_devices)
+        w.done.connect(lambda: setattr(self, "_devices_loading", False))
+        self.register_worker(w)
+        w.start()
+
+    def _on_devices(self, result: dict):
+        devices = result.get("devices") or []
+        if not devices:
+            return
+        previous_ip, _name = self._selected_target()
+        typed = self.ps_target.currentText().strip()
+        self.ps_target.clear()
+        for d in devices:
+            ip = d.get("ip", "")
+            name = _device_display_name(d)
+            label = f"{name}  \u2014  {ip}" if name and name != ip else ip
+            self.ps_target.addItem(label, (ip, name if name != ip else ""))
+        # Keep what the user already picked or typed; otherwise start on the router.
+        keep = next((i for i in range(self.ps_target.count())
+                     if self.ps_target.itemData(i)[0] == previous_ip), -1)
+        if keep >= 0:
+            self.ps_target.setCurrentIndex(keep)
+        elif typed:
+            self.ps_target.setCurrentIndex(-1)
+            self.ps_target.setEditText(typed)
+        else:
+            self.ps_target.setCurrentIndex(0)
+
+    def _selected_target(self):
+        """Return (ip_or_host, display_name) for the chosen port scan target."""
+        text = self.ps_target.currentText().strip()
+        idx = self.ps_target.currentIndex()
+        if idx >= 0 and self.ps_target.itemText(idx) == text:
+            ip, name = self.ps_target.itemData(idx)
+            return ip, name
+        return text, ""
+
     # -- Styling --
     def _section_option(self, key, label, icon_name):
-        """A clickable row with an icon, label, and a checkbox — nicer than
-        a bare checkbox. Clicking anywhere toggles it."""
-        from ui.widgets.card import Card  # not needed, build a frame
+        """Create a row whose icon, label, or checkbox toggles the option."""
         frame = QFrame()
         frame.setObjectName("SectOpt")
         frame.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -201,21 +299,29 @@ class ReportPage(BasePage):
         if not sections:
             self._status.setText("Select at least one section.")
             return
+        target, target_name, profile = "", "", "common"
+        if "port_scan" in sections:
+            target, target_name = self._selected_target()
+            if not target:
+                self._status.setText(
+                    "Pick a device (or type an IP) for the port scan.")
+                return
+            profile = self.ps_profile.currentData() or "common"
         self.btn_generate.setEnabled(False)
         self.btn_save.setEnabled(False)
         self._status.setText("Collecting data… (scanning may take a few seconds)")
         self._show_loading("Collecting network data\u2026")
 
         # Collect data in a worker, then build the PDF
-        w = OneshotWorker(report_data.collect, self.core, sections)
+        w = OneshotWorker(report_data.collect, self.core, sections,
+                          target, profile, target_name)
         w.result.connect(lambda data: self._on_data(data, sections))
         w.error.connect(self._on_error)
         self.register_worker(w)
         w.start()
 
     def _on_data(self, data, sections):
-        # Build PDF to a temp file (still off the UI-blocking path, building
-        # is fast once data is gathered)
+        # Build the PDF in a temporary file.
         try:
             tmp = os.path.join(tempfile.gettempdir(),
                                f"netwer_preview_{datetime.now():%H%M%S}.pdf")
@@ -242,8 +348,7 @@ class ReportPage(BasePage):
                 w.deleteLater()
 
     def _show_loading(self, text):
-        """Replace the preview area with a centered spinner + message so it's
-        obvious the report is being built (not just a small status line)."""
+        """Show a centered progress indicator in the preview area."""
         self._clear_preview()
         self._preview_layout.addStretch()
         spin = Spinner(size=40)
@@ -268,7 +373,6 @@ class ReportPage(BasePage):
 
         self._pdf_doc.load(pdf_path)
         page_count = self._pdf_doc.pageCount()
-        from PyQt6.QtCore import QSizeF
         for i in range(page_count):
             size = self._pdf_doc.pagePointSize(i)
             # Render at ~1.4x for crisp preview
@@ -303,8 +407,9 @@ class ReportPage(BasePage):
             import shutil
             shutil.copyfile(self._temp_pdf, path)
             self._status.setText(f"Saved \u2713  {path}")
-            from app.activity import activity
             import os as _os
+
+            from app.activity import activity
             activity.add("Report saved", _os.path.basename(path), kind="success")
         except Exception as e:
             self._status.setText(f"Save failed: {e}")
