@@ -8,14 +8,14 @@ from PyQt6.QtGui import QIcon, QPixmap
 
 from app.theme import Theme
 
-# Project root (two levels above app/resources.py)
+# Project root
 _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 ASSETS_DIR = os.path.join(_PROJECT_ROOT, "assets")
 LOGO_PATH = os.path.join(ASSETS_DIR, "logo", "netwer_logo.png")
 
 
 def logo_pixmap(size: int = 44) -> QPixmap:
-    """NETWER logo, smoothly scaled to the given size."""
+    """NETWER logo"""
     pm = QPixmap(LOGO_PATH)
     if pm.isNull():
         # Fall back to the globe icon if the logo file isn't there
@@ -70,6 +70,10 @@ class Icons:
         "export": "fa6s.file-export",
         "refresh": "fa6s.rotate",
         "close": "fa6s.xmark",
+        "ai": "fa6s.wand-magic-sparkles",
+        "send": "fa6s.paper-plane",
+        "clear_chat": "fa6s.broom",
+        "arrow_right": "fa6s.arrow-right",
         "notif_success": "fa6s.circle-check",
         "notif_warning": "fa6s.triangle-exclamation",
         "notif_error": "fa6s.circle-exclamation",
@@ -116,9 +120,6 @@ class Icons:
 
     @classmethod
     def png_path(cls, name: str, size: int = 16, color: str = "#ffffff") -> str:
-        """Render an icon to a PNG on disk and return the path (with
-        forward slashes). Needed because a Qt stylesheet can't draw a
-        qtawesome icon directly, it wants image: url(path). Cached."""
         key = (name, size, color)
         if key in cls._png_cache and os.path.isfile(cls._png_cache[key]):
             return cls._png_cache[key]

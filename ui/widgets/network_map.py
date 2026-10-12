@@ -270,6 +270,11 @@ class NetworkMap(QWidget):
         router_top = top_of(self._router_node.icon_label)
         router_bottom = bottom_of(self._router_node.icon_label)
 
+        # Everything hangs off the router icon's axis. Odd widths make the
+        # other icons land 1 px to the side, which showed as a jog in the line.
+        cx = router_top.x()
+        internet_bottom.setX(cx)
+
         # Internet -> Router
         p.drawLine(internet_bottom, router_top)
 
@@ -279,11 +284,13 @@ class NetworkMap(QWidget):
             item = self._devices_layout.itemAt(i)
             w = item.widget()
             if isinstance(w, _DeviceNode):
-                device_tops.append(top_of(w.icon_label))
+                pt = top_of(w.icon_label)
+                if abs(pt.x() - cx) <= 3:      # rounding, not a real offset
+                    pt.setX(cx)
+                device_tops.append(pt)
 
         if device_tops:
             bus_y = (router_bottom.y() + device_tops[0].y()) / 2
-            cx = router_bottom.x()
             p.drawLine(QPointF(cx, router_bottom.y()), QPointF(cx, bus_y))
             xs = [pt.x() for pt in device_tops]
             if len(xs) > 1:
