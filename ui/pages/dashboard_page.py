@@ -16,6 +16,7 @@ from PyQt6.QtWidgets import (
 from app.formatting import format_speed
 from app.resources import Icons
 from app.theme import Theme
+from app.traffic_history import traffic_history
 from core.discovery import get_discovery_service
 from ui.pages.base_page import BasePage
 from ui.widgets.card import Card, kv_row
@@ -120,6 +121,19 @@ class DashboardPage(BasePage):
         )
         self.adapter_combo.addItem("Auto (recommended)", "")
         self.adapter_combo.currentIndexChanged.connect(self._on_adapter_changed)
+
+        # Opens the detailed analysis (bandwidth, latency, packet loss).
+        from PyQt6.QtWidgets import QPushButton
+        self.btn_analysis = QPushButton(" Detailed analysis")
+        self.btn_analysis.setIcon(Icons.get("monitor", Theme.TEXT_SECONDARY))
+        self.btn_analysis.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_analysis.setStyleSheet(
+            f"QPushButton {{ background: {Theme.BG_ELEVATED}; color: {Theme.TEXT_BODY};"
+            f"border: 1px solid {Theme.BORDER_STRONG}; border-radius: 6px;"
+            f"padding: 3px 10px; font-size: {Theme.FONT_SIZE_TINY}px; }}"
+            f"QPushButton:hover {{ border-color: {Theme.ACCENT}; color: {Theme.ACCENT}; }}")
+        self.btn_analysis.clicked.connect(self._open_traffic_analysis)
+        monitor_card.header_layout.addWidget(self.btn_analysis)
         monitor_card.header_layout.addWidget(self.adapter_combo)
 
         # Legend row (Download = blue, Upload = purple) + live peak/avg stats
@@ -139,6 +153,7 @@ class DashboardPage(BasePage):
         monitor_card.content_layout.addLayout(legend)
 
         self.chart = LiveChart(max_points=60)
+        self.chart.clicked.connect(self._open_traffic_analysis)
         monitor_card.content_layout.addWidget(self.chart, 1)
 
         # Small label showing which adapter is currently monitored
@@ -451,9 +466,11 @@ class DashboardPage(BasePage):
             self.card_loss.set_tile_tint("#351a24", "#ff6b8a")
             self.card_loss.set_value("100", "%", color=Theme.DANGER, subtitle="No response")
             self.card_loss.push_spark(100)
+            traffic_history.add_connectivity(None, 100.0)
             return
         avg_ping = round(sum(r["avg"] for r in reachable) / len(reachable))
         avg_loss = round(sum(r["loss"] for r in reachable) / len(reachable), 1)
+        traffic_history.add_connectivity(avg_ping, avg_loss)
         self.card_internet.set_value("Connected", color=Theme.SUCCESS,
                                      subtitle=f"Ping: {avg_ping} ms")
         if avg_loss < 1:
@@ -866,6 +883,12 @@ class DashboardPage(BasePage):
             self.adapter_combo.addItem(label, name)
         self.adapter_combo.blockSignals(False)
 
+    def _open_traffic_analysis(self):
+        # Open the detailed bandwidth / latency / packet-loss view.
+        from ui.components.traffic_analysis_dialog import TrafficAnalysisDialog
+        dlg = TrafficAnalysisDialog(self)
+        dlg.exec()
+
     def _on_adapter_changed(self, index):
         # User picked a different adapter - restart monitor on it.
         selected = self.adapter_combo.currentData()
@@ -911,6 +934,8 @@ class DashboardPage(BasePage):
         if adapter:
             self.adapter_status.setText(f"Monitoring: {adapter}")
         if "dl" in d and "ul" in d:
+            traffic_history.set_adapter(adapter)
+            traffic_history.add_bandwidth(d["dl"], d["ul"])
             self.chart.push(d["dl"], d["ul"])
             # Adaptive units: Kbps / Mbps / Gbps depending on the value
             dl_val, dl_unit = format_speed(d["dl"])
