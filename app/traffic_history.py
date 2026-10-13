@@ -1,9 +1,9 @@
-"""Rolling record of bandwidth and connectivity samples."""
+"""In-memory history of bandwidth and ping samples (GUI thread only)."""
 import time
 from collections import deque
 
 RAW_SECONDS = 3600      # 1 s samples kept for the last hour
-MINUTES = 1440          # per-minute buckets kept for 24 hours
+MINUTES = 43200         # per-minute buckets kept for 30 days
 CONN_SAMPLES = 17280    # one ping/loss check every ~5 s for 24 hours
 
 
@@ -17,6 +17,7 @@ class TrafficHistory:
 
     # -- recording --
     def set_adapter(self, label: str) -> None:
+        # new adapter, new record
         if label != self.adapter:
             self.adapter = label
             self._raw.clear()
@@ -51,7 +52,7 @@ class TrafficHistory:
 
     # -- reading --
     def bandwidth(self, seconds: int) -> list:
-        """Rows of (t, dl, ul, dl_peak, ul_peak, seconds_covered), oldest first."""
+        # rows: (t, dl, ul, dl_peak, ul_peak, seconds)
         start = time.time() - seconds
         if seconds <= RAW_SECONDS:
             return [(t, dl, ul, dl, ul, 1) for t, dl, ul in self._raw if t >= start]
@@ -62,8 +63,18 @@ class TrafficHistory:
             rows.append((b[0] + 30, b[1] / n, b[2] / n, b[3], b[4], n))
         return rows
 
+    def bandwidth_all(self):
+        # (rows, coarse); short sessions stay per-second
+        if len(self._minutes) < 60:
+            return [(t, dl, ul, dl, ul, 1) for t, dl, ul in self._raw], False
+        rows = list(self._minutes)
+        b = self._bucket
+        if b and b[5]:
+            rows.append((b[0] + 30, b[1] / b[5], b[2] / b[5], b[3], b[4], b[5]))
+        return rows, True
+
     def latest(self, max_age: float = 3.0):
-        """Newest (t, dl, ul) sample, or None if monitoring has stopped."""
+        # newest sample, None if monitoring stopped
         if self._raw and time.time() - self._raw[-1][0] <= max_age:
             return self._raw[-1]
         return None

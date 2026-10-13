@@ -217,6 +217,9 @@ class MainWindow(QMainWindow):
         import main as app_main
         current = self._current_key
         # Stop workers before deleting pages to avoid callbacks to deleted widgets.
+        dash = self._pages.get("dashboard")
+        if dash is not None and hasattr(dash, "shutdown"):
+            dash.shutdown()
         for page in self._pages.values():
             try:
                 page.on_leave()
@@ -601,6 +604,9 @@ class MainWindow(QMainWindow):
         self._fade_anim = anim
 
     def closeEvent(self, event):
+        dash = self._pages.get("dashboard")
+        if dash is not None and hasattr(dash, "shutdown"):
+            dash.shutdown()
         if self._current_key is not None:
             self._pages[self._current_key].on_leave()
         super().closeEvent(event)

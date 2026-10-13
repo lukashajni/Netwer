@@ -79,7 +79,7 @@ class PingPage(BasePage):
 
     def _style_run_button(self, running: bool):
         color = Theme.DANGER if running else Theme.ACCENT
-        hover = Theme.DANGER_HOVER if running else Theme.ACCENT_PURPLE
+        hover = Theme.DANGER_HOVER if running else Theme.ACCENT_HOVER
         self.btn_run.setStyleSheet(
             f"QPushButton {{ background: {color}; color: white; border: none;"
             f"border-radius: 8px; padding: 9px 20px;"

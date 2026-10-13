@@ -3,6 +3,7 @@ import sys
 from PyQt6.QtGui import QFont
 from PyQt6.QtWidgets import QApplication
 
+from app.combo_arrow import ComboArrowFilter, arrow_url
 from app.theme import Theme
 from core import netwer_core
 from ui.main_window import MainWindow
@@ -20,6 +21,7 @@ from ui.pages.system_info_page import SystemInfoPage
 from ui.pages.wifi_info_page import WiFiInfoPage
 
 def build_global_qss():
+    arrow = arrow_url()
     app_gradient = (
         f"qlineargradient(x1:0, y1:0, x2:1, y2:1, "
         f"stop:0 {Theme.BG_SIDEBAR}, stop:0.5 {Theme.BG_APP}, "
@@ -40,6 +42,16 @@ QWidget {{
 QScrollArea, QScrollArea > QWidget, QScrollArea > QWidget > QWidget {{
     background: transparent;
     border: none;
+}}
+QComboBox::drop-down {{
+    subcontrol-origin: padding;
+    subcontrol-position: center right;
+    border: none;
+}}
+QComboBox::down-arrow {{
+    image: url({arrow});
+    width: 12px;
+    height: 12px;
 }}
 QScrollBar:vertical {{
     background: transparent;
@@ -147,6 +159,7 @@ def main() -> int:
     apply_ui_scale(display_res.profile_for(res_w))
 
     app.setStyleSheet(build_global_qss())
+    app.installEventFilter(ComboArrowFilter(app))
 
     try:
         import psutil  # noqa: F401

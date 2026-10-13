@@ -87,7 +87,7 @@ class DashboardPage(BasePage):
     def _build_stat_cards(self):
         row = QHBoxLayout()
         row.setSpacing(Theme.GAP)
-        self.card_internet = StatCard("internet", "Internet Status", spark_color=Theme.SUCCESS)
+        self.card_internet = StatCard("internet", "Internet Status", spark_color=Theme.SUCCESS, extra_parallel=True)
         self.card_download = StatCard("download", "Download Speed", spark_color=Theme.ACCENT)
         self.card_upload = StatCard("upload", "Upload Speed", spark_color=Theme.ACCENT_PURPLE)
         self.card_loss = StatCard("packet_loss", "Packet Loss", spark_color=Theme.SUCCESS)
@@ -370,10 +370,11 @@ class DashboardPage(BasePage):
 
     def on_leave(self):
         self._resource_timer.stop()
-        self._ping_timer.stop()
         self._info_timer.stop()
         self._discovery_timer.stop()
-        self._monitor_worker = None
+        # Traffic monitor and ping timer keep running so the history stays continuous
+        if self._monitor_worker in self._workers:
+            self._workers.remove(self._monitor_worker)
         if self._devices_scanning:
             self._devices_placeholder.setText(
                 "Discovery is stopping because Dashboard was left. "
@@ -898,6 +899,14 @@ class DashboardPage(BasePage):
             self._monitor_worker = None
         self._selected_adapter = selected or ""
         self._start_monitor()
+
+    def shutdown(self):
+        # Called when the app closes or pages are rebuilt
+        self._ping_timer.stop()
+        if self._monitor_worker is not None:
+            self._monitor_worker.stop()
+            self._monitor_worker.wait(1500)
+            self._monitor_worker = None
 
     def _start_monitor(self):
         if self._monitor_worker is not None:

@@ -35,6 +35,7 @@ def _severity_colour(sev):
 
 
 class _FindingRow(QFrame):
+    # One issue - coloured bar, title, explanation and what to do.
 
     def __init__(self, finding, on_ask=None, parent=None):
         super().__init__(parent)
@@ -104,6 +105,7 @@ class HealthPage(BasePage):
         self._worker = None
         self._report = None
 
+        # -- Run bar --
         bar = QHBoxLayout()
         bar.setSpacing(12)
         self.btn_run = QPushButton("  Diagnose my network")
@@ -128,6 +130,7 @@ class HealthPage(BasePage):
             f"border-radius: 4px; }}")
         bar.addWidget(self.progress, 1)
 
+        # Netwer AI opens only when asked for.
         self.btn_ai = QPushButton("  Ask AI")
         self.btn_ai.setCheckable(True)
         self.btn_ai.setIcon(Icons.get("ai", Theme.ACCENT))
@@ -146,6 +149,7 @@ class HealthPage(BasePage):
             f"color: {Theme.TEXT_MUTED}; font-size: 12px;")
         self.body_layout.addWidget(self.status)
 
+        # -- Verdict banner --
         self.verdict = QFrame()
         self.verdict.setObjectName("Verdict")
         self.verdict.hide()
@@ -165,6 +169,7 @@ class HealthPage(BasePage):
         vl.addWidget(self.verdict_text)
         self.body_layout.addWidget(self.verdict)
 
+        # -- Findings --
         self.findings_card = Card("What we found", "summary")
         self._findings_area = QScrollArea()
         self._findings_area.setWidgetResizable(True)
@@ -191,6 +196,7 @@ class HealthPage(BasePage):
         left.setSpacing(Theme.GAP)
         left.addWidget(self.findings_card, 1)
 
+        # -- Measurements strip --
         self.metrics_card = Card("Measurements", "monitor")
         self._metrics = QGridLayout()
         self._metrics.setHorizontalSpacing(26)
@@ -211,6 +217,7 @@ class HealthPage(BasePage):
         self.ai_panel.ask_about(finding)
 
     def _navigate(self, target: str):
+        """Open a tool from a button inside an AI answer."""
         if target == "health_run":
             self._run()
             return
@@ -220,6 +227,7 @@ class HealthPage(BasePage):
         elif hasattr(win, "goto"):
             win.goto(target)
 
+    # -- Run --
     def _run(self):
         if self._worker is not None:
             return
@@ -255,6 +263,7 @@ class HealthPage(BasePage):
         self.btn_run.setText("  Diagnose my network")
         self.progress.setValue(100)
 
+    # -- Results --
     def _clear_findings(self):
         while self._findings_layout.count():
             item = self._findings_layout.takeAt(0)

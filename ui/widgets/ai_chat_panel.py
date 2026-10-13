@@ -1,4 +1,4 @@
-"""Netwer AI chat: a side panel that slides in on the Health page."""
+"""Netwer AI chat panel."""
 import html
 import re
 
@@ -24,11 +24,12 @@ from core.discovery import get_discovery_service
 from ui.widgets.network_map import device_display_name, guess_device_icon
 
 WIDTH = 420
-BUBBLE_MAX = 318
+BUBBLE_MAX = 318          # widest AI answer bubble
 SEVERITY_COLOUR = {"critical": "DANGER", "warning": "WARNING", "info": "ACCENT", "good": "SUCCESS"}
 
 
 def _rich(s: str) -> str:
+    # escape, then **bold**
     s = html.escape(s)
     s = re.sub(r"\*\*(.+?)\*\*", rf"<b style='color:{Theme.TEXT_PRIMARY};'>\1</b>", s)
     return f"<div style='line-height:145%;'>{s}</div>"
@@ -66,6 +67,7 @@ class _Avatar(QLabel):
 
 
 class _Typing(QFrame):
+    # animated dots while thinking
 
     def __init__(self):
         super().__init__()
@@ -90,6 +92,7 @@ class _Typing(QFrame):
 
 
 class _AIBubble(QFrame):
+    # one answer, blocks stacked in a bubble
 
     def __init__(self, on_action):
         super().__init__()
@@ -191,8 +194,8 @@ class _AIBubble(QFrame):
 
 
 class AIChatPanel(QWidget):
-    navigate = pyqtSignal(str)
-    toggled = pyqtSignal(bool)
+    navigate = pyqtSignal(str)       # page key, "health_run" or "scan:<ip>"
+    toggled = pyqtSignal(bool)       # open / closed
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -206,7 +209,7 @@ class AIChatPanel(QWidget):
         self._queue = []
         self._current = None
         self._suggestions = []
-        self._token = 0
+        self._token = 0              # invalidates a pending answer after "clear"
         self.setMaximumWidth(0)
         self.setMinimumWidth(0)
         self._anim = QPropertyAnimation(self, b"maximumWidth", self)
@@ -235,6 +238,7 @@ class AIChatPanel(QWidget):
         outer.addWidget(self._build_chat(), 1)
         outer.addWidget(self._build_input())
 
+    # -- construction --
     def _build_header(self):
         w = QWidget()
         w.setStyleSheet("background: transparent;")
@@ -345,6 +349,7 @@ class AIChatPanel(QWidget):
         outer.addWidget(note)
         return wrap
 
+    # -- open / close --
     @property
     def is_open(self) -> bool:
         return self._open
@@ -376,6 +381,7 @@ class AIChatPanel(QWidget):
         if self._open:
             self.input.setFocus()
 
+    # -- conversation --
     def set_report(self, report):
         self._report = report
 
@@ -408,6 +414,7 @@ class AIChatPanel(QWidget):
                 self._drop_layout(it.layout())
 
     def ask(self, question: str, finding: dict = None):
+        # finding: set when asking about one card
         question = (question or "").strip()
         if not question or self._busy:
             return
@@ -452,8 +459,9 @@ class AIChatPanel(QWidget):
                                             traffic_history.connectivity(300), traffic_history.adapter)
         return netwer_ai.build_context(self._report, devices, port_scan, traffic)
 
+    # -- rendering --
     def _begin_answer(self, answer: dict, token: int):
-        if token != self._token or self._typing is None:
+        if token != self._token or self._typing is None:      # cleared while thinking
             return
         row = self._typing_row
         self._chat.removeItem(row)
@@ -493,6 +501,7 @@ class AIChatPanel(QWidget):
         lay = QVBoxLayout(bubble)
         lay.setContentsMargins(14, 9, 14, 10)
         label = _label(text, "#ffffff", 13)
+        # Size the bubble to its text, wrapping only past 250 px.
         probe = QLabel(text)
         probe.setStyleSheet("font-size: 13px;")
         probe.ensurePolished()

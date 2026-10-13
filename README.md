@@ -57,6 +57,12 @@ Enable **Offline privacy mode** in Settings to block optional third-party lookup
   <img src="docs/screenshots/monitor.png" width="720" alt="Local network radar" />
 </p>
 
+### Traceroute
+
+<p align="center">
+  <img src="docs/screenshots/traceroute.png" width="720" alt="Local network radar" />
+</p>
+
 ## Technologies
 
 | Area | Technology |
@@ -103,14 +109,10 @@ NETWER/
 └── tests/                 # Automated tests
 ```
 
-## Contributing
-
-Pull requests are welcome. For major changes, please open an issue first to discuss the proposed direction.
-
 ## License
 
 This project is licensed under the GPLv3. See `LICENSE` for details.
 
-## Team
+## Netwer team
 
 Lukas Hajneman, Jan Sven Bukovski, and Erik Celjak.

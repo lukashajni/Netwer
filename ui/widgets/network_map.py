@@ -96,7 +96,16 @@ class _LabeledIcon(QWidget):
 
         self._icon_name = icon_name
         self._subtitle_mono = subtitle_mono
+        self._on_click = None
         self.set_colors(icon_color, title_color or Theme.TEXT_BODY)
+
+    def set_click(self, callback):
+        self._on_click = callback
+        self.setCursor(Qt.CursorShape.PointingHandCursor if callback else Qt.CursorShape.ArrowCursor)
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton and self._on_click:
+            self._on_click()
 
     def set_colors(self, icon_color, title_color):
         self.icon_label.setPixmap(Icons.pixmap(self._icon_name,
@@ -218,6 +227,13 @@ class NetworkMap(QWidget):
             rv = "Router"
         self._router_node.set_title(rv)
         self._router_node.set_subtitle(self._gateway)
+
+        # Clicking the router opens its details and open ports, like any device
+        gw = next((d for d in devices if d.get("ip") == gateway), None)
+        gw_dev = dict(gw or {"ip": gateway, "hostname": "", "vendor": router_vendor})
+        gw_dev["is_gateway"] = True
+        has_gw = bool(gateway) and gateway != "\u2014"
+        self._router_node.set_click((lambda: self.node_clicked.emit(gw_dev)) if has_gw else None)
 
         # Rebuild the device row
         while self._devices_layout.count():

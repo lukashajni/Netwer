@@ -1,4 +1,4 @@
-"""Detailed analysis of the live monitor: bandwidth, latency and packet loss."""
+"""Detailed traffic analysis dialog."""
 import time
 
 import numpy as np
@@ -19,7 +19,8 @@ from app.formatting import format_speed, scale_for_axis
 from app.theme import Theme, card_bg
 from app.traffic_history import traffic_history
 
-RANGES = (("5 min", 300), ("1 hour", 3600), ("24 hours", 86400))
+ALL = 0   # "Continuous": no window, everything recorded so far
+RANGES = (("5 min", 300), ("1 hour", 3600), ("24 hours", 86400), ("Continuous", ALL))
 
 
 def _clock(t: float, long_range: bool) -> str:
@@ -37,6 +38,7 @@ def _data_size(mib: float) -> str:
 
 
 def _gapped(ts, series, gap):
+    # NaN rows mark gaps in the data
     out_t, out = [], [[] for _ in series]
     prev = None
     for i, t in enumerate(ts):
@@ -52,7 +54,7 @@ def _gapped(ts, series, gap):
 
 
 class _Tile(QFrame):
-    """Small stat card: caption, big value, one line of detail."""
+    # small stat card
 
     def __init__(self, caption: str, accent: str = None):
         super().__init__()
@@ -83,7 +85,7 @@ class _Tile(QFrame):
 
 
 class _NowTile(_Tile):
-    """Live download / upload right now"""
+    # live value, same as the Dashboard cards
 
     def __init__(self):
         super().__init__("Now \u00b7 live", accent=Theme.ACCENT)
@@ -111,6 +113,8 @@ class TrafficAnalysisDialog(QDialog):
         self.setMinimumSize(1000, 760)
         self.setStyleSheet(f"QDialog {{ background: {Theme.BG_APP}; }}")
         self._range = RANGES[0][1]
+        self._long = False
+        self._span = RANGES[0][1]
         self._bw_ts = np.array([])
         self._bw_dl = np.array([])
         self._bw_ul = np.array([])
@@ -126,8 +130,7 @@ class TrafficAnalysisDialog(QDialog):
         root.addWidget(self._build_highlights())
 
         foot = QHBoxLayout()
-        note = QLabel("History is recorded while the Dashboard is open and is cleared "
-                      "when you close Netwer.")
+        note = QLabel("Recorded in the background while Netwer runs. Cleared when you close it.")
         note.setStyleSheet(f"color: {Theme.TEXT_MUTED}; font-size: {Theme.FONT_SIZE_TINY}px;")
         foot.addWidget(note)
         foot.addStretch()
@@ -179,9 +182,9 @@ class TrafficAnalysisDialog(QDialog):
             b.setStyleSheet(
                 f"QPushButton {{ background: {Theme.BG_ELEVATED}; color: {Theme.TEXT_SECONDARY};"
                 f"border: 1px solid {Theme.BORDER_STRONG}; border-radius: 8px; padding: 6px 14px;"
-                f"font-size: {Theme.FONT_SIZE_SMALL}px; }}"
+                f"font-size: {Theme.FONT_SIZE_SMALL}px; font-weight: 600; }}"
                 f"QPushButton:checked {{ background: {Theme.GRAD_ACCENT}; color: white;"
-                f"border-color: transparent; font-weight: 600; }}")
+                f"border-color: transparent; }}")
             b.clicked.connect(lambda _=False, s=seconds: self._set_range(s))
             group.addButton(b)
             row.addWidget(b)
@@ -325,7 +328,7 @@ class TrafficAnalysisDialog(QDialog):
                      f" &nbsp;<span style='color:{Theme.DANGER};'>loss {c[2]:.0f}%</span>")
         self._readout.setHtml(
             f"<div style='background:{Theme.BG_ELEVATED}; padding:3px 6px; font-size:9pt;'>"
-            f"<span style='color:{Theme.TEXT_MUTED};'>{_clock(t, self._range >= 86400)}</span><br>"
+            f"<span style='color:{Theme.TEXT_MUTED};'>{_clock(t, self._long)}</span><br>"
             f"<span style='color:{Theme.CHART_DOWNLOAD};'>\u2193 {_speed(0 if np.isnan(dl) else dl)}</span>"
             f" &nbsp;<span style='color:{Theme.CHART_UPLOAD};'>\u2191 {_speed(0 if np.isnan(ul) else ul)}</span>"
             f"{extra}</div>")
@@ -338,14 +341,24 @@ class TrafficAnalysisDialog(QDialog):
     # -- data --
     def refresh(self):
         now = time.time()
-        long_range = self._range >= 86400
-        bw = traffic_history.bandwidth(self._range)
-        self._conn = traffic_history.connectivity(self._range)
+        coarse = self._range >= 86400
+        if self._range == ALL:
+            bw, coarse = traffic_history.bandwidth_all()
+            self._conn = traffic_history.connectivity(10 ** 9)
+            start = bw[0][0] if bw else now - 300
+        else:
+            bw = traffic_history.bandwidth(self._range)
+            self._conn = traffic_history.connectivity(self._range)
+            start = now - self._range
+        self._span = max(now - start, 60)
+        long_range = self._span >= 6 * 3600
+        self._long = long_range
         adapter = traffic_history.adapter or "detecting\u2026"
         label = next(l for l, s in RANGES if s == self._range)
-        self._subtitle.setText(f"Monitoring: {adapter}  \u00b7  last {label}")
+        period = "all recorded data" if self._range == ALL else f"last {label}"
+        self._subtitle.setText(f"Monitoring: {adapter}  \u00b7  {period}")
 
-        gap = 150.0 if long_range else 3.0
+        gap = 150.0 if coarse else 3.0
         if bw:
             ts, (dl, ul, dlp, ulp) = _gapped(
                 [r[0] for r in bw],
@@ -361,7 +374,7 @@ class TrafficAnalysisDialog(QDialog):
         self._dl_curve.setData(ts, dl / self._divisor)
         self._ul_curve.setData(ts, ul / self._divisor)
         self._p_bw.setYRange(0, (peak / self._divisor) * 1.25 if peak > 0 else 10.0, padding=0)
-        self._p_bw.setXRange(now - self._range, now, padding=0)
+        self._p_bw.setXRange(start, now, padding=0)
 
         # Mark the highest download and upload sample.
         marks = []
@@ -383,7 +396,7 @@ class TrafficAnalysisDialog(QDialog):
             cts = ping = loss = np.array([])
         self._lat_curve.setData(cts, ping)
         ok_loss = np.nan_to_num(loss)
-        self._loss_bars.setOpts(x=cts, height=ok_loss, width=max(5.0, self._range / 150.0))
+        self._loss_bars.setOpts(x=cts, height=ok_loss, width=max(5.0, self._span / 150.0))
         self._p_lat.setYRange(0, (np.nanmax(ping) * 1.25) if len(ping) and not np.all(np.isnan(ping)) else 50,
                               padding=0)
         self._p_loss.setYRange(0, max(5.0, float(ok_loss.max()) * 1.25) if len(ok_loss) else 5.0,

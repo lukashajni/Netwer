@@ -1,5 +1,5 @@
-from PyQt6.QtCore import QRectF, Qt
-from PyQt6.QtGui import QBrush, QColor, QPainter, QPainterPath, QPen
+from PyQt6.QtCore import QPointF, QRectF, Qt
+from PyQt6.QtGui import QBrush, QColor, QPainter, QPainterPath, QPen, QPixmap
 from PyQt6.QtWidgets import QFrame, QHBoxLayout, QLabel, QVBoxLayout, QWidget
 
 from app.resources import Icons
@@ -19,7 +19,7 @@ class StatCard(QFrame):
     }
 
     def __init__(self, icon_name: str, label: str, spark_color: str = None,
-                 tint: str = None, parent=None):
+                 tint: str = None, extra_parallel: bool = False, parent=None):
         super().__init__(parent)
         self.setObjectName("StatCard")
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
@@ -41,7 +41,9 @@ class StatCard(QFrame):
         self._icon.setStyleSheet(
             f"#StatTile {{ background: {tile_bg}; border-radius: 10px; }}")
         self._icon_name = icon_name
-        self._icon.setPixmap(Icons.pixmap(icon_name, 17, tile_fg))
+        self._extra_parallel = extra_parallel
+        self._tile_bg = tile_bg
+        self._icon.setPixmap(self._icon_pixmap(tile_fg))
         self._icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
         top.addWidget(self._icon)
         top.addStretch()
@@ -83,6 +85,19 @@ class StatCard(QFrame):
             filler.setStyleSheet("background: transparent;")
             lay.addWidget(filler)
 
+    def _icon_pixmap(self, color: str) -> QPixmap:
+        pm = Icons.pixmap(self._icon_name, 17, color)
+        if not self._extra_parallel:
+            return pm
+        # second parallel above the one already in the globe glyph
+        pm = QPixmap(pm)
+        p = QPainter(pm)
+        p.setPen(QPen(QColor(self._tile_bg), 1.0))
+        y = pm.height() / pm.devicePixelRatio() * 0.36
+        p.drawLine(QPointF(0, y), QPointF(pm.width() / pm.devicePixelRatio(), y))
+        p.end()
+        return pm
+
     def set_badge(self, text: str, positive: bool = True) -> None:
         if not text:
             self._badge.setText("")
@@ -100,9 +115,10 @@ class StatCard(QFrame):
     def set_tile_tint(self, bg: str, fg: str) -> None:
         """Recolour the icon tile at runtime (e.g. packet loss going from a
         healthy green to amber/red as it climbs)."""
+        self._tile_bg = bg
         self._icon.setStyleSheet(
             f"#StatTile {{ background: {bg}; border-radius: 10px; }}")
-        self._icon.setPixmap(Icons.pixmap(self._icon_name, 17, fg))
+        self._icon.setPixmap(self._icon_pixmap(fg))
 
     def set_value(self, value: str, unit: str = "", color: str | None = None,
                   subtitle: str = "") -> None:

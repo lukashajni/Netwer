@@ -79,8 +79,8 @@ class Theme:
     GLASS_BORDER = "#293355"        # glass edge (more visible than normal)
     GLASS_BORDER_HI = "#3a4a72"     # stronger glass edge
     #: Gradient used by active navigation items and primary buttons.
-    GRAD_ACCENT = ("qlineargradient(x1:0, y1:0, x2:1, y2:1, "
-                   "stop:0 #5b8cff, stop:1 #8b6dff)")
+    GRAD_ACCENT = "#5b8cff"          # solid, same colour as ACCENT
+    ACCENT_HOVER = "#7ba2ff"
     GRAD_ACCENT_SOFT = ("qlineargradient(x1:0, y1:0, x2:1, y2:1, "
                         "stop:0 #26325a, stop:1 #2b2f5a)")
     #: Whether cards use the glass-effect colors.
@@ -275,6 +275,8 @@ def apply_theme(theme_name: str, accent_name: str = None) -> None:
         setattr(Theme, key, value)
     # INFO follows ACCENT
     Theme.INFO = Theme.ACCENT
+    Theme.GRAD_ACCENT = Theme.ACCENT
+    Theme.ACCENT_HOVER = _lighten(Theme.ACCENT)
     # chart RGBA fills from the new accent color
     Theme.CHART_DOWNLOAD = Theme.ACCENT
     Theme.CHART_UPLOAD = Theme.ACCENT_PURPLE
@@ -298,10 +300,19 @@ def apply_accent(preset_name: str) -> None:
         Theme.ACCENT = preset["accent"]
         Theme.ACCENT_PURPLE = preset["purple"]
     Theme.INFO = Theme.ACCENT
+    Theme.GRAD_ACCENT = Theme.ACCENT
+    Theme.ACCENT_HOVER = _lighten(Theme.ACCENT)
     Theme.CHART_DOWNLOAD = Theme.ACCENT
     Theme.CHART_UPLOAD = Theme.ACCENT_PURPLE
     Theme.CHART_FILL_DL = _hex_to_rgba(Theme.ACCENT, 45)
     Theme.CHART_FILL_UL = _hex_to_rgba(Theme.ACCENT_PURPLE, 35)
+
+
+def _lighten(hex_color: str, amount: float = 0.18) -> str:
+    h = hex_color.lstrip("#")
+    r, g, b = (int(h[i:i + 2], 16) for i in (0, 2, 4))
+    r, g, b = (int(c + (255 - c) * amount) for c in (r, g, b))
+    return f"#{r:02x}{g:02x}{b:02x}"
 
 
 def _hex_to_rgba(hex_color: str, alpha: int):
