@@ -16,6 +16,36 @@ from app.store import store
 from app.theme import ACCENT_PRESETS, THEMES, Theme, current_accent_name, current_theme_name
 
 
+class _AdapterCombo(QComboBox):
+    # Reloads the adapter list every time it opens
+    def showPopup(self):
+        self.reload()
+        super().showPopup()
+
+    def reload(self):
+        from app.adapter_state import adapter_state
+        from core import network
+        current = adapter_state.get()
+        try:
+            adapters = network.list_adapters()
+            adapters = adapters.get("items", adapters) if isinstance(adapters, dict) else adapters
+        except Exception:
+            adapters = []
+        self.blockSignals(True)
+        self.clear()
+        self.addItem("Auto (recommended)", "")
+        for a in sorted(adapters or [], key=lambda a: (a.get("status") != "Up", a.get("name", ""))):
+            name, status = a.get("name", ""), a.get("status", "")
+            if name:
+                self.addItem(name if status == "Up" else f"{name}  ({status})", name)
+        idx = self.findData(current)
+        if idx < 0 and current:
+            self.addItem(f"{current}  (not found)", current)
+            idx = self.count() - 1
+        self.setCurrentIndex(max(idx, 0))
+        self.blockSignals(False)
+
+
 class SettingsPanel(QWidget):
     theme_changed = pyqtSignal(str)      # theme name
     accent_changed = pyqtSignal(str)     # accent name
@@ -94,6 +124,30 @@ class SettingsPanel(QWidget):
             "Glass effect (blur-style cards)",
             store.get_setting("glass_enabled", True),
             lambda v: self.glass_toggled.emit(v))
+
+        # -- Network --
+        self._section("Network")
+        row = QWidget()
+        rl = QHBoxLayout(row)
+        rl.setContentsMargins(0, 4, 0, 4)
+        lbl = QLabel("Adapter")
+        lbl.setObjectName("SettingsLabel")
+        lbl.setStyleSheet(f"color: {Theme.TEXT_BODY}; font-size: {Theme.FONT_SIZE_SMALL}px;"
+                          f"background: transparent;")
+        rl.addWidget(lbl)
+        rl.addStretch()
+        self.adapter_combo = _AdapterCombo()
+        self.adapter_combo.setFixedWidth(210)
+        self.adapter_combo.setStyleSheet(self._combo_style())
+        self.adapter_combo.reload()
+        self.adapter_combo.currentIndexChanged.connect(self._on_adapter)
+        rl.addWidget(self.adapter_combo)
+        self._body.addWidget(row)
+        hint = QLabel("Used by the Dashboard, Network Information, Network Health and scans.")
+        hint.setWordWrap(True)
+        hint.setStyleSheet(f"color: {Theme.TEXT_FAINT}; font-size: {Theme.FONT_SIZE_TINY}px;"
+                           f"background: transparent;")
+        self._body.addWidget(hint)
 
         # -- Display --
         self._section("Display")
@@ -226,6 +280,10 @@ class SettingsPanel(QWidget):
         return cb
 
     # -- Actions --
+    def _on_adapter(self, _index):
+        from app.adapter_state import adapter_state
+        adapter_state.set(self.adapter_combo.currentData() or "")
+
     def _on_theme(self, name):
         self.theme_changed.emit(name)
 
@@ -247,6 +305,9 @@ class SettingsPanel(QWidget):
 
     def _reset(self):
         store.reset_settings()
+        from app.adapter_state import adapter_state
+        adapter_state.set("")
+        self.adapter_combo.reload()
         self.offline_mode.setChecked(True)
         self.offline_mode_toggled.emit(True)
         self.schedule_on.setChecked(False)

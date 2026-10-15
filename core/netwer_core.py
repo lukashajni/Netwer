@@ -48,6 +48,8 @@ from .network import (  # noqa: F401
     get_ip_class,
     get_main_adapter_linux,
     get_network_config,
+    get_selected_adapter,
+    set_selected_adapter,
     get_public_ip,
     handle_adapter_details_linux,
     is_private,

@@ -20,7 +20,7 @@ from app.theme import Theme, card_bg
 from app.traffic_history import traffic_history
 
 ALL = 0   # "Continuous": no window, everything recorded so far
-RANGES = (("5 min", 300), ("1 hour", 3600), ("24 hours", 86400), ("Continuous", ALL))
+RANGES = (("Continuous", ALL), ("5 min", 300), ("1 hour", 3600), ("24 hours", 86400))
 
 
 def _clock(t: float, long_range: bool) -> str:
@@ -112,9 +112,15 @@ class TrafficAnalysisDialog(QDialog):
         self.setWindowTitle("Network Analysis")
         self.setMinimumSize(1000, 760)
         self.setStyleSheet(f"QDialog {{ background: {Theme.BG_APP}; }}")
-        self._range = RANGES[0][1]
+        self._range = ALL
         self._long = False
-        self._span = RANGES[0][1]
+        self._span = 300
+        self._follow = True
+        self._rows, self._conn, self._conn_view = [], [], []
+        self._view_timer = QTimer(self)           # recompute stats after zoom or pan
+        self._view_timer.setSingleShot(True)
+        self._view_timer.setInterval(60)
+        self._view_timer.timeout.connect(self._apply_view)
         self._bw_ts = np.array([])
         self._bw_dl = np.array([])
         self._bw_ul = np.array([])
@@ -188,14 +194,23 @@ class TrafficAnalysisDialog(QDialog):
             b.clicked.connect(lambda _=False, s=seconds: self._set_range(s))
             group.addButton(b)
             row.addWidget(b)
+        self._btn_follow = QPushButton("Follow live")
+        self._btn_follow.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._btn_follow.setStyleSheet(
+            f"QPushButton {{ background: transparent; color: {Theme.ACCENT}; border: 1px solid {Theme.ACCENT};"
+            f"border-radius: 8px; padding: 6px 14px; font-size: {Theme.FONT_SIZE_SMALL}px; font-weight: 600; }}"
+            f"QPushButton:hover {{ background: {Theme.BG_ELEVATED}; }}")
+        self._btn_follow.clicked.connect(self._reset_zoom)
+        self._btn_follow.hide()
+        row.insertWidget(row.count() - len(RANGES), self._btn_follow)
         return row
 
     def _build_tiles(self):
         row = QHBoxLayout()
         row.setSpacing(10)
         self._t_now = _NowTile()
-        self._t_dl = _Tile("Download \u00b7 avg")
-        self._t_ul = _Tile("Upload \u00b7 avg")
+        self._t_dl = _Tile("Receive \u00b7 avg")
+        self._t_ul = _Tile("Send \u00b7 avg")
         self._t_data = _Tile("Data transferred")
         self._t_loss = _Tile("Packet loss \u00b7 avg")
         self._t_lat = _Tile("Latency \u00b7 avg")
@@ -207,7 +222,7 @@ class TrafficAnalysisDialog(QDialog):
         plot = pg.PlotWidget(axisItems={"bottom": pg.DateAxisItem()})
         plot.setBackground(card_bg())
         plot.showGrid(x=False, y=True, alpha=0.15)
-        plot.setMouseEnabled(x=False, y=False)
+        plot.setMouseEnabled(x=True, y=False)
         plot.hideButtons()
         plot.getViewBox().setMenuEnabled(False)
         plot.setLabel("left", ylabel, **{"color": Theme.TEXT_FAINT, "font-size": "9pt"})
@@ -222,6 +237,11 @@ class TrafficAnalysisDialog(QDialog):
         vline.setVisible(False)
         plot.addItem(vline, ignoreBounds=True)
         plot.scene().sigMouseMoved.connect(lambda pos, p=plot: self._hover(p, pos))
+        plot.scene().sigMouseClicked.connect(lambda ev: ev.double() and self._reset_zoom())
+        vb = plot.getViewBox()
+        vb.setLimits(minXRange=3)
+        vb.sigRangeChangedManually.connect(self._user_zoomed)
+        vb.sigXRangeChanged.connect(lambda *_: self._view_timer.start())
         return plot, vline
 
     def _build_plots(self):
@@ -235,7 +255,7 @@ class TrafficAnalysisDialog(QDialog):
         lay.setSpacing(4)
 
         legend = QHBoxLayout()
-        for text, color in (("Download", Theme.CHART_DOWNLOAD), ("Upload", Theme.CHART_UPLOAD),
+        for text, color in (("Receive", Theme.CHART_DOWNLOAD), ("Send", Theme.CHART_UPLOAD),
                             ("Latency", Theme.WARNING), ("Packet loss", Theme.DANGER)):
             dot = QLabel(f"<span style='color:{color};'>\u25CF</span> {text}")
             dot.setStyleSheet(f"color: {Theme.TEXT_SECONDARY}; font-size: {Theme.FONT_SIZE_TINY}px;"
@@ -243,6 +263,9 @@ class TrafficAnalysisDialog(QDialog):
             legend.addWidget(dot)
             legend.addSpacing(10)
         legend.addStretch()
+        hint = QLabel("Scroll to zoom \u00b7 drag to move \u00b7 double-click to reset")
+        hint.setStyleSheet(f"color: {Theme.TEXT_FAINT}; font-size: {Theme.FONT_SIZE_TINY}px; background: transparent;")
+        legend.addWidget(hint)
         lay.addLayout(legend)
 
         self._p_bw, v1 = self._make_plot("Mbps", False)
@@ -301,6 +324,15 @@ class TrafficAnalysisDialog(QDialog):
     # -- interaction --
     def _set_range(self, seconds: int):
         self._range = seconds
+        self._reset_zoom()
+
+    def _user_zoomed(self, *_):
+        self._follow = False
+        self._btn_follow.show()
+
+    def _reset_zoom(self):
+        self._follow = True
+        self._btn_follow.hide()
         self.refresh()
 
     def _hover(self, plot, pos):
@@ -367,26 +399,9 @@ class TrafficAnalysisDialog(QDialog):
         else:
             ts = dl = ul = dlp = ulp = np.array([])
         self._bw_ts, self._bw_dl, self._bw_ul = ts, dl, ul
+        self._bw_dlp, self._bw_ulp = dlp, ulp
+        self._rows = bw
 
-        peak = float(np.nanmax(np.concatenate([dlp, ulp, [0.0]]))) if len(ts) else 0.0
-        self._unit, self._divisor = scale_for_axis(peak)
-        self._p_bw.setLabel("left", self._unit, **{"color": Theme.TEXT_FAINT, "font-size": "9pt"})
-        self._dl_curve.setData(ts, dl / self._divisor)
-        self._ul_curve.setData(ts, ul / self._divisor)
-        self._p_bw.setYRange(0, (peak / self._divisor) * 1.25 if peak > 0 else 10.0, padding=0)
-        self._p_bw.setXRange(start, now, padding=0)
-
-        # Mark the highest download and upload sample.
-        marks = []
-        if len(ts) and not np.all(np.isnan(dlp)):
-            for series, color in ((dlp, Theme.CHART_DOWNLOAD), (ulp, Theme.CHART_UPLOAD)):
-                i = int(np.nanargmax(series))
-                if series[i] > 0:
-                    marks.append({"pos": (ts[i], series[i] / self._divisor),
-                                  "brush": pg.mkBrush(color)})
-        self._peaks.setData(marks)
-
-        # Latency and packet loss.
         if self._conn:
             cts, (ping, loss) = _gapped(
                 [c[0] for c in self._conn],
@@ -394,17 +409,57 @@ class TrafficAnalysisDialog(QDialog):
                  [c[2] for c in self._conn]), 12.0)
         else:
             cts = ping = loss = np.array([])
+        self._cts, self._ping, self._loss = cts, ping, np.nan_to_num(loss)
         self._lat_curve.setData(cts, ping)
-        ok_loss = np.nan_to_num(loss)
-        self._loss_bars.setOpts(x=cts, height=ok_loss, width=max(5.0, self._span / 150.0))
-        self._p_lat.setYRange(0, (np.nanmax(ping) * 1.25) if len(ping) and not np.all(np.isnan(ping)) else 50,
-                              padding=0)
-        self._p_loss.setYRange(0, max(5.0, float(ok_loss.max()) * 1.25) if len(ok_loss) else 5.0,
-                               padding=0)
+        self._loss_bars.setOpts(x=cts, height=self._loss, width=max(5.0, self._span / 150.0))
 
+        if self._follow:
+            self._p_bw.setXRange(start, now, padding=0)
         self._t_now.set_now(traffic_history.latest())
-        self._update_tiles(bw)
-        self._update_highlights(bw, long_range)
+        self._apply_view()
+
+    def _apply_view(self):
+        # Everything that depends on the visible time window: axes, stats, highlights
+        ts = self._bw_ts
+        x0, x1 = self._p_bw.viewRange()[0]
+        zoomed = not self._follow
+        if len(ts):
+            vis = (ts >= x0) & (ts <= x1)
+            pk = np.concatenate([self._bw_dlp[vis], self._bw_ulp[vis], [0.0]])
+            peak = float(np.nanmax(pk)) if len(pk) else 0.0
+        else:
+            vis, peak = np.array([], dtype=bool), 0.0
+        self._unit, self._divisor = scale_for_axis(peak)
+        self._p_bw.setLabel("left", self._unit, **{"color": Theme.TEXT_FAINT, "font-size": "9pt"})
+        self._dl_curve.setData(ts, self._bw_dl / self._divisor)
+        self._ul_curve.setData(ts, self._bw_ul / self._divisor)
+        self._p_bw.setYRange(0, (peak / self._divisor) * 1.25 if peak > 0 else 10.0, padding=0)
+
+        marks = []
+        if len(ts) and vis.any():
+            for series, color in ((self._bw_dlp, Theme.CHART_DOWNLOAD), (self._bw_ulp, Theme.CHART_UPLOAD)):
+                part = np.where(vis, series, np.nan)
+                if not np.all(np.isnan(part)):
+                    i = int(np.nanargmax(part))
+                    if series[i] > 0:
+                        marks.append({"pos": (ts[i], series[i] / self._divisor), "brush": pg.mkBrush(color)})
+        self._peaks.setData(marks)
+
+        if len(self._cts):
+            cv = (self._cts >= x0) & (self._cts <= x1)
+            pv = self._ping[cv]
+            self._p_lat.setYRange(0, float(np.nanmax(pv)) * 1.25 if len(pv) and not np.all(np.isnan(pv)) else 50, padding=0)
+            lv = self._loss[cv]
+            self._p_loss.setYRange(0, max(5.0, float(lv.max()) * 1.25) if len(lv) else 5.0, padding=0)
+        rows = [r for r in self._rows if x0 <= r[0] <= x1] if zoomed else self._rows
+        self._conn_view = [c for c in self._conn if x0 <= c[0] <= x1] if zoomed else self._conn
+        if zoomed:
+            adapter_name = traffic_history.adapter or "detecting\u2026"
+            long_sel = (x1 - x0) >= 6 * 3600
+            self._subtitle.setText(f"Monitoring: {adapter_name}  \u00b7  "
+                                   f"selection {_clock(x0, long_sel)} to {_clock(x1, long_sel)}")
+        self._update_tiles(rows)
+        self._update_highlights(rows, self._long)
 
     def _update_tiles(self, bw):
         if bw:
@@ -422,8 +477,8 @@ class TrafficAnalysisDialog(QDialog):
             for t in (self._t_dl, self._t_ul, self._t_data):
                 t.set("\u2014", "waiting for data")
 
-        pings = [c[1] for c in self._conn if c[1] is not None]
-        losses = [c[2] for c in self._conn]
+        pings = [c[1] for c in self._conn_view if c[1] is not None]
+        losses = [c[2] for c in self._conn_view]
         if losses:
             avg_loss = sum(losses) / len(losses)
             color = (Theme.SUCCESS if avg_loss < 1 else Theme.WARNING if avg_loss < 5
@@ -449,27 +504,27 @@ class TrafficAnalysisDialog(QDialog):
             peak_dl = max(bw, key=lambda r: r[3])
             if peak_dl[3] > 0:
                 add(Theme.CHART_DOWNLOAD,
-                    f"Highest download {_speed(peak_dl[3])} at {_clock(peak_dl[0], long_range)}.")
+                    f"Highest receive speed {_speed(peak_dl[3])} at {_clock(peak_dl[0], long_range)}.")
             n = sum(r[5] for r in bw)
             ul_avg = sum(r[2] * r[5] for r in bw) / n
             peak_ul = max(bw, key=lambda r: r[4])
             if peak_ul[4] > 0.5 and peak_ul[4] > 4 * max(ul_avg, 0.01):
                 add(Theme.CHART_UPLOAD,
-                    f"Upload spike to {_speed(peak_ul[4])} at {_clock(peak_ul[0], long_range)} "
+                    f"Send spike to {_speed(peak_ul[4])} at {_clock(peak_ul[0], long_range)} "
                     f"(average is {_speed(ul_avg)}). A backup, sync or large upload is likely.")
-        if self._conn:
-            lossy = [c for c in self._conn if c[2] > 0]
-            drops = [c for c in self._conn if c[2] >= 100]
+        if self._conn_view:
+            lossy = [c for c in self._conn_view if c[2] > 0]
+            drops = [c for c in self._conn_view if c[2] >= 100]
             if drops:
                 add(Theme.DANGER, f"Connection dropped {len(drops)} time(s); last at "
                                   f"{_clock(drops[-1][0], long_range)}.")
             elif lossy:
                 worst = max(lossy, key=lambda c: c[2])
-                add(Theme.WARNING, f"Packet loss in {len(lossy)} of {len(self._conn)} checks, "
+                add(Theme.WARNING, f"Packet loss in {len(lossy)} of {len(self._conn_view)} checks, "
                                    f"worst {worst[2]:.0f}% at {_clock(worst[0], long_range)}.")
             else:
                 add(Theme.SUCCESS, "No packet loss detected in this period.")
-            pings = [c for c in self._conn if c[1] is not None]
+            pings = [c for c in self._conn_view if c[1] is not None]
             if pings:
                 avg = sum(c[1] for c in pings) / len(pings)
                 worst = max(pings, key=lambda c: c[1])
