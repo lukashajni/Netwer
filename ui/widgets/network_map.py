@@ -96,7 +96,16 @@ class _LabeledIcon(QWidget):
 
         self._icon_name = icon_name
         self._subtitle_mono = subtitle_mono
+        self._on_click = None
         self.set_colors(icon_color, title_color or Theme.TEXT_BODY)
+
+    def set_click(self, callback):
+        self._on_click = callback
+        self.setCursor(Qt.CursorShape.PointingHandCursor if callback else Qt.CursorShape.ArrowCursor)
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton and self._on_click:
+            self._on_click()
 
     def set_colors(self, icon_color, title_color):
         self.icon_label.setPixmap(Icons.pixmap(self._icon_name,
@@ -219,6 +228,13 @@ class NetworkMap(QWidget):
         self._router_node.set_title(rv)
         self._router_node.set_subtitle(self._gateway)
 
+        # Clicking the router opens its details and open ports, like any device
+        gw = next((d for d in devices if d.get("ip") == gateway), None)
+        gw_dev = dict(gw or {"ip": gateway, "hostname": "", "vendor": router_vendor})
+        gw_dev["is_gateway"] = True
+        has_gw = bool(gateway) and gateway != "\u2014"
+        self._router_node.set_click((lambda: self.node_clicked.emit(gw_dev)) if has_gw else None)
+
         # Rebuild the device row
         while self._devices_layout.count():
             item = self._devices_layout.takeAt(0)
@@ -270,6 +286,11 @@ class NetworkMap(QWidget):
         router_top = top_of(self._router_node.icon_label)
         router_bottom = bottom_of(self._router_node.icon_label)
 
+        # Everything hangs off the router icon's axis. Odd widths make the
+        # other icons land 1 px to the side, which showed as a jog in the line.
+        cx = router_top.x()
+        internet_bottom.setX(cx)
+
         # Internet -> Router
         p.drawLine(internet_bottom, router_top)
 
@@ -279,11 +300,13 @@ class NetworkMap(QWidget):
             item = self._devices_layout.itemAt(i)
             w = item.widget()
             if isinstance(w, _DeviceNode):
-                device_tops.append(top_of(w.icon_label))
+                pt = top_of(w.icon_label)
+                if abs(pt.x() - cx) <= 3:      # rounding, not a real offset
+                    pt.setX(cx)
+                device_tops.append(pt)
 
         if device_tops:
             bus_y = (router_bottom.y() + device_tops[0].y()) / 2
-            cx = router_bottom.x()
             p.drawLine(QPointF(cx, router_bottom.y()), QPointF(cx, bus_y))
             xs = [pt.x() for pt in device_tops]
             if len(xs) > 1:

@@ -85,7 +85,7 @@ class NotificationsPanel(QWidget):
         act_row.addStretch()
         self._mark_btn = QPushButton("Mark all read")
         self._mark_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._mark_btn.clicked.connect(notifications.mark_all_read)
+        self._mark_btn.clicked.connect(self._mark_all_read)
         act_row.addWidget(self._mark_btn)
         outer.addLayout(act_row)
 
@@ -99,6 +99,11 @@ class NotificationsPanel(QWidget):
         self._list.addStretch()
         scroll.setWidget(self._list_host)
         outer.addWidget(scroll, 1)
+
+    def _mark_all_read(self):
+        # Reading everything dismisses it: mark read (updates the badge), then clear.
+        notifications.mark_all_read()
+        notifications.clear()
 
     def refresh_list(self):
         # Clear the list

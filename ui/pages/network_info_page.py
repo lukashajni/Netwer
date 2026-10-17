@@ -12,6 +12,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from app.adapter_state import adapter_state
 from app.resources import Icons
 from app.theme import Theme
 from ui.pages.base_page import BasePage
@@ -35,17 +36,14 @@ class NetworkInfoPage(BasePage):
         toolbar = QHBoxLayout()
         toolbar.setSpacing(10)
 
-        adapter_lbl = QLabel("Adapter:")
-        adapter_lbl.setStyleSheet(
-            f"color: {Theme.TEXT_SECONDARY}; font-size: {Theme.FONT_SIZE_SMALL}px;"
-        )
-        toolbar.addWidget(adapter_lbl)
-
-        self.adapter_combo = QComboBox()
-        self.adapter_combo.setMinimumWidth(280)
-        self.adapter_combo.setStyleSheet(self._combo_style())
-        self.adapter_combo.currentIndexChanged.connect(self._on_adapter_selected)
-        toolbar.addWidget(self.adapter_combo)
+        self.adapter_label = QLabel("Adapter: \u2026")
+        self.adapter_label.setStyleSheet(
+            f"color: {Theme.TEXT_BODY}; font-size: {Theme.FONT_SIZE_SMALL}px; font-weight: 600;")
+        toolbar.addWidget(self.adapter_label)
+        hint = QLabel("change it in Settings")
+        hint.setStyleSheet(f"color: {Theme.TEXT_MUTED}; font-size: {Theme.FONT_SIZE_TINY}px;")
+        toolbar.addWidget(hint)
+        adapter_state.changed.connect(lambda _n: self._load_adapters())
 
         toolbar.addStretch()
 
@@ -119,35 +117,35 @@ class NetworkInfoPage(BasePage):
             self._load_public_ip()
 
     # -- Data loading --
+    def _resolve_adapter(self):
+        # The adapter chosen in Settings, or the active one when set to Auto
+        name = adapter_state.get()
+        if not name:
+            name = self.core.get_network_config().get("adapter", "")
+        if not name:
+            adapters = self.core.list_adapters()
+            adapters = adapters.get("items", adapters) if isinstance(adapters, dict) else adapters
+            up = [a for a in adapters or [] if a.get("status") == "Up"]
+            name = (up or adapters or [{}])[0].get("name", "")
+        return {"name": name}
+
     def _load_adapters(self):
         self._status.setText("Loading adapters…")
-        w = OneshotWorker(self.core.list_adapters)
+        w = OneshotWorker(self._resolve_adapter)
         w.result.connect(self._on_adapters)
         w.error.connect(lambda e: self._status.setText(self.core.friendly_error(e)))
         self.register_worker(w)
         w.start()
 
     def _on_adapters(self, data):
-        adapters = data.get("items", data) if isinstance(data, dict) else data
-        if not isinstance(adapters, list):
-            self._status.setText("Could not list adapters")
+        name = data.get("name", "") if isinstance(data, dict) else ""
+        if not name:
+            self._status.setText("No adapter found")
             return
-        self.adapter_combo.blockSignals(True)
-        self.adapter_combo.clear()
-        # Sort - Up adapters first, then by name
-        adapters.sort(key=lambda a: (a.get("status") != "Up", a.get("name", "")))
-        for a in adapters:
-            name = a.get("name", "")
-            status = a.get("status", "")
-            if not name:
-                continue
-            label = name if status == "Up" else f"{name}  ({status})"
-            self.adapter_combo.addItem(label, name)
-        self.adapter_combo.blockSignals(False)
         self._status.setText("")
-        # Load details for the first (active) adapter
-        if self.adapter_combo.count() > 0:
-            self._on_adapter_selected(0)
+        self._current_adapter = name
+        self.adapter_label.setText(f"Adapter: {name}")
+        self._load_details(name)
 
     def _load_public_ip(self):
         w = OneshotWorker(self.core.get_public_ip)
@@ -164,13 +162,6 @@ class NetworkInfoPage(BasePage):
         # If a table is already shown, refresh it to include the public IP
         if self._current_adapter:
             self._refresh_current()
-
-    def _on_adapter_selected(self, index):
-        name = self.adapter_combo.itemData(index)
-        if not name:
-            return
-        self._current_adapter = name
-        self._load_details(name)
 
     def _load_details(self, name):
         self.info_table.clear()

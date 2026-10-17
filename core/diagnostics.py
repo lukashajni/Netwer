@@ -271,8 +271,8 @@ def run_diagnostics_stream(core, deep=False):
             m["signal"] = int(str(wifi.get("signal", 0)).rstrip("%") or 0)
         except Exception:
             m["signal"] = 0
-        m["band"] = wifi.get("band", "")
-        m["channel"] = wifi.get("channel", "")
+        m["band"] = wifi.get("band", "") if wifi.get("band") != "\u2014" else ""
+        m["channel"] = wifi.get("channel", "") if wifi.get("channel") != "\u2014" else ""
     else:
         m["wifi"] = False
     yield progress("Measuring Wi-Fi quality…")
