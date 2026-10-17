@@ -2799,14 +2799,18 @@ def stream_speed_test():
     yield {"type": "ping", "ms": round(ping_in_ms, 1) }
 
 
-    test_dict_upload: dict[str,float | int] = speedx.upload_speed_test(url=download_url,speed_time=15)
+    test_dict_upload: dict[str,float | int] = yield from speedx.upload_speed_test(
+        url=download_url,speed_time=15
+    )
     ul_speed_in_Mbps: float = speedx.calculate_speed_in_Mbps(test_dict_upload["total_bytes"], test_dict_upload["elapsed_time"])
-    print(f"Upload speed: {ul_speed_in_Mbps}Mbps")
+    #print(f"Upload speed: {ul_speed_in_Mbps}Mbps")
     yield {"type": "upload", "mbps": round(ul_speed_in_Mbps, 2)}
 
-    test_dict: dict[str,float | int] = speedx.download_speed_test(url=download_url,speed_time=15)
-    dl_speed_in_Mbps: float = speedx.calculate_speed_in_Mbps(test_dict["total_bytes"], test_dict["elapsed_time"])
-    print(f"Download speed: {dl_speed_in_Mbps}Mbps")
+    test_dict_download: dict[str,float | int] = yield from speedx.download_speed_test(
+        url=download_url,speed_time=15
+    )
+    dl_speed_in_Mbps: float = speedx.calculate_speed_in_Mbps(test_dict_download["total_bytes"], test_dict_download["elapsed_time"])
+    #print(f"Download speed: {dl_speed_in_Mbps}Mbps")
     yield {"type": "download", "mbps": round(dl_speed_in_Mbps, 2)}
 
     yield {"type": "result",
