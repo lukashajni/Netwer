@@ -149,6 +149,24 @@ class SettingsPanel(QWidget):
                            f"background: transparent;")
         self._body.addWidget(hint)
 
+        # -- AI assistant --
+        self._section("AI assistant")
+        ai_row = QWidget()
+        al = QHBoxLayout(ai_row)
+        al.setContentsMargins(0, 4, 0, 4)
+        ai_lbl = QLabel("Provider, model and API key")
+        ai_lbl.setStyleSheet(f"color: {Theme.TEXT_BODY}; font-size: {Theme.FONT_SIZE_SMALL}px; background: transparent;")
+        al.addWidget(ai_lbl)
+        al.addStretch()
+        ai_btn = QPushButton("Set up\u2026")
+        ai_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        ai_btn.setStyleSheet(f"QPushButton {{ background: {Theme.ACCENT}; color: white; border: none; border-radius: 8px;"
+                             f"padding: 7px 16px; font-size: {Theme.FONT_SIZE_SMALL}px; font-weight: 600; }}"
+                             f"QPushButton:hover {{ background: {Theme.ACCENT_HOVER}; }}")
+        ai_btn.clicked.connect(self._open_ai)
+        al.addWidget(ai_btn)
+        self._body.addWidget(ai_row)
+
         # -- Display --
         self._section("Display")
         from app import display as display_res
@@ -280,6 +298,10 @@ class SettingsPanel(QWidget):
         return cb
 
     # -- Actions --
+    def _open_ai(self):
+        from ui.components.ai_settings_dialog import AISettingsDialog
+        AISettingsDialog(self).exec()
+
     def _on_adapter(self, _index):
         from app.adapter_state import adapter_state
         adapter_state.set(self.adapter_combo.currentData() or "")

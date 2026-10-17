@@ -1,9 +1,8 @@
 """Main application window and page navigation."""
 
-from PyQt6.QtCore import QEasingCurve, QPropertyAnimation
-from PyQt6.QtGui import QIcon
+from PyQt6.QtCore import QEasingCurve, QPropertyAnimation, Qt, pyqtProperty
+from PyQt6.QtGui import QColor, QIcon, QPainter
 from PyQt6.QtWidgets import (
-    QGraphicsOpacityEffect,
     QHBoxLayout,
     QMainWindow,
     QStackedWidget,
@@ -21,6 +20,28 @@ from ui.components.sidebar import Sidebar
 from ui.components.topbar import TopBar
 from ui.pages.base_page import BasePage
 from ui.widgets.loading_overlay import LoadingOverlay
+
+
+class _FadeCover(QWidget):
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        self._alpha = 255
+
+    def _get(self):
+        return self._alpha
+
+    def _set(self, value):
+        self._alpha = int(value)
+        self.update()
+
+    cover = pyqtProperty(int, _get, _set)
+
+    def paintEvent(self, event):
+        p = QPainter(self)
+        color = QColor(Theme.BG_APP)
+        color.setAlpha(self._alpha)
+        p.fillRect(self.rect(), color)
 
 
 class MainWindow(QMainWindow):
@@ -592,14 +613,19 @@ class MainWindow(QMainWindow):
             page.set_target(ip, autostart=True)
 
     def _fade_in(self, widget: QWidget) -> None:
-        effect = QGraphicsOpacityEffect(widget)
-        widget.setGraphicsEffect(effect)
-        anim = QPropertyAnimation(effect, b"opacity")
+        # A background-coloured cover fades out over the page; the page itself is never
+        # rendered through a graphics effect, so its text stays sharp during the transition.
+        parent = widget.parentWidget() or widget
+        cover = _FadeCover(parent)
+        cover.setGeometry(parent.rect())
+        cover.show()
+        cover.raise_()
+        anim = QPropertyAnimation(cover, b"cover")
         anim.setDuration(Theme.ANIM_NORMAL)
-        anim.setStartValue(0.0)
-        anim.setEndValue(1.0)
+        anim.setStartValue(255)
+        anim.setEndValue(0)
         anim.setEasingCurve(QEasingCurve.Type.OutCubic)
-        anim.finished.connect(lambda: widget.setGraphicsEffect(None))
+        anim.finished.connect(cover.deleteLater)
         anim.start()
         self._fade_anim = anim
 

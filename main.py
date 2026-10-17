@@ -20,7 +20,7 @@ from ui.pages.speedtest_page import SpeedTestPage
 from ui.pages.system_info_page import SystemInfoPage
 from ui.pages.wifi_info_page import WiFiInfoPage
 
-def build_global_qss():
+def build_global_qss(): 
     arrow = arrow_url()
     app_gradient = (
         f"qlineargradient(x1:0, y1:0, x2:1, y2:1, "
@@ -177,7 +177,7 @@ def main() -> int:
         box.exec()
 
     QFont.insertSubstitutions(Theme.FONT_FAMILY_PRIMARY, [
-        "Segoe UI Variable", "Segoe UI", "Inter", "Helvetica Neue",
+        "Segoe UI Variable Text", "Segoe UI", "Inter", "Helvetica Neue",
         "Arial", "sans-serif",
     ])
     QFont.insertSubstitutions(Theme.FONT_MONO_PRIMARY, [
@@ -185,7 +185,8 @@ def main() -> int:
         "DejaVu Sans Mono", "monospace",
     ])
     font = QFont(Theme.FONT_FAMILY_PRIMARY, 10)
-    font.setStyleStrategy(QFont.StyleStrategy.PreferAntialias)
+    font.setStyleStrategy(QFont.StyleStrategy.PreferAntialias | QFont.StyleStrategy.PreferQuality)
+    font.setHintingPreference(QFont.HintingPreference.PreferFullHinting)   # crisper glyphs on Windows
     app.setFont(font)
 
     window = MainWindow(netwer_core)

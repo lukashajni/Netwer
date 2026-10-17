@@ -43,15 +43,15 @@ class Theme:
 
     # Typography
     # Qt stylesheets and QFont accept comma-separated font-family fallbacks.
-    FONT_FAMILY = ('"Inter", "Segoe UI Variable Display", "Segoe UI", '
+    FONT_FAMILY = ('"Segoe UI Variable Text", "Segoe UI", "Inter", '
                    '"Helvetica Neue", Arial, sans-serif')
     FONT_MONO = ('"JetBrains Mono", "Cascadia Code", "Cascadia Mono", '
                  'Consolas, "DejaVu Sans Mono", monospace')
     # For data values: cleaner, heavier sans.
-    FONT_DATA = ('"Inter", "Segoe UI Semibold", "Segoe UI", Arial, sans-serif')
+    FONT_DATA = ('"Segoe UI Variable Text", "Segoe UI Semibold", "Segoe UI", "Inter", Arial, sans-serif')
 
     #: First font family in each stack for QFont calls.
-    FONT_FAMILY_PRIMARY = "Inter"
+    FONT_FAMILY_PRIMARY = "Segoe UI"
     FONT_MONO_PRIMARY = "JetBrains Mono"
 
     FONT_SIZE_TITLE = 24
@@ -273,6 +273,9 @@ def apply_theme(theme_name: str, accent_name: str = None) -> None:
         if key == "mode":
             continue
         setattr(Theme, key, value)
+    # Secondary text must stay readable on the lightest card surface
+    for key, target in (("TEXT_SECONDARY", 7.0), ("TEXT_MUTED", 5.0), ("TEXT_FAINT", 3.8)):
+        setattr(Theme, key, _ensure_contrast(palette[key], palette["BG_ELEVATED"], target))
     # INFO follows ACCENT
     Theme.INFO = Theme.ACCENT
     Theme.GRAD_ACCENT = Theme.ACCENT
@@ -306,6 +309,30 @@ def apply_accent(preset_name: str) -> None:
     Theme.CHART_UPLOAD = Theme.ACCENT_PURPLE
     Theme.CHART_FILL_DL = _hex_to_rgba(Theme.ACCENT, 45)
     Theme.CHART_FILL_UL = _hex_to_rgba(Theme.ACCENT_PURPLE, 35)
+
+
+def _luminance(hex_color: str) -> float:
+    h = hex_color.lstrip("#")
+    ch = [int(h[i:i + 2], 16) / 255 for i in (0, 2, 4)]
+    ch = [c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4 for c in ch]
+    return 0.2126 * ch[0] + 0.7152 * ch[1] + 0.0722 * ch[2]
+
+
+def _contrast(a: str, b: str) -> float:
+    hi, lo = sorted((_luminance(a), _luminance(b)), reverse=True)
+    return (hi + 0.05) / (lo + 0.05)
+
+
+def _ensure_contrast(fg: str, bg: str, target: float) -> str:
+    # push the colour away from the background until it reads well
+    end = 255 if _luminance(bg) < 0.4 else 0
+    h = fg.lstrip("#")
+    rgb = [int(h[i:i + 2], 16) for i in (0, 2, 4)]
+    for _ in range(40):
+        if _contrast("#%02x%02x%02x" % tuple(rgb), bg) >= target:
+            break
+        rgb = [round(c + (end - c) * 0.06) for c in rgb]
+    return "#%02x%02x%02x" % tuple(rgb)
 
 
 def _lighten(hex_color: str, amount: float = 0.18) -> str:

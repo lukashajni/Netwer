@@ -1,5 +1,6 @@
-"""Netwer AI chat panel."""
+"""Chat panel for the AI assistant."""
 import html
+import os
 import re
 
 from PyQt6.QtCore import QEasingCurve, QPropertyAnimation, Qt, QTimer, pyqtSignal
@@ -15,27 +16,73 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from app.adapter_state import adapter_state
+from app.notifications import notifications
 from app.resources import Icons
 from app.store import store
 from app.theme import Theme
 from app.traffic_history import traffic_history
-from core import netwer_ai
+from core import ai_client, ai_knowledge, ai_tools, network
 from core.discovery import get_discovery_service
 from ui.widgets.network_map import device_display_name, guess_device_icon
+from workers import StreamWorker
 
 WIDTH = 420
-BUBBLE_MAX = 318          # widest AI answer bubble
-SEVERITY_COLOUR = {"critical": "DANGER", "warning": "WARNING", "info": "ACCENT", "good": "SUCCESS"}
+BUBBLE_MAX = 318
+SUGGESTIONS = ("Explain these results", "What should I fix first?", "How can I improve my network?",
+               "Is my network secure?", "Who is on my network?")
 
 
 def _rich(s: str) -> str:
-    # escape, then **bold**
     s = html.escape(s)
     s = re.sub(r"\*\*(.+?)\*\*", rf"<b style='color:{Theme.TEXT_PRIMARY};'>\1</b>", s)
+    s = re.sub(r"`([^`]+)`", rf"<span style='font-family:{Theme.FONT_MONO}; color:{Theme.TEXT_PRIMARY};'>\1</span>", s)
     return f"<div style='line-height:145%;'>{s}</div>"
 
 
-def _label(text: str, color: str, size: float = 13, rich: bool = False, bold: bool = False) -> QLabel:
+def markdown_blocks(src: str) -> list:
+    # paragraphs, numbered lists, bullet lists and headings are enough for chat answers
+    blocks, para, items, kind = [], [], [], None
+
+    def flush_para():
+        if para:
+            blocks.append({"type": "text", "text": " ".join(para)})
+            para.clear()
+
+    def flush_list():
+        nonlocal items, kind
+        if items:
+            blocks.append({"type": "steps" if kind == "num" else "bullets", "items": items})
+        items, kind = [], None
+
+    for line in src.split("\n"):
+        s = line.strip()
+        num, bul = re.match(r"^\d+[.)]\s+(.*)", s), re.match(r"^[-*\u2022]\s+(.*)", s)
+        if not s:
+            flush_para()
+            flush_list()
+        elif num or bul:
+            flush_para()
+            want = "num" if num else "bul"
+            if kind != want:
+                flush_list()
+                kind = want
+            items.append((num or bul).group(1))
+        elif s.startswith("#"):
+            flush_para()
+            flush_list()
+            blocks.append({"type": "text", "text": f"**{s.lstrip('# ').strip()}**"})
+        elif items and line.startswith((" ", "\t")):
+            items[-1] += " " + s
+        else:
+            flush_list()
+            para.append(s)
+    flush_para()
+    flush_list()
+    return blocks
+
+
+def _label(text: str, color: str, size: int = 13, rich: bool = False, bold: bool = False) -> QLabel:
     lab = QLabel(_rich(text) if rich else text)
     if rich:
         lab.setTextFormat(Qt.TextFormat.RichText)
@@ -63,12 +110,11 @@ class _Avatar(QLabel):
         self.setFixedSize(size, size)
         self.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.setPixmap(Icons.pixmap("ai", int(size * 0.5), "#ffffff"))
-        self.setStyleSheet(f"background: {Theme.GRAD_ACCENT}; border-radius: {size // 2}px;")
+        self.setStyleSheet(f"background: {Theme.ACCENT}; border-radius: {size // 2}px;")
 
 
 class _Typing(QFrame):
-    # animated dots while thinking
-
+    # animated dots with an optional status line
     def __init__(self):
         super().__init__()
         self.setObjectName("Typing")
@@ -77,23 +123,28 @@ class _Typing(QFrame):
             f"border-radius: 14px; border-bottom-left-radius: 4px; }}")
         lay = QHBoxLayout(self)
         lay.setContentsMargins(14, 9, 14, 9)
-        self._lab = QLabel("\u25CF")
-        self._lab.setStyleSheet(f"color: {Theme.ACCENT}; font-size: 11px; background: transparent;")
-        lay.addWidget(self._lab)
+        lay.setSpacing(8)
+        self._dots = QLabel("\u25CF")
+        self._dots.setStyleSheet(f"color: {Theme.ACCENT}; font-size: 11px; background: transparent;")
+        self._status = QLabel("")
+        self._status.setStyleSheet(f"color: {Theme.TEXT_MUTED}; font-size: 12px; background: transparent;")
+        lay.addWidget(self._dots)
+        lay.addWidget(self._status)
         self._n = 1
         self._timer = QTimer(self)
         self._timer.setInterval(300)
         self._timer.timeout.connect(self._tick)
         self._timer.start()
 
+    def set_status(self, text: str):
+        self._status.setText(text)
+
     def _tick(self):
         self._n = self._n % 3 + 1
-        self._lab.setText("  ".join(["\u25CF"] * self._n))
+        self._dots.setText("  ".join(["\u25CF"] * self._n))
 
 
 class _AIBubble(QFrame):
-    # one answer, blocks stacked in a bubble
-
     def __init__(self, on_action):
         super().__init__()
         self._on_action = on_action
@@ -106,73 +157,48 @@ class _AIBubble(QFrame):
         self._lay.setContentsMargins(14, 11, 14, 12)
         self._lay.setSpacing(9)
 
-    def add_block(self, b: dict):
-        kind = b["type"]
-        if kind == "text":
-            w = _label(b["text"], Theme.TEXT_BODY, 13, rich=True)
-        elif kind == "steps":
-            w = self._steps(b["items"])
-        elif kind == "bullets":
-            w = self._bullets(b["items"])
-        elif kind == "finding":
-            w = self._finding(b)
-        elif kind == "actions":
-            w = self._actions(b["items"])
-        else:
-            return
-        self._lay.addWidget(w)
+    def set_blocks(self, blocks):
+        while self._lay.count():
+            w = self._lay.takeAt(0).widget()
+            if w is not None:
+                w.setParent(None)
+        for b in blocks:
+            kind = b["type"]
+            if kind == "text":
+                w = _label(b["text"], Theme.TEXT_BODY, 13, rich=True)
+            elif kind == "steps":
+                w = self._list(b["items"], numbered=True)
+            elif kind == "bullets":
+                w = self._list(b["items"], numbered=False)
+            elif kind == "actions":
+                w = self._actions(b["items"])
+            else:
+                continue
+            self._lay.addWidget(w)
 
-    def _steps(self, items):
+    def _list(self, items, numbered):
         box = QWidget()
         box.setStyleSheet("background: transparent;")
         lay = QVBoxLayout(box)
         lay.setContentsMargins(0, 0, 0, 0)
-        lay.setSpacing(8)
+        lay.setSpacing(8 if numbered else 6)
         for i, item in enumerate(items, 1):
             row = QHBoxLayout()
             row.setSpacing(10)
-            badge = QLabel(str(i))
-            badge.setFixedSize(22, 22)
-            badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            badge.setStyleSheet(f"color: {Theme.ACCENT}; background: transparent; font-size: 11px;"
-                                f"font-weight: 700; border: 1px solid {Theme.ACCENT}; border-radius: 11px;")
-            row.addWidget(badge, 0, Qt.AlignmentFlag.AlignTop)
-            row.addWidget(_label(item, Theme.TEXT_BODY, 12.5, rich=True), 1)
+            if numbered:
+                mark = QLabel(str(i))
+                mark.setFixedSize(22, 22)
+                mark.setAlignment(Qt.AlignmentFlag.AlignCenter)
+                mark.setStyleSheet(f"color: {Theme.ACCENT}; background: transparent; font-size: 11px; font-weight: 700;"
+                                   f"border: 1px solid {Theme.ACCENT}; border-radius: 11px;")
+            else:
+                mark = QLabel("\u2022")
+                mark.setFixedWidth(10)
+                mark.setStyleSheet(f"color: {Theme.ACCENT}; background: transparent; font-size: 14px;")
+            row.addWidget(mark, 0, Qt.AlignmentFlag.AlignTop)
+            row.addWidget(_label(item, Theme.TEXT_BODY, 13, rich=True), 1)
             lay.addLayout(row)
         return box
-
-    def _bullets(self, items):
-        box = QWidget()
-        box.setStyleSheet("background: transparent;")
-        lay = QVBoxLayout(box)
-        lay.setContentsMargins(0, 0, 0, 0)
-        lay.setSpacing(6)
-        for item in items:
-            row = QHBoxLayout()
-            row.setSpacing(9)
-            dot = QLabel("\u2022")
-            dot.setFixedWidth(10)
-            dot.setStyleSheet(f"color: {Theme.ACCENT}; background: transparent; font-size: 14px;")
-            row.addWidget(dot, 0, Qt.AlignmentFlag.AlignTop)
-            row.addWidget(_label(item, Theme.TEXT_BODY, 12.5, rich=True), 1)
-            lay.addLayout(row)
-        return box
-
-    def _finding(self, b):
-        colour = getattr(Theme, SEVERITY_COLOUR.get(b["severity"], "ACCENT"))
-        card = QFrame()
-        card.setObjectName("Fnd")
-        card.setStyleSheet(f"#Fnd {{ background: rgba(7, 10, 20, 120); border: none;"
-                           f"border-left: 3px solid {colour}; border-radius: 8px; }}")
-        lay = QVBoxLayout(card)
-        lay.setContentsMargins(11, 8, 10, 9)
-        lay.setSpacing(3)
-        lay.addWidget(_label(b["title"], Theme.TEXT_PRIMARY, 12.5, bold=True))
-        if b.get("detail"):
-            lay.addWidget(_label(b["detail"], Theme.TEXT_SECONDARY, 12))
-        if b.get("action"):
-            lay.addWidget(_label("\u2192 " + b["action"], colour, 12))
-        return card
 
     def _actions(self, items):
         box = QWidget()
@@ -195,27 +221,28 @@ class _AIBubble(QFrame):
 
 class AIChatPanel(QWidget):
     navigate = pyqtSignal(str)       # page key, "health_run" or "scan:<ip>"
-    toggled = pyqtSignal(bool)       # open / closed
+    toggled = pyqtSignal(bool)
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self._ai = netwer_ai.NetwerAI()
         self._report = None
         self._open = False
         self._busy = False
-        self._typing = None
-        self._typing_row = None
-        self._chips = None
-        self._queue = []
-        self._current = None
-        self._suggestions = []
-        self._token = 0              # invalidates a pending answer after "clear"
+        self._worker = None
+        self._history = []
+        self._typing = self._typing_row = self._bubble = self._chips = None
+        self._answer = ""
+        self._actions = []
         self.setMaximumWidth(0)
         self.setMinimumWidth(0)
         self._anim = QPropertyAnimation(self, b"maximumWidth", self)
         self._anim.setDuration(240)
         self._anim.setEasingCurve(QEasingCurve.Type.OutCubic)
-        self._anim.finished.connect(self._after_anim)
+        self._anim.finished.connect(lambda: self._open and self.input.setFocus())
+        self._render_timer = QTimer(self)             # redraw the streaming answer a few times a second
+        self._render_timer.setSingleShot(True)
+        self._render_timer.setInterval(70)
+        self._render_timer.timeout.connect(self._render)
 
         shell = QHBoxLayout(self)
         shell.setContentsMargins(Theme.GAP, 0, 0, 0)
@@ -226,7 +253,6 @@ class AIChatPanel(QWidget):
         card.setStyleSheet(f"#AIPanel {{ background: {Theme.GLASS_CARD}; border: 1px solid {Theme.GLASS_BORDER};"
                            f"border-radius: {Theme.RADIUS_CARD}px; }}")
         shell.addWidget(card)
-
         outer = QVBoxLayout(card)
         outer.setContentsMargins(0, 0, 0, 0)
         outer.setSpacing(0)
@@ -237,6 +263,7 @@ class AIChatPanel(QWidget):
         outer.addWidget(line)
         outer.addWidget(self._build_chat(), 1)
         outer.addWidget(self._build_input())
+        self._refresh_status()
 
     # -- construction --
     def _build_header(self):
@@ -249,17 +276,19 @@ class AIChatPanel(QWidget):
         col = QVBoxLayout()
         col.setSpacing(1)
         col.addWidget(_label("Netwer AI", Theme.TEXT_PRIMARY, 15, bold=True))
-        sub = QLabel(f"<span style='color:{Theme.SUCCESS};'>\u25CF</span>&nbsp; Runs on your PC, nothing is sent out")
-        sub.setTextFormat(Qt.TextFormat.RichText)
-        sub.setStyleSheet(f"color: {Theme.TEXT_MUTED}; font-size: 11px; background: transparent;")
-        col.addWidget(sub)
+        self._status = QLabel("")
+        self._status.setTextFormat(Qt.TextFormat.RichText)
+        self._status.setStyleSheet(f"color: {Theme.TEXT_MUTED}; font-size: 11px; background: transparent;")
+        col.addWidget(self._status)
         lay.addLayout(col, 1)
-        self.btn_clear = _icon_button("clear_chat", "Clear conversation")
-        self.btn_clear.clicked.connect(self.clear)
+        btn_set = _icon_button("settings", "AI settings")
+        btn_set.clicked.connect(self._open_setup)
+        btn_clear = _icon_button("clear_chat", "Clear conversation")
+        btn_clear.clicked.connect(self.clear)
         btn_close = _icon_button("close", "Close")
         btn_close.clicked.connect(self.close_panel)
-        lay.addWidget(self.btn_clear)
-        lay.addWidget(btn_close)
+        for b in (btn_set, btn_clear, btn_close):
+            lay.addWidget(b)
         return w
 
     def _build_chat(self):
@@ -288,29 +317,35 @@ class AIChatPanel(QWidget):
         lay = QVBoxLayout(w)
         lay.setContentsMargins(0, 2, 0, 0)
         lay.setSpacing(8)
-        av = _Avatar(48)
-        lay.addWidget(av, 0, Qt.AlignmentFlag.AlignHCenter)
+        lay.addWidget(_Avatar(48), 0, Qt.AlignmentFlag.AlignHCenter)
         title = _label("Hi, I'm Netwer AI", Theme.TEXT_PRIMARY, 18, bold=True)
         title.setAlignment(Qt.AlignmentFlag.AlignHCenter)
         lay.addWidget(title)
-        sub = _label("Ask me about your network. I read your latest diagnosis, devices and traffic and "
-                     "explain them in plain language.", Theme.TEXT_MUTED, 12.5)
+        sub = _label("I can read your diagnosis, devices, port scan and traffic from Netwer and explain them "
+                     "in plain language.", Theme.TEXT_MUTED, 13)
         sub.setAlignment(Qt.AlignmentFlag.AlignHCenter)
         lay.addWidget(sub)
-        lay.addSpacing(4)
-        for q in self._ai.welcome_suggestions():
+        self._setup_btn = QPushButton("Connect an AI to get started")
+        self._setup_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._setup_btn.setStyleSheet(
+            f"QPushButton {{ background: {Theme.ACCENT}; color: white; border: none; border-radius: 10px;"
+            f"padding: 10px 14px; font-size: 13px; font-weight: 600; }}"
+            f"QPushButton:hover {{ background: {Theme.ACCENT_HOVER}; }}")
+        self._setup_btn.clicked.connect(self._open_setup)
+        lay.addWidget(self._setup_btn)
+        lay.addSpacing(2)
+        for q in SUGGESTIONS:
             lay.addWidget(self._suggestion_button(q))
+        self._setup_btn.setVisible(not ai_client.is_configured())
         return w
 
     def _suggestion_button(self, q: str, compact: bool = False) -> QPushButton:
         b = QPushButton(q)
         b.setCursor(Qt.CursorShape.PointingHandCursor)
-        pad = "6px 12px" if compact else "8px 14px"
-        radius = 14 if compact else 11
         b.setStyleSheet(
             f"QPushButton {{ background: {Theme.GLASS_INPUT}; color: {Theme.TEXT_BODY}; text-align: left;"
-            f"border: 1px solid {Theme.GLASS_BORDER}; border-radius: {radius}px; padding: {pad};"
-            f"font-size: {12 if compact else 12.5}px; }}"
+            f"border: 1px solid {Theme.GLASS_BORDER}; border-radius: {14 if compact else 11}px;"
+            f"padding: {'6px 12px' if compact else '8px 14px'}; font-size: {12 if compact else 13}px; }}"
             f"QPushButton:hover {{ border-color: {Theme.ACCENT}; background: {Theme.BG_ELEVATED}; }}")
         b.clicked.connect(lambda _=False, t=q: self.ask(t))
         return b
@@ -335,18 +370,19 @@ class AIChatPanel(QWidget):
         self.input.returnPressed.connect(self._submit)
         lay.addWidget(self.input, 1)
         self.btn_send = QPushButton()
-        self.btn_send.setIcon(Icons.get("send", "#ffffff"))
         self.btn_send.setFixedSize(34, 34)
         self.btn_send.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.btn_send.setStyleSheet(f"QPushButton {{ background: {Theme.GRAD_ACCENT}; border: none; border-radius: 17px; }}"
-                                    f"QPushButton:disabled {{ background: {Theme.BG_ELEVATED}; }}")
-        self.btn_send.clicked.connect(self._submit)
+        self.btn_send.setStyleSheet(f"QPushButton {{ background: {Theme.ACCENT}; border: none; border-radius: 17px; }}"
+                                    f"QPushButton:hover {{ background: {Theme.ACCENT_HOVER}; }}")
+        self.btn_send.clicked.connect(self._on_send_clicked)
         lay.addWidget(self.btn_send)
         outer.addWidget(bar)
-        note = QLabel("Answers come from your own measurements, so run a diagnosis first.")
+        note = QLabel("A summary of your network data (no MAC addresses, public IP or Wi-Fi name) goes to your AI provider.")
+        note.setWordWrap(True)
         note.setAlignment(Qt.AlignmentFlag.AlignHCenter)
         note.setStyleSheet(f"color: {Theme.TEXT_FAINT}; font-size: 10px; background: transparent;")
         outer.addWidget(note)
+        self._set_busy(False)
         return wrap
 
     # -- open / close --
@@ -355,18 +391,16 @@ class AIChatPanel(QWidget):
         return self._open
 
     def open(self):
-        if self._open:
-            return
-        self._open = True
-        self._animate(WIDTH + Theme.GAP)
-        self.toggled.emit(True)
+        if not self._open:
+            self._open = True
+            self._animate(WIDTH + Theme.GAP)
+            self.toggled.emit(True)
 
     def close_panel(self):
-        if not self._open:
-            return
-        self._open = False
-        self._animate(0)
-        self.toggled.emit(False)
+        if self._open:
+            self._open = False
+            self._animate(0)
+            self.toggled.emit(False)
 
     def toggle(self):
         self.close_panel() if self._open else self.open()
@@ -377,22 +411,33 @@ class AIChatPanel(QWidget):
         self._anim.setEndValue(target)
         self._anim.start()
 
-    def _after_anim(self):
-        if self._open:
-            self.input.setFocus()
+    # -- setup --
+    def _open_setup(self):
+        from ui.components.ai_settings_dialog import AISettingsDialog
+        if AISettingsDialog(self).exec():
+            self._refresh_status()
+
+    def _refresh_status(self):
+        cfg = ai_client.load_config()
+        ok = ai_client.is_configured()
+        self._status.setText(
+            f"<span style='color:{Theme.SUCCESS if ok else Theme.WARNING};'>\u25CF</span>&nbsp; "
+            + (f"Connected \u00b7 {html.escape(cfg['model'])}" if ok else "Not connected"))
+        if hasattr(self, "_setup_btn"):
+            try:
+                self._setup_btn.setVisible(not ok)
+            except RuntimeError:
+                pass
 
     # -- conversation --
     def set_report(self, report):
         self._report = report
 
     def clear(self):
-        self._token += 1
-        self._queue.clear()
-        self._current = None
-        self._busy = False
-        self._typing = None
-        self._chips = None
-        self._ai.reset()
+        self.stop()
+        self._history.clear()
+        self._typing = self._typing_row = self._bubble = self._chips = None
+        self._answer, self._actions = "", []
         while self._chat.count():
             item = self._chat.takeAt(0)
             if item.widget() is not None:
@@ -402,8 +447,161 @@ class AIChatPanel(QWidget):
         self._welcome = self._build_welcome()
         self._chat.addWidget(self._welcome)
         self._chat.addStretch(1)
-        self.input.setEnabled(True)
-        self.btn_send.setEnabled(True)
+        self._set_busy(False)
+
+    def stop(self):
+        if self._worker is not None:
+            self._worker.stop()
+
+    def ask_about(self, finding: dict):
+        self.ask(f"Explain this finding and how to fix it: {finding.get('title', '')}. {finding.get('detail', '')}")
+
+    def ask(self, question: str):
+        question = (question or "").strip()
+        if not question or self._busy:
+            return
+        self.open()
+        if not ai_client.is_configured():
+            self._open_setup()
+            if not ai_client.is_configured():
+                return
+        self._welcome.hide()
+        self._remove_chips()
+        self._add_user(question)
+        tools = ai_tools.AppTools(self._snapshot())
+        self._answer, self._actions, self._bubble = "", [], None
+        self._typing = _Typing()
+        self._add_ai_row(self._typing)
+        self._set_busy(True)
+        self._question = question
+        w = StreamWorker(ai_client.chat, list(self._history), question, ai_knowledge.build_system_prompt(),
+                         ai_tools.TOOLS, tools, ai_client.load_config())
+        w.result.connect(self._on_event)
+        w.error.connect(self._on_error)
+        w.done.connect(self._on_done)
+        self._worker = w
+        w.start()
+
+    def _submit(self):
+        text = self.input.text()
+        self.input.clear()
+        self.ask(text)
+
+    def _on_send_clicked(self):
+        self.stop() if self._busy else self._submit()
+
+    # -- data the assistant can read --
+    def _snapshot(self) -> dict:
+        snap = {"selected_adapter": adapter_state.get()}
+        r = self._report
+        if r:
+            m = dict(r.get("measurements") or {})
+            for k in ("ssid", "mac", "public_ip"):
+                m.pop(k, None)
+            snap["diagnosis"] = {"headline": r.get("headline"), "summary": r.get("summary"),
+                                 "severity": r.get("severity"), "measurements": m,
+                                 "findings": [{k: f.get(k) for k in ("severity", "title", "detail", "action")}
+                                              for f in r.get("findings", [])]}
+        try:
+            cfg = network.get_network_config()
+            snap["network"] = {k: cfg.get(k) for k in ("adapter", "ip", "gateway", "dns", "error") if cfg.get(k)}
+        except Exception:
+            pass
+        devices = []
+        try:
+            for d in get_discovery_service().snapshot().get("devices", [])[:25]:
+                devices.append({"ip": d.get("ip", ""), "name": device_display_name(d), "vendor": d.get("vendor", ""),
+                                "kind": guess_device_icon(d).replace("dev_", ""), "is_gateway": bool(d.get("is_gateway"))})
+        except Exception:
+            pass
+        snap["devices"] = devices
+        try:
+            ps = (store.get_last_scan("port_scanner") or {}).get("payload") or {}
+            if ps.get("target"):
+                snap["port_scan"] = {"target": ps["target"], "target_name": ps.get("target_name", ""),
+                                     "device_type": ps.get("device_type", ""),
+                                     "open_ports": [{"port": x.get("port"), "service": x.get("service"),
+                                                     "banner": (x.get("banner") or "")[:60]} for x in ps.get("results", [])]}
+        except Exception:
+            pass
+        snap["traffic"] = ai_tools.traffic_snapshot(traffic_history.bandwidth(3600), traffic_history.connectivity(3600),
+                                                    traffic_history.adapter)
+        try:
+            from core import wifi
+            w = wifi.get_wifi_info() or {}
+            if w and "error" not in w:
+                snap["wifi"] = {k: v for k, v in w.items() if k not in ("ssid", "bssid", "networks", "nearby")}
+        except Exception:
+            pass
+        try:
+            import psutil
+            snap["system"] = {"cpu_percent": psutil.cpu_percent(None), "memory_percent": psutil.virtual_memory().percent,
+                              "disk_percent": psutil.disk_usage(os.path.abspath(os.sep)).percent}
+        except Exception:
+            pass
+        snap["activity"] = [{"title": n.title, "detail": n.detail, "kind": n.kind} for n in notifications.items()[:10]]
+        return snap
+
+    # -- streaming --
+    def _on_event(self, ev: dict):
+        if "tool" in ev and self._typing is not None:
+            self._typing.set_status(f"Reading {ev['tool']}\u2026")
+        elif "text" in ev:
+            if self._bubble is None:
+                self._start_bubble()
+            self._answer += ev["text"]
+            if not self._render_timer.isActive():
+                self._render_timer.start()
+        elif "action" in ev:
+            self._actions.append(ev["action"])
+
+    def _on_error(self, message: str):
+        self._answer += ("\n\n" if self._answer else "") + f"\u26A0 {message}"
+        if self._bubble is None:
+            self._start_bubble()
+        self._failed = True
+        self._render()
+
+    def _on_done(self):
+        self._render_timer.stop()
+        if self._bubble is None and self._typing is not None:
+            self._start_bubble()
+        self._render(final=True)
+        if self._answer and not getattr(self, "_failed", False):
+            self._history += [{"role": "user", "content": self._question},
+                              {"role": "assistant", "content": self._answer}]
+        self._failed = False
+        self._worker = None
+        self._typing = None
+        self._set_busy(False)
+        self._scroll_down()
+
+    def _start_bubble(self):
+        if self._typing_row is not None:
+            self._chat.removeItem(self._typing_row)
+            self._drop_layout(self._typing_row)
+            self._typing_row = None
+        self._typing = None
+        self._bubble = _AIBubble(self._on_action)
+        self._add_ai_row(self._bubble)
+
+    def _render(self, final: bool = False):
+        if self._bubble is None:
+            return
+        blocks = markdown_blocks(self._answer)
+        if final and self._actions:
+            blocks.append({"type": "actions", "items": self._actions})
+        self._bubble.set_blocks(blocks)
+        self._scroll_down()
+
+    # -- layout helpers --
+    def _set_busy(self, busy: bool):
+        self._busy = busy
+        self.btn_send.setIcon(Icons.get("close" if busy else "send", "#ffffff"))
+        self.btn_send.setToolTip("Stop" if busy else "Send")
+        self.input.setEnabled(not busy)
+        if not busy and self._open:
+            self.input.setFocus()
 
     def _drop_layout(self, layout):
         while layout.count():
@@ -413,95 +611,14 @@ class AIChatPanel(QWidget):
             elif it.layout() is not None:
                 self._drop_layout(it.layout())
 
-    def ask(self, question: str, finding: dict = None):
-        # finding: set when asking about one card
-        question = (question or "").strip()
-        if not question or self._busy:
-            return
-        self.open()
-        self._welcome.hide()
-        self._remove_chips()
-        self._add_user(question)
-        ctx = self._collect_context()
-        answer = (self._ai.explain_finding(finding, ctx) if finding
-                  else self._ai.answer(question, ctx))
-        self._busy = True
-        self.input.setEnabled(False)
-        self.btn_send.setEnabled(False)
-        self._typing = _Typing()
-        self._add_ai_row(self._typing)
-        token = self._token
-        QTimer.singleShot(650, lambda: self._begin_answer(answer, token))
-
-    def ask_about(self, finding: dict):
-        self.ask(f"Explain: {finding.get('title', 'this finding')}", finding=finding)
-
-    def _submit(self):
-        text = self.input.text()
-        self.input.clear()
-        self.ask(text)
-
-    def _collect_context(self) -> dict:
-        devices = []
-        try:
-            for d in get_discovery_service().snapshot().get("devices", []):
-                devices.append({"ip": d.get("ip", ""), "name": device_display_name(d),
-                                "kind": guess_device_icon(d).replace("dev_", ""),
-                                "is_gateway": bool(d.get("is_gateway"))})
-        except Exception:
-            pass
-        port_scan = None
-        try:
-            port_scan = (store.get_last_scan("port_scanner") or {}).get("payload")
-        except Exception:
-            pass
-        traffic = netwer_ai.traffic_summary(traffic_history.bandwidth(300),
-                                            traffic_history.connectivity(300), traffic_history.adapter)
-        return netwer_ai.build_context(self._report, devices, port_scan, traffic)
-
-    # -- rendering --
-    def _begin_answer(self, answer: dict, token: int):
-        if token != self._token or self._typing is None:      # cleared while thinking
-            return
-        row = self._typing_row
-        self._chat.removeItem(row)
-        self._drop_layout(row)
-        bubble = _AIBubble(self._on_action)
-        self._add_ai_row(bubble)
-        self._queue = list(answer["blocks"])
-        self._suggestions = answer.get("suggestions", [])
-        self._current = bubble
-        self._reveal()
-
-    def _reveal(self):
-        if self._current is None:
-            return
-        if self._queue:
-            self._current.add_block(self._queue.pop(0))
-            self._scroll_down()
-            token = self._token
-            QTimer.singleShot(170, lambda: token == self._token and self._reveal())
-            return
-        if self._suggestions:
-            self._add_chips(self._suggestions)
-        self._current = None
-        self._typing = None
-        self._busy = False
-        self.input.setEnabled(True)
-        self.btn_send.setEnabled(True)
-        self.input.setFocus()
-        self._scroll_down()
-
     def _add_user(self, text: str):
         bubble = QFrame()
         bubble.setObjectName("UserBubble")
-        bubble.setStyleSheet(
-            f"#UserBubble {{ background: {Theme.GRAD_ACCENT}; border: none; border-radius: 14px;"
-            f"border-bottom-right-radius: 4px; }}")
+        bubble.setStyleSheet(f"#UserBubble {{ background: {Theme.ACCENT}; border: none; border-radius: 14px;"
+                             f"border-bottom-right-radius: 4px; }}")
         lay = QVBoxLayout(bubble)
         lay.setContentsMargins(14, 9, 14, 10)
         label = _label(text, "#ffffff", 13)
-        # Size the bubble to its text, wrapping only past 250 px.
         probe = QLabel(text)
         probe.setStyleSheet("font-size: 13px;")
         probe.ensurePolished()
@@ -521,19 +638,6 @@ class AIChatPanel(QWidget):
         if isinstance(content, _Typing):
             self._typing_row = row
         self._insert(row)
-
-    def _add_chips(self, suggestions):
-        col = QVBoxLayout()
-        col.setContentsMargins(37, 0, 0, 0)
-        col.setSpacing(6)
-        for s in suggestions:
-            b = self._suggestion_button(s, compact=True)
-            wrap = QHBoxLayout()
-            wrap.addWidget(b)
-            wrap.addStretch(1)
-            col.addLayout(wrap)
-        self._chips = col
-        self._insert(col)
 
     def _remove_chips(self):
         if self._chips is not None:
