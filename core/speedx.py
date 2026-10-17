@@ -74,7 +74,7 @@ def probe_network_ul(url: str) -> int:
         elapsed_time: float = time.monotonic() - start_time
         """ If the request is received in less than a second, increase currRequestSize,
         if the currRequestSize is longer than 1 second, exit the loop """
-        if elapsed_time <= 1:
+        if elapsed_time <= 0.5:
             currRequestSize *= 1.2
         else:
             break
@@ -112,7 +112,7 @@ def probe_network_dl(url: str) -> int:
         #print(f"elapsed_time: {elapsed_time}")
         """ If the request is received in less than a second, increase currRequestSize,
         if the currRequestSize is longer than 1 second, exit the loop """
-        if elapsed_time <= 0.5:
+        if elapsed_time <= 1:
             currRequestSize *= 1.2
         else:
             break
@@ -138,13 +138,17 @@ def download_worker(worker_queue: "Queue[dict[str,float | int]]", url: str, spee
         with session.get(url, headers=None, stream=True) as response:
             #print(response.status_code, bytes_received)
             response.raise_for_status()
-            for chunk in response.iter_content(chunk_size=8192):
+            # 64 KiB
+            for chunk in response.iter_content(chunk_size=65536):
                 """ If request time exceeded the speed test time, then just exit from it
                 this is done in order to get the most accurate test as possible """
                 if time.monotonic() - start_time > speed_time:
                     break
-                bytes_received += len(chunk)
-            worker_queue.put({"type":"answer", "megabytes_received": megabytes_per_request })
+                if not chunk:
+                    continue
+                chunk_length = len(chunk)
+                bytes_received += chunk_length
+                worker_queue.put({"type":"answer", "bytes_received": chunk_length})
     elapsed_time: float = time.monotonic() - start_time
 
     worker_queue.put({"type": "finish","elapsed_time": elapsed_time, "bytes_received": bytes_received})
@@ -186,15 +190,15 @@ def download_speed_test(url: str, speed_time: float) -> dict[str,float | int]:
             case "answer":
                 # This is just converted to a format that the UI can understand
                 # Convert to bytes
-                received_request_bytes_sent += dl_worker_res["megabytes_received"] * 1000000
+                received_request_bytes_sent += dl_worker_res["bytes_received"]
                 received_request_amount += 1
-        if received_request_amount == 2:
+        if received_request_amount == 300:
             """I need to divide the elapsed_time by 2, to be honest I don't know why
             but that gives the closest calculations to the actual result (probably needs changing, but it works for now) """
             mbps_to_send = calculate_speed_in_Mbps(received_request_bytes_sent, time.monotonic() - requests_time) 
             #print(f"mbps to send: {mbps_to_send}, received_request_bytes_sent: {received_request_bytes_sent}")
 
-            yield {"type": "download", "mbps": mbps_to_send } 
+            yield {"type": "download", "mbps": round(mbps_to_send,2) } 
 
             received_request_amount = 0
             received_request_bytes_sent = 0
@@ -213,6 +217,24 @@ def download_speed_test(url: str, speed_time: float) -> dict[str,float | int]:
     #print(f"Recieved {total_bytes} bytes, avg_elapsed_time: {avg_elapsed_time}")
     return {"elapsed_time": avg_elapsed_time, "total_bytes": total_bytes}
 
+# This function is used just for yelding the sent bytes to the UI
+def send_chunks(random_data: bytes, worker_queue: "Queue[dict[str,float | int]]") -> bytes:
+    chunk_size: int = 65536
+    pending_bytes: int = 0
+
+    for offset in range(0, len(random_data), chunk_size):
+        chunk = random_data[offset:offset+chunk_size]
+        chunk_length = len(chunk)
+
+        pending_bytes += chunk_length 
+        # Used to reduce the amount of worker_queue items
+        if pending_bytes >= 1024 * 1024:
+            worker_queue.put({"type": "answer", "bytes_sent": pending_bytes})
+            pending_bytes = 0
+        
+        yield chunk
+
+
 # This function is used as a thread that returns some data to the main upload_speed_test
 def upload_worker(worker_queue: "Queue[dict[str,float | int]]", url: str, speed_time: int, bytes_per_request: int) -> None:
     session: Session = requests.Session()
@@ -220,17 +242,17 @@ def upload_worker(worker_queue: "Queue[dict[str,float | int]]", url: str, speed_
     random_data: bytes = os.urandom(bytes_per_request)
     bytes_sent: int = 0
     start_time: float = time.monotonic()    
-    previous_time: float = start_time
 
     while time.monotonic() - start_time < speed_time:
-        with session.post(url=url, data=random_data) as response:
+        with session.post(url=url, data=send_chunks(random_data, worker_queue)) as response:
             #print(response.status_code, bytes_sent)
-            if response.status_code == 200:
-                bytes_sent += bytes_per_request
-                # I basically need to put the all sent bytes becuase the elapsed time is time.monotonic() - start_time 
-                worker_queue.put({"type":"answer", "elapsed_time": time.monotonic() - previous_time, "bytes_sent": bytes_per_request })
-        previous_time = time.monotonic()
-
+            try:
+                response.raise_for_status()
+                bytes_sent += len(random_data) 
+            except:
+                # If a server doesn't want to receive data anymore, just end the test
+                worker_queue.put({"type": "finish", "elapsed_time": elapsed_time, "bytes_sent": bytes_sent})
+            
     elapsed_time: float = time.monotonic() - start_time
     worker_queue.put({"type": "finish", "elapsed_time": elapsed_time, "bytes_sent": bytes_sent})
 
@@ -248,6 +270,7 @@ def upload_speed_test(url: str, speed_time: int) -> dict[str,float | int]:
         ul_worker: Thread = threading.Thread(target=upload_worker, args=(worker_queue, url, speed_time, bytes_per_request))
         ul_worker.start()
         ul_workers.append(ul_worker)
+    requests_time: float = time.monotonic()
     
     finished_workers: int = 0
     """ This variable is used for tracking how many requests have been successfully sent and is used for
@@ -255,7 +278,9 @@ def upload_speed_test(url: str, speed_time: int) -> dict[str,float | int]:
     sent_request_amount: int = 0
     # These 2 variables are basically used for calculating the value that the singla will receive
     sent_request_bytes_sent: int = 0
-    sent_request_elapsed_time: int = 0
+    
+    previous_smoothed_speed: float = -1
+    smooth_responsiveness: float = 0.1
     while True:
         ul_worker_res =  worker_queue.get()
         match ul_worker_res["type"]:
@@ -268,18 +293,25 @@ def upload_speed_test(url: str, speed_time: int) -> dict[str,float | int]:
             case "answer":
                 # This is just converted to a format that the UI can understand
                 sent_request_bytes_sent += ul_worker_res["bytes_sent"]
-                sent_request_elapsed_time += ul_worker_res["elapsed_time"]
                 sent_request_amount += 1
-        if sent_request_amount == 2:
-            """I need to divide the elapsed_time by worker_amount, to be honest I don't know why
+        if sent_request_amount == 20:
+            """I need to divide the elapsed time by worker_amount, to be honest I don't know why
             but that gives the closest calculations to the actual result (probably needs changing, but it works for now) """
-            mbps_to_send = calculate_speed_in_Mbps(sent_request_bytes_sent, sent_request_elapsed_time / worker_amount) 
-            #print(f"mbps to send: {mbps_to_send}, sent_request_bytes_sent: {sent_request_bytes_sent}\nsent_request_elapsed_time: {sent_request_elapsed_time}")
-            yield {"type": "upload", "mbps": mbps_to_send } 
+            mbps_to_send = calculate_speed_in_Mbps(sent_request_bytes_sent, time.monotonic() - requests_time) 
+            #print(f"mbps to send: {mbps_to_send}, sent_request_bytes_sent: {sent_request_bytes_sent}")
+            if previous_smoothed_speed == -1:
+                previous_smoothed_speed = mbps_to_send
+            
+            """ The upload tester usese the exponential moving average formula for smoothening
+            the upload speed in the UI, it's not perfect, but it will work for now """
+            smoothed_speed: float = smooth_responsiveness * mbps_to_send + (1 - smooth_responsiveness) * previous_smoothed_speed 
+            
+            previous_smoothed_speed = smoothed_speed
+            yield {"type": "upload", "mbps": smoothed_speed} 
 
             sent_request_amount = 0
             sent_request_bytes_sent = 0
-            sent_request_elapsed_time = 0
+            requests_time = time.monotonic()
         # I don't know how it could be higher than worker_amount, but I just want to be safe
         if finished_workers >= worker_amount: break
 
