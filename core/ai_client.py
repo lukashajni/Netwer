@@ -11,55 +11,85 @@ MAX_HISTORY = 12
 
 
 def load_config() -> dict:
+    # Load provider and defaults
     from app.store import store
     provider = store.get_setting("ai_provider", "anthropic")
     if provider not in PROVIDERS:
         provider = "anthropic"
     d = DEFAULTS[provider]
-    return {"provider": provider,
-            "url": store.get_setting("ai_url", "") or d["url"],
-            "model": store.get_setting("ai_model", "") or d["model"],
-            "key": get_key()}
+
+    # Try keyring first for the API key, fallback to store
+    key = ""
+    try:
+        import keyring
+        key = keyring.get_password("netwer", "ai_api_key") or ""
+    except Exception:
+        pass
+    if not key:
+        key = store.get_setting("ai_key", "")
+
+    return {
+        "provider": provider,
+        "url": store.get_setting("ai_url", "") or d["url"],
+        "model": store.get_setting("ai_model", "") or d["model"],
+        "key": key
+    }
 
 
 def get_key() -> str:
-    from app.store import store
-    try:
-        import keyring
-        saved = keyring.get_password("netwer", "ai_api_key")
-        if saved:
-            return saved
-    except Exception:
-        pass
-    return (store.get_setting("ai_key", "") or "").strip()
+    cfg = load_config()
+    return cfg["key"]
 
 
 def save_config(provider, url, model, key) -> None:
+    # Save settings persistently
     from app.store import store
     store.set_setting("ai_provider", provider)
     store.set_setting("ai_url", url.strip())
     store.set_setting("ai_model", model.strip())
+
+    # Securely store key if possible, fallback to store
+    key_str = key.strip()
     try:
         import keyring
-        keyring.set_password("netwer", "ai_api_key", key.strip())
-        store.set_setting("ai_key", "")
+        if key_str:
+            keyring.set_password("netwer", "ai_api_key", key_str)
+        else:
+            keyring.delete_password("netwer", "ai_api_key")
     except Exception:
-        store.set_setting("ai_key", key.strip())
+        pass
+    store.set_setting("ai_key", key_str)
+
+
+def purge_saved() -> None:
+    # Wipe saved config and keys
+    from app.store import store
+    for name in ("ai_provider", "ai_url", "ai_model", "ai_key"):
+        if store.get_setting(name, ""):
+            store.set_setting(name, "")
+    try:
+        import keyring
+        keyring.delete_password("netwer", "ai_api_key")
+    except Exception:
+        pass
 
 
 def is_configured() -> bool:
     cfg = load_config()
-    # local servers such as Ollama accept any key, so only the URL and model are required there
+    # Local servers like Ollama don't strictly need a real API key
     return bool(cfg["model"] and (cfg["key"] or cfg["provider"] == "openai" and "localhost" in cfg["url"]))
 
 
-# -- HTTP --
+# --- HTTP helpers ---
+
 def _error_text(err: urllib.error.HTTPError) -> str:
     detail = ""
     try:
         body = json.loads(err.read().decode("utf-8", "replace"))
-        e = body.get("error", body)
-        detail = e.get("message", "") if isinstance(e, dict) else str(e)
+        if isinstance(body, list) and body:
+            body = body[0]
+        e = body.get("error", body) if isinstance(body, dict) else body
+        detail = (e.get("message") or e.get("detail") or "") if isinstance(e, dict) else str(e)
     except Exception:
         pass
     if err.code == 401:
@@ -73,7 +103,7 @@ def _error_text(err: urllib.error.HTTPError) -> str:
         return "Model or address not found. Check the model name and URL in the AI settings. " + detail
     if err.code == 429:
         return "Rate limit or quota reached. " + (detail or "Try again in a minute.")
-    return detail or f"The AI service returned an error ({err.code})."
+    return f"The AI service returned an error ({err.code}). {detail[:300]}".strip()
 
 
 def _open(url, headers, body):
@@ -82,7 +112,7 @@ def _open(url, headers, body):
 
 
 def _sse(resp, cancel):
-    # yields the JSON payload of each "data:" line
+    # Stream and parse SSE data lines
     for raw in resp:
         if cancel is not None and cancel.is_set():
             return
@@ -98,11 +128,13 @@ def _sse(resp, cancel):
             continue
 
 
-# -- one round per provider: yields ("text", s) then ("end", info) --
+# --- Provider rounds ---
+
 def _anthropic_round(cfg, system, msgs, tools, cancel):
     body = {"model": cfg["model"], "max_tokens": 1500, "system": system, "messages": msgs, "stream": True}
     if tools:
-        body["tools"] = [{"name": t["name"], "description": t["description"], "input_schema": t["parameters"]} for t in tools]
+        body["tools"] = [{"name": t["name"], "description": t["description"], "input_schema": t["parameters"]} for t in
+                         tools]
     headers = {"content-type": "application/json", "x-api-key": cfg["key"], "anthropic-version": "2023-06-01"}
     resp = _open(cfg["url"].rstrip("/") + "/v1/messages", headers, body)
     blocks, raw_json = {}, {}
@@ -143,7 +175,7 @@ def _openai_round(cfg, system, msgs, tools, cancel):
     body = {"model": cfg["model"], "stream": True, "messages": [{"role": "system", "content": system}] + msgs}
     if tools:
         body["tools"] = [{"type": "function", "function": {"name": t["name"], "description": t["description"],
-                                                            "parameters": t["parameters"]}} for t in tools]
+                                                           "parameters": t["parameters"]}} for t in tools]
     headers = {"content-type": "application/json"}
     if cfg["key"]:
         headers["authorization"] = "Bearer " + cfg["key"]
@@ -164,6 +196,8 @@ def _openai_round(cfg, system, msgs, tools, cancel):
                         idx = len(calls) if tc.get("id") or not calls else len(calls) - 1
                     c = calls.setdefault(idx, {"id": "", "name": "", "args": ""})
                     c["id"] = tc.get("id") or c["id"]
+                    if tc.get("extra_content"):
+                        c["extra"] = tc["extra_content"]
                     fn = tc.get("function", {})
                     c["name"] = fn.get("name") or c["name"]
                     c["args"] += fn.get("arguments") or ""
@@ -174,19 +208,27 @@ def _openai_round(cfg, system, msgs, tools, cancel):
             args = json.loads(c["args"] or "{}")
         except ValueError:
             args = {}
-        parsed.append((c["id"] or f"call_{i}", c["name"], args, c["args"] or "{}"))
+        parsed.append((c["id"] or f"call_{i}", c["name"], args, c["args"] or "{}", c.get("extra")))
     assistant = {"role": "assistant", "content": text or None}
     if parsed:
-        assistant["tool_calls"] = [{"id": i, "type": "function", "function": {"name": n, "arguments": raw}}
-                                   for i, n, _a, raw in parsed]
-    yield "end", {"assistant": assistant, "calls": [(i, n, a) for i, n, a, _r in parsed]}
+        assistant["tool_calls"] = []
+        for i, n, _a, raw, extra in parsed:
+            call = {"id": i, "type": "function", "function": {"name": n, "arguments": raw}}
+            if extra:
+                call["extra_content"] = extra
+            assistant["tool_calls"].append(call)
+    yield "end", {"assistant": assistant, "calls": [(i, n, a) for i, n, a, _r, _e in parsed]}
 
 
 def _tool_messages(provider, results):
     if provider == "anthropic":
         return [{"role": "user", "content": [{"type": "tool_result", "tool_use_id": i, "content": out}
-                                             for i, out in results]}]
-    return [{"role": "tool", "tool_call_id": i, "content": out} for i, out in results]
+                                             for i, _n, out in results]}]
+    msgs = [{"role": "tool", "tool_call_id": i, "content": out} for i, _n, out in results]
+    if provider == "gemini":
+        for m, (_i, name, _o) in zip(msgs, results):
+            m["name"] = name
+    return msgs
 
 
 FRIENDLY = {"get_network_status": "network status", "get_diagnosis": "the diagnosis", "get_devices": "devices",
@@ -196,7 +238,7 @@ FRIENDLY = {"get_network_status": "network status", "get_diagnosis": "the diagno
 
 
 def chat(history, question, system, tools, app_tools, cfg, cancel_event=None):
-    """Yield {"text"}, {"tool"}, {"action"}, then {"done"}; failures come as {"error"}."""
+    # Main chat loop with tool calling & streaming support
     msgs = [m for m in history[-MAX_HISTORY:] if m.get("content")] + [{"role": "user", "content": question}]
     while msgs and msgs[0]["role"] != "user":
         msgs.pop(0)
@@ -224,7 +266,7 @@ def chat(history, question, system, tools, app_tools, cfg, cancel_event=None):
             for call_id, name, args in info["calls"]:
                 yield {"tool": FRIENDLY.get(name, name)}
                 before = len(app_tools.actions)
-                results.append((call_id, app_tools.call(name, args)))
+                results.append((call_id, name, app_tools.call(name, args)))
                 for act in app_tools.actions[before:]:
                     yield {"action": act}
             msgs.extend(_tool_messages(cfg["provider"], results))
@@ -238,8 +280,46 @@ def chat(history, question, system, tools, app_tools, cfg, cancel_event=None):
         yield {"error": str(exc)}
 
 
+_NOT_CHAT = ("embedding", "aqa", "imagen", "tts", "image", "live", "audio", "realtime", "transcribe",
+             "robotics", "computer-use", "search", "moderation", "whisper", "dall", "instruct", "veo")
+
+
+def list_models(cfg):
+    # Fetch model list from the provider API
+    try:
+        if cfg["provider"] == "anthropic":
+            req = urllib.request.Request(cfg["url"].rstrip("/") + "/v1/models?limit=100",
+                                         headers={"x-api-key": cfg["key"], "anthropic-version": "2023-06-01"})
+        else:
+            headers = {"authorization": "Bearer " + cfg["key"]} if cfg["key"] else {}
+            req = urllib.request.Request(cfg["url"].rstrip("/") + "/models", headers=headers)
+        with urllib.request.urlopen(req, timeout=20) as resp:
+            body = json.loads(resp.read().decode("utf-8", "replace"))
+    except urllib.error.HTTPError as err:
+        return [], _error_text(err)
+    except (urllib.error.URLError, TimeoutError, OSError):
+        return [], "Can't reach the AI service. Check your internet connection and the address."
+    except ValueError:
+        return [], "The address did not return a model list."
+    items = body.get("data", body.get("models", [])) if isinstance(body, dict) else body
+    names = []
+    for it in items or []:
+        mid = (it.get("id") or it.get("name") or "") if isinstance(it, dict) else str(it)
+        mid = mid.split("/", 1)[1] if mid.startswith("models/") else mid
+        if mid:
+            names.append(mid)
+    if cfg["provider"] == "gemini":
+        names = [n for n in names if n.startswith("gemini") and not any(x in n for x in _NOT_CHAT)]
+    elif cfg["provider"] == "openai" and "api.openai.com" in cfg["url"]:
+        names = [n for n in names if n.startswith(("gpt", "o1", "o3", "o4", "chatgpt"))
+                 and not any(x in n for x in _NOT_CHAT)]
+    if cfg["provider"] != "anthropic":
+        names = sorted(set(names), reverse=True)
+    return names, ("" if names else "No models were returned for this key.")
+
+
 def test_connection(cfg) -> str:
-    """Return "" on success or an error message."""
+    # Quick connectivity check
     for ev in chat([], "Reply with the single word: ok", "You are a connection test.", [], _NoTools(), cfg):
         if "error" in ev:
             return ev["error"]

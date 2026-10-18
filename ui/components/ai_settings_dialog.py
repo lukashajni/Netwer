@@ -1,4 +1,4 @@
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtWidgets import (
     QComboBox,
     QDialog,
@@ -52,13 +52,28 @@ class AISettingsDialog(QDialog):
             self.provider.addItem(label, key)
         self.provider.setCurrentIndex(max(self.provider.findData(cfg["provider"]), 0))
         self.url = QLineEdit(cfg["url"])
-        self.model = QLineEdit(cfg["model"])
+        self.model = QComboBox()
+        self.model.setEditable(True)
+        self.model.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
+        self.model.setEditText(cfg["model"])
+        self.btn_models = QPushButton("Load models")
+        self.btn_models.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_models.setStyleSheet(f"QPushButton {{ background: transparent; color: {Theme.ACCENT};"
+                                      f"border: 1px solid {Theme.BORDER_STRONG}; border-radius: 8px; padding: 8px 12px;"
+                                      f"font-size: {Theme.FONT_SIZE_SMALL}px; font-weight: 600; }}"
+                                      f"QPushButton:hover {{ border-color: {Theme.ACCENT}; }}")
+        self.btn_models.clicked.connect(self._load_models)
+        model_row = QHBoxLayout()
+        model_row.setSpacing(8)
+        model_row.addWidget(self.model, 1)
+        model_row.addWidget(self.btn_models)
+        self._models_token = 0
         self.key = QLineEdit(cfg["key"])
         self.key.setEchoMode(QLineEdit.EchoMode.Password)
         self.key.setPlaceholderText("Paste your API key")
         form.addRow("Provider", self.provider)
         form.addRow("Address", self.url)
-        form.addRow("Model", self.model)
+        form.addRow("Model", model_row)
         form.addRow("API key", self.key)
         root.addLayout(form)
         reset = QPushButton("Reset address and model")
@@ -70,6 +85,8 @@ class AISettingsDialog(QDialog):
         root.addWidget(reset, 0, Qt.AlignmentFlag.AlignLeft)
         self._last_defaults = ai_client.DEFAULTS[cfg["provider"]]
         self.provider.currentIndexChanged.connect(self._provider_changed)
+        self.key.editingFinished.connect(self._load_models)
+        QTimer.singleShot(0, self._load_models)
 
         hint = QLabel("Claude: Anthropic. Gemini: Google Gemini (key from Google AI Studio). OpenAI, Ollama and most servers: OpenAI-compatible. "
                       "For Ollama use http://localhost:11434/v1 and any key.")
@@ -119,14 +136,17 @@ class AISettingsDialog(QDialog):
         new = ai_client.DEFAULTS[self.provider.currentData()]
         if self.url.text().strip() in ("", self._last_defaults["url"]):
             self.url.setText(new["url"])
-        if self.model.text().strip() in ("", self._last_defaults["model"]):
-            self.model.setText(new["model"])
+        if self.model.currentText().strip() in ("", self._last_defaults["model"]):
+            self.model.setEditText(new["model"])
         self._last_defaults = new
+        self.model.clear()
+        self.model.setEditText(self.model.currentText() or new["model"])
+        self._load_models()
 
     def _reset_defaults(self):
         d = ai_client.DEFAULTS[self.provider.currentData()]
         self.url.setText(d["url"])
-        self.model.setText(d["model"])
+        self.model.setEditText(d["model"])
         self._last_defaults = d
         self._show("Address and model reset to the defaults for this provider.", ok=None)
 
@@ -142,7 +162,43 @@ class AISettingsDialog(QDialog):
 
     def _current(self):
         return {"provider": self.provider.currentData(), "url": self.url.text().strip(),
-                "model": self.model.text().strip(), "key": self.key.text().strip()}
+                "model": self.model.currentText().strip(), "key": self.key.text().strip()}
+
+    def _load_models(self):
+        # ask the provider which models this key can use
+        cfg = self._current()
+        local = "localhost" in cfg["url"] or "127.0.0.1" in cfg["url"]
+        if (not cfg["key"] and not local) or not cfg["url"] or self._address_problem(cfg):
+            return
+        self._models_token += 1
+        token = self._models_token
+        self.btn_models.setEnabled(False)
+        self.btn_models.setText("Loading\u2026")
+
+        def work():
+            names, problem = ai_client.list_models(cfg)
+            return {"names": names, "problem": problem, "token": token}
+        w = OneshotWorker(work)
+        w.result.connect(self._models_loaded)
+        w.error.connect(lambda e: self._models_loaded({"names": [], "problem": str(e), "token": token}))
+        self._models_worker = w
+        w.start()
+
+    def _models_loaded(self, r):
+        if r["token"] != self._models_token:
+            return                                    # an older request; ignore it
+        self.btn_models.setEnabled(True)
+        self.btn_models.setText("Load models")
+        if r["names"]:
+            current = self.model.currentText()
+            self.model.blockSignals(True)
+            self.model.clear()
+            self.model.addItems(r["names"])
+            self.model.setEditText(current if current else r["names"][0])
+            self.model.blockSignals(False)
+            self._show(f"{len(r['names'])} models available for this key.", ok=True)
+        elif r["problem"]:
+            self._show(r["problem"], ok=False)
 
     def _test(self):
         cfg = self._current()
