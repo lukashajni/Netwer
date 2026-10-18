@@ -18,6 +18,7 @@ from app.resources import Icons
 from app.theme import Theme
 from core import diagnostics as diag
 from ui.pages.base_page import BasePage
+from ui.widgets.ai_chat_panel import AIChatPanel
 from ui.widgets.card import Card
 from workers import StreamWorker
 
@@ -36,7 +37,7 @@ def _severity_colour(sev):
 class _FindingRow(QFrame):
     # One issue - coloured bar, title, explanation and what to do.
 
-    def __init__(self, finding, parent=None):
+    def __init__(self, finding, on_ask=None, parent=None):
         super().__init__(parent)
         colour, glyph = _SEVERITY_STYLE.get(
             finding["severity"], (Theme.TEXT_SECONDARY, "\u2022"))
@@ -82,6 +83,17 @@ class _FindingRow(QFrame):
             box.addWidget(act)
         lay.addLayout(box, 1)
 
+        if on_ask is not None and finding["severity"] != diag.GOOD:
+            ask = QPushButton("Ask AI")
+            ask.setCursor(Qt.CursorShape.PointingHandCursor)
+            ask.setStyleSheet(
+                f"QPushButton {{ background: transparent; color: {Theme.ACCENT};"
+                f"border: 1px solid {Theme.GLASS_BORDER}; border-radius: 8px; padding: 4px 10px;"
+                f"font-size: 11.5px; }}"
+                f"QPushButton:hover {{ border-color: {Theme.ACCENT}; }}")
+            ask.clicked.connect(lambda: on_ask(finding))
+            lay.addWidget(ask, 0, Qt.AlignmentFlag.AlignTop)
+
 
 class HealthPage(BasePage):
     PAGE_TITLE = "Network Health"
@@ -117,6 +129,19 @@ class HealthPage(BasePage):
             f"QProgressBar::chunk {{ background: {Theme.GRAD_ACCENT};"
             f"border-radius: 4px; }}")
         bar.addWidget(self.progress, 1)
+
+        # Netwer AI opens only when asked for.
+        self.btn_ai = QPushButton("  Ask AI")
+        self.btn_ai.setCheckable(True)
+        self.btn_ai.setIcon(Icons.get("ai", Theme.ACCENT))
+        self.btn_ai.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_ai.setStyleSheet(
+            f"QPushButton {{ background: {Theme.GLASS_INPUT}; color: {Theme.TEXT_PRIMARY};"
+            f"border: 1px solid {Theme.GLASS_BORDER_HI}; border-radius: {Theme.RADIUS_CONTROL}px;"
+            f"padding: 11px 20px; font-size: 13.5px; font-weight: 600; }}"
+            f"QPushButton:hover {{ border-color: {Theme.ACCENT}; }}"
+            f"QPushButton:checked {{ background: {Theme.BG_ELEVATED}; border-color: {Theme.ACCENT}; }}")
+        bar.addWidget(self.btn_ai)
         self.body_layout.addLayout(bar)
 
         self.status = QLabel("Runs a few quick checks — takes about 15 seconds.")
@@ -165,7 +190,11 @@ class HealthPage(BasePage):
         self._findings_layout.addStretch()
         self._findings_area.setWidget(inner)
         self.findings_card.content_layout.addWidget(self._findings_area)
-        self.body_layout.addWidget(self.findings_card, 1)
+        columns = QHBoxLayout()
+        columns.setSpacing(0)
+        left = QVBoxLayout()
+        left.setSpacing(Theme.GAP)
+        left.addWidget(self.findings_card, 1)
 
         # -- Measurements strip --
         self.metrics_card = Card("Measurements", "monitor")
@@ -174,7 +203,29 @@ class HealthPage(BasePage):
         self._metrics.setVerticalSpacing(8)
         self.metrics_card.content_layout.addLayout(self._metrics)
         self.metrics_card.hide()
-        self.body_layout.addWidget(self.metrics_card)
+        left.addWidget(self.metrics_card)
+        columns.addLayout(left, 1)
+
+        self.ai_panel = AIChatPanel()
+        self.ai_panel.navigate.connect(self._navigate)
+        self.ai_panel.toggled.connect(self.btn_ai.setChecked)
+        self.btn_ai.clicked.connect(self.ai_panel.toggle)
+        columns.addWidget(self.ai_panel)
+        self.body_layout.addLayout(columns, 1)
+
+    def _ask_about(self, finding):
+        self.ai_panel.ask_about(finding)
+
+    def _navigate(self, target: str):
+        """Open a tool from a button inside an AI answer."""
+        if target == "health_run":
+            self._run()
+            return
+        win = self._window or self.window()
+        if target.startswith("scan:") and hasattr(win, "scan_ports_for"):
+            win.scan_ports_for(target[5:])
+        elif hasattr(win, "goto"):
+            win.goto(target)
 
     # -- Run --
     def _run(self):
@@ -240,9 +291,10 @@ class HealthPage(BasePage):
         self._clear_findings()
         for f in report["findings"]:
             self._findings_layout.insertWidget(
-                self._findings_layout.count() - 1, _FindingRow(f))
+                self._findings_layout.count() - 1, _FindingRow(f, self._ask_about))
 
         self._show_metrics(report.get("measurements", {}))
+        self.ai_panel.set_report(report)
         self.status.setText("Done.")
         activity.add("Network diagnosis", report["headline"],
                      kind=("error" if report["severity"] == diag.CRITICAL

@@ -164,7 +164,34 @@ def convert_adapter_details_into_network_config(details):
             "mac": details["mac"], "adapter": details["name"]}
 
 
+_SELECTED_ADAPTER = ""
+
+
+def set_selected_adapter(name):
+    global _SELECTED_ADAPTER
+    _SELECTED_ADAPTER = name or ""
+
+
+def get_selected_adapter():
+    return _SELECTED_ADAPTER
+
+
+def _config_for_adapter(name):
+    d = get_adapter_details(name)
+    if "error" in d:
+        return None                      # adapter is gone, fall back to auto
+    if not d.get("ipv4"):
+        return {"error": f"{d.get('name', name)} has no IPv4 address", "adapter": d.get("name", name)}
+    return {"ip": d["ipv4"], "prefix": d.get("prefix") or 24, "gateway": d.get("gateway") or "N/A",
+            "dns": d.get("dns") or "N/A", "mac": d.get("mac") or "N/A",
+            "adapter": d.get("name", name), "ipv6": d.get("ipv6", "")}
+
+
 def get_network_config():
+    if _SELECTED_ADAPTER:
+        cfg = _config_for_adapter(_SELECTED_ADAPTER)
+        if cfg is not None:
+            return cfg
     try:
         if platform.system() == "Windows":
             return windows_network.active_network_config()
@@ -678,22 +705,39 @@ def _sum_counters(iface_names):
     return recv, sent
 
 
-def monitor_stream(adapter_name="", max_samples=600):
+def _traffic_label(adapter_name, ifaces):
+    if adapter_name:
+        return adapter_name
+    if not ifaces:
+        return "No active adapter"
+    return ifaces[0] if len(ifaces) == 1 else f"All physical adapters ({len(ifaces)})"
+
+
+def monitor_stream(adapter_name="", max_samples=None):
     if not PSUTIL_AVAILABLE:
         yield {"error": "psutil is required for Network Monitor. pip install psutil"}
         return
     ifaces = _pick_traffic_ifaces(adapter_name)
-    if not ifaces:
-        yield {"error": "No active network interface found"}
-        return
-    label = adapter_name or (ifaces[0] if len(ifaces) == 1 else f"All physical adapters ({len(ifaces)})")
-    prev_recv, prev_sent = _sum_counters(ifaces)
+    prev_recv, prev_sent = _sum_counters(ifaces) if ifaces else (0, 0)
     prev_time, total_dl, total_ul = time.time(), 0.0, 0.0
+    last_pick, count = time.time(), 0
     yield {"dl": 0.0, "ul": 0.0, "total_dl": 0.0, "total_ul": 0.0,
-           "adapter": label, "iface": ",".join(ifaces)}
-    for _ in range(max_samples):
+           "adapter": _traffic_label(adapter_name, ifaces), "iface": ",".join(ifaces), "waiting": not ifaces}
+    while max_samples is None or count < max_samples:
+        count += 1
         time.sleep(1)
-        cur_recv, cur_sent = _sum_counters(ifaces)
+        try:
+            # Interfaces can disappear and come back (sleep, reconnect), so look again now and then
+            if not ifaces or time.time() - last_pick > 10:
+                last_pick = time.time()
+                fresh = _pick_traffic_ifaces(adapter_name)
+                if fresh != ifaces:
+                    ifaces = fresh
+                    prev_recv, prev_sent = _sum_counters(ifaces) if ifaces else (0, 0)
+                    prev_time = time.time()
+            cur_recv, cur_sent = _sum_counters(ifaces) if ifaces else (0, 0)
+        except Exception:
+            continue
         now = time.time()
         elapsed = max(now - prev_time, 0.001)
         prev_time = now
@@ -702,8 +746,8 @@ def monitor_stream(adapter_name="", max_samples=600):
         dl_mbps, ul_mbps = round(dl * 8 / elapsed / 1_048_576, 2), round(ul * 8 / elapsed / 1_048_576, 2)
         total_dl += dl / 1_048_576
         total_ul += ul / 1_048_576
-        yield {"dl": dl_mbps, "ul": ul_mbps, "total_dl": round(total_dl, 2),
-               "total_ul": round(total_ul, 2), "adapter": label, "iface": ",".join(ifaces)}
+        yield {"dl": dl_mbps, "ul": ul_mbps, "total_dl": round(total_dl, 2), "total_ul": round(total_ul, 2),
+               "adapter": _traffic_label(adapter_name, ifaces), "iface": ",".join(ifaces), "waiting": not ifaces}
 
 
 def get_bandwidth_today():

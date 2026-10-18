@@ -86,12 +86,12 @@ class TraceroutePage(BasePage):
         self.body_layout.addLayout(row)
 
     def _style_button(self, running):
-        bg = Theme.DANGER if running else Theme.GRAD_ACCENT
+        bg = Theme.DANGER if running else Theme.ACCENT
         self.btn.setStyleSheet(
             f"QPushButton {{ background: {bg}; color: white; border: none;"
             f"border-radius: {Theme.RADIUS_CONTROL}px; padding: 10px 22px;"
             f"font-weight: 600; font-size: {Theme.FONT_SIZE_SMALL}px; }}"
-            f"QPushButton:hover {{ background: {bg}; }}")
+            f"QPushButton:hover {{ background: {Theme.DANGER_HOVER if running else Theme.ACCENT_HOVER}; }}")
 
     def _build_status(self):
         card = Card("")

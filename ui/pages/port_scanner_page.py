@@ -122,7 +122,7 @@ class PortScannerPage(BasePage):
 
     def _style_scan_button(self, running: bool):
         color = Theme.DANGER if running else Theme.ACCENT
-        hover = Theme.DANGER_HOVER if running else Theme.ACCENT_PURPLE
+        hover = Theme.DANGER_HOVER if running else Theme.ACCENT_HOVER
         self.btn_scan.setStyleSheet(
             f"QPushButton {{ background: {color}; color: white; border: none;"
             f"border-radius: 8px; padding: 9px 20px;"

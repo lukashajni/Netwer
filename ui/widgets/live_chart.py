@@ -1,6 +1,7 @@
 from collections import deque
 
 import pyqtgraph as pg
+from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtWidgets import QVBoxLayout, QWidget
 
 from app.formatting import format_speed as _fmt
@@ -9,8 +10,11 @@ from app.theme import Theme, card_bg
 
 
 class LiveChart(QWidget):
+    clicked = pyqtSignal()   # left click on the plot (opens the detailed view)
+
     def __init__(self, max_points: int = 60, parent=None):
         super().__init__(parent)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
         self._max = max_points
         # Stored in Mbps
         self._dl = deque([0.0] * max_points, maxlen=max_points)
@@ -60,9 +64,14 @@ class LiveChart(QWidget):
         self._hover_label.setVisible(False)
         self._plot.addItem(self._hover_label, ignoreBounds=True)
         self._plot.scene().sigMouseMoved.connect(self._on_mouse_moved)
+        self._plot.scene().sigMouseClicked.connect(self._on_mouse_clicked)
         self._plot.getViewBox().setMenuEnabled(False)
 
         self._rescale()
+
+    def _on_mouse_clicked(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.clicked.emit()
 
     def _on_mouse_moved(self, pos):
         # Show a crosshair + value readout at the hovered sample.

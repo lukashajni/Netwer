@@ -20,9 +20,9 @@ from app.theme import Theme
 from ui.pages.base_page import BasePage
 from ui.widgets.globe_3d import Globe3D
 
-APP_VERSION = "v4.0"
-AUTHOR = "Lukas Hajneman"
-GITHUB_URL = "https://github.com/RomFishy/Netwer"
+APP_VERSION = "v5.0"
+AUTHOR = "Netwer Team"
+GITHUB_URL = "https://github.com/lukashajni/Netwer"
 
 DESCRIPTION = (
     "NETWER is an all-in-one network toolkit for diagnostics, monitoring "
@@ -279,7 +279,7 @@ class AboutPage(BasePage):
         lay.setContentsMargins(26, 14, 26, 14)
         lay.setSpacing(8)
 
-        copyright_lbl = QLabel(f"\u00A9 2026 {AUTHOR}  \u00B7  All rights reserved")
+        copyright_lbl = QLabel(f"\u00A9 2026 {AUTHOR} \u00B7  All rights reserved")
         copyright_lbl.setStyleSheet(
             f"color: {Theme.TEXT_FAINT}; font-size: {Theme.FONT_SIZE_TINY}px;"
             f"background: transparent;")

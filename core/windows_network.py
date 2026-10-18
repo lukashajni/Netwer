@@ -409,6 +409,24 @@ class _WlanAvailableNetwork(ctypes.Structure):
                 ("cipher", ctypes.c_int), ("flags", wintypes.ULONG), ("reserved", wintypes.ULONG)]
 
 
+class _WlanRateSet(ctypes.Structure):
+    _fields_ = [("length", wintypes.ULONG), ("rates", ctypes.c_ushort * 126)]
+
+
+class _WlanBssEntry(ctypes.Structure):
+    _fields_ = [("ssid", _Dot11Ssid), ("phy_id", wintypes.ULONG), ("bssid", ctypes.c_ubyte * 6),
+                ("bss_type", ctypes.c_int), ("phy_type", ctypes.c_int), ("rssi", ctypes.c_int32),
+                ("link_quality", wintypes.ULONG), ("in_reg_domain", ctypes.c_ubyte),
+                ("beacon_period", ctypes.c_ushort), ("timestamp", ctypes.c_ulonglong),
+                ("host_timestamp", ctypes.c_ulonglong), ("capability", ctypes.c_ushort),
+                ("center_freq", wintypes.ULONG), ("rate_set", _WlanRateSet),
+                ("ie_offset", wintypes.ULONG), ("ie_size", wintypes.ULONG)]
+
+
+class _WlanBssList(ctypes.Structure):
+    _fields_ = [("total_size", wintypes.DWORD), ("count", wintypes.DWORD), ("items", _WlanBssEntry * 1)]
+
+
 class _WlanNetworkList(ctypes.Structure):
     _fields_ = [("count", wintypes.DWORD), ("index", wintypes.DWORD),
                 ("items", _WlanAvailableNetwork * 1)]
@@ -421,6 +439,50 @@ _AUTH = {1: "Open", 2: "Shared/WEP", 3: "WPA-Enterprise", 4: "WPA-Personal",
 _CIPHER = {0: "None", 1: "WEP-40", 2: "TKIP", 4: "CCMP", 5: "WEP-104",
             6: "BIP", 8: "GCMP", 9: "GCMP-256", 10: "CCMP-256",
             11: "BIP-GMAC-128", 12: "BIP-GMAC-256", 13: "BIP-CMAC-256"}
+
+
+# DOT11_PHY_TYPE values
+_PHY = {1: "802.11 FHSS", 2: "802.11 DSSS", 3: "802.11 IR", 4: "802.11a", 5: "802.11b", 6: "802.11g",
+        7: "802.11n (Wi-Fi 4)", 8: "802.11ac (Wi-Fi 5)", 9: "802.11ad", 10: "802.11ax (Wi-Fi 6)",
+        11: "802.11be (Wi-Fi 7)"}
+_PHY_BAND = {4: "5 GHz", 8: "5 GHz", 9: "60 GHz", 5: "2.4 GHz", 6: "2.4 GHz"}
+
+
+def _freq_info(mhz):
+    # (channel, band) from a centre frequency in MHz
+    if not mhz:
+        return "", ""
+    if 2400 <= mhz < 2500:
+        return str(14 if round(mhz) == 2484 else round((mhz - 2407) / 5)), "2.4 GHz"
+    if 4900 <= mhz < 5900:
+        return str(round((mhz - 5000) / 5)), "5 GHz"
+    if 5925 <= mhz <= 7125:
+        return str(round((mhz - 5950) / 5)), "6 GHz"
+    return "", f"{mhz / 1000:g} GHz"
+
+
+def _bss_entries(wlan, handle, guid, ssid=None, bss_type=3, secure=False):
+    # BSS entries the adapter knows about: (ssid, bssid, centre MHz, phy type, rssi)
+    fn = wlan.WlanGetNetworkBssList
+    fn.argtypes = [wintypes.HANDLE, ctypes.POINTER(_Guid), ctypes.POINTER(_Dot11Ssid), ctypes.c_int,
+                   wintypes.BOOL, ctypes.c_void_p, ctypes.POINTER(ctypes.c_void_p)]
+    fn.restype = wintypes.DWORD
+    ptr = ctypes.c_void_p()
+    code = fn(handle, ctypes.byref(guid), ctypes.byref(ssid) if ssid is not None else None,
+              bss_type, secure, None, ctypes.byref(ptr))
+    if code or not ptr:
+        return []
+    out = []
+    try:
+        header = ctypes.cast(ptr, ctypes.POINTER(_WlanBssList)).contents
+        base = ctypes.addressof(header) + _WlanBssList.items.offset
+        for i in range(header.count):
+            e = _WlanBssEntry.from_address(base + i * ctypes.sizeof(_WlanBssEntry))
+            name = bytes(e.ssid.value[:min(e.ssid.length, 32)]).decode("utf-8", "replace")
+            out.append((name, bytes(e.bssid), e.center_freq / 1000.0, e.phy_type, e.rssi))
+    finally:
+        wlan.WlanFreeMemory(ptr)
+    return out
 
 
 def _wlan_interfaces():
@@ -489,9 +551,22 @@ def current_wifi():
                 assoc, sec = info.association, info.security
                 ssid = bytes(assoc.ssid.value[:min(assoc.ssid.length, 32)]).decode("utf-8", "replace")
                 bssid = ":".join(f"{b:02X}" for b in assoc.bssid)
+                # Channel and band come from the access point we are connected to
+                mhz, phy = 0.0, assoc.phy_type
+                try:
+                    for _n, mac, freq, bss_phy, _r in _bss_entries(
+                            wlan, handle, interface.guid, assoc.ssid, assoc.bss_type, bool(sec.security_enabled)):
+                        if mac == bytes(assoc.bssid):
+                            mhz, phy = freq, bss_phy or phy
+                            break
+                except Exception:
+                    pass
+                channel, band = _freq_info(mhz)
+                band = band or _PHY_BAND.get(phy, "")
                 return {"ssid": ssid or "Unknown", "bssid": bssid, "signal": f"{assoc.signal}%",
-                        "radio": "Unknown", "band": "Unknown", "auth": _AUTH.get(sec.auth, "Unknown"),
-                        "channel": "Unknown", "cipher": _CIPHER.get(sec.cipher, "Unknown"),
+                        "radio": _PHY.get(assoc.phy_type) or _PHY.get(phy) or "\u2014", "band": band or "\u2014",
+                        "auth": _AUTH.get(sec.auth, "Unknown"),
+                        "channel": channel or "\u2014", "cipher": _CIPHER.get(sec.cipher, "Unknown"),
                         "link_speed": f"{max(assoc.rx_rate, assoc.tx_rate) / 1000:g} Mbps",
                         "rx_rate": f"{assoc.rx_rate / 1000:g} Mbps", "tx_rate": f"{assoc.tx_rate / 1000:g} Mbps"}
             return {"error": "No active Wi-Fi connection"}
@@ -532,6 +607,13 @@ def scan_wifi_networks():
                 try:
                     if not ptr:
                         continue
+                    try:
+                        bss_by_ssid = {}
+                        for name, _mac, freq, phy, rssi in _bss_entries(wlan, handle, interface.guid):
+                            if name and (name not in bss_by_ssid or rssi > bss_by_ssid[name][2]):
+                                bss_by_ssid[name] = (freq, phy, rssi)
+                    except Exception:
+                        bss_by_ssid = {}
                     header = ctypes.cast(ptr, ctypes.POINTER(_WlanNetworkList)).contents
                     base = ctypes.addressof(header) + _WlanNetworkList.items.offset
                     for i in range(header.count):
@@ -541,6 +623,10 @@ def scan_wifi_networks():
                         found = {"ssid": ssid, "auth": _AUTH.get(item.auth, "Unknown"),
                                  "encryption": _CIPHER.get(item.cipher, "Unknown"), "signal": int(item.signal),
                                  "signal_dbm": round(item.signal / 2 - 100), "channel": "", "band": "", "radio": "Unknown"}
+                        if ssid in bss_by_ssid:
+                            freq, phy, _r = bss_by_ssid[ssid]
+                            found["channel"], found["band"] = _freq_info(freq)
+                            found["radio"] = _PHY.get(phy, "Unknown")
                         if ssid not in networks or item.signal > networks[ssid]["signal"]:
                             networks[ssid] = found
                 finally:

@@ -13,9 +13,11 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from app.adapter_state import adapter_state
 from app.formatting import format_speed
 from app.resources import Icons
 from app.theme import Theme
+from app.traffic_history import traffic_history
 from core.discovery import get_discovery_service
 from ui.pages.base_page import BasePage
 from ui.widgets.card import Card, kv_row
@@ -33,6 +35,12 @@ class DashboardPage(BasePage):
         super().__init__(core, parent)
 
         self._monitor_worker = None
+        self._closing = False
+        self._last_sample = time.time()
+        self._watchdog = QTimer(self)             # restarts the monitor if it stalls
+        self._watchdog.setInterval(5000)
+        self._watchdog.timeout.connect(self._check_monitor)
+        adapter_state.changed.connect(self._on_adapter_setting)
         self._resource_timer = QTimer(self)
         self._resource_timer.setInterval(1500)
         self._resource_timer.timeout.connect(self._refresh_resources)
@@ -86,9 +94,9 @@ class DashboardPage(BasePage):
     def _build_stat_cards(self):
         row = QHBoxLayout()
         row.setSpacing(Theme.GAP)
-        self.card_internet = StatCard("internet", "Internet Status", spark_color=Theme.SUCCESS)
-        self.card_download = StatCard("download", "Download Speed", spark_color=Theme.ACCENT)
-        self.card_upload = StatCard("upload", "Upload Speed", spark_color=Theme.ACCENT_PURPLE)
+        self.card_internet = StatCard("internet", "Internet Status", spark_color=Theme.SUCCESS, extra_parallel=True)
+        self.card_download = StatCard("download", "Receive Speed", spark_color=Theme.ACCENT)
+        self.card_upload = StatCard("upload", "Send Speed", spark_color=Theme.ACCENT_PURPLE)
         self.card_loss = StatCard("packet_loss", "Packet Loss", spark_color=Theme.SUCCESS)
         self.card_devices = StatCard("devices", "Devices online")
         for c in (self.card_internet, self.card_download, self.card_upload,
@@ -105,28 +113,24 @@ class DashboardPage(BasePage):
 
         monitor_card = Card("Live Network Monitor", "monitor")
         monitor_card.setMinimumHeight(MIDDLE_HEIGHT)  # grows in fullscreen
-        # Adapter selector in the card header (right side)
-        from PyQt6.QtWidgets import QComboBox
-        self.adapter_combo = QComboBox()
-        self.adapter_combo.setMinimumWidth(180)
-        self.adapter_combo.setStyleSheet(
-            f"QComboBox {{ background: {Theme.BG_ELEVATED}; color: {Theme.TEXT_BODY};"
+        # Opens the detailed analysis (bandwidth, latency, packet loss).
+        from PyQt6.QtWidgets import QPushButton
+        self.btn_analysis = QPushButton(" Detailed analysis")
+        self.btn_analysis.setIcon(Icons.get("monitor", Theme.TEXT_SECONDARY))
+        self.btn_analysis.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_analysis.setStyleSheet(
+            f"QPushButton {{ background: {Theme.BG_ELEVATED}; color: {Theme.TEXT_BODY};"
             f"border: 1px solid {Theme.BORDER_STRONG}; border-radius: 6px;"
-            f"padding: 3px 8px; font-size: {Theme.FONT_SIZE_TINY}px; }}"
-            f"QComboBox::drop-down {{ border: none; width: 18px; }}"
-            f"QComboBox QAbstractItemView {{ background: {Theme.BG_ELEVATED};"
-            f"color: {Theme.TEXT_BODY}; selection-background-color: {Theme.ACCENT};"
-            f"border: 1px solid {Theme.BORDER_STRONG}; outline: none; }}"
-        )
-        self.adapter_combo.addItem("Auto (recommended)", "")
-        self.adapter_combo.currentIndexChanged.connect(self._on_adapter_changed)
-        monitor_card.header_layout.addWidget(self.adapter_combo)
+            f"padding: 3px 10px; font-size: {Theme.FONT_SIZE_TINY}px; }}"
+            f"QPushButton:hover {{ border-color: {Theme.ACCENT}; color: {Theme.ACCENT}; }}")
+        self.btn_analysis.clicked.connect(self._open_traffic_analysis)
+        monitor_card.header_layout.addWidget(self.btn_analysis)
 
-        # Legend row (Download = blue, Upload = purple) + live peak/avg stats
+        # Legend row (Receive = blue, Send = purple) + live peak/avg stats
         legend = QHBoxLayout()
         legend.setSpacing(16)
-        legend.addWidget(self._legend_item("Download", Theme.ACCENT))
-        legend.addWidget(self._legend_item("Upload", Theme.ACCENT_PURPLE))
+        legend.addWidget(self._legend_item("Receive", Theme.ACCENT))
+        legend.addWidget(self._legend_item("Send", Theme.ACCENT_PURPLE))
         legend.addStretch()
         # Peak / Avg readouts (updated live, hover the graph for per-point).
         self.stat_peak = QLabel("Peak \u2014")
@@ -139,6 +143,7 @@ class DashboardPage(BasePage):
         monitor_card.content_layout.addLayout(legend)
 
         self.chart = LiveChart(max_points=60)
+        self.chart.clicked.connect(self._open_traffic_analysis)
         monitor_card.content_layout.addWidget(self.chart, 1)
 
         # Small label showing which adapter is currently monitored
@@ -156,7 +161,7 @@ class DashboardPage(BasePage):
 
         self.summary_card = Card("Network Summary", "summary")
         self._summary_values = {}
-        for key in ("Public IP", "Local IP", "Gateway", "DNS", "MAC Address"):
+        for key in ("Adapter", "Public IP", "Local IP", "Gateway", "DNS", "MAC Address"):
             container, val_lbl = kv_row(key, "\u2014", mono=True)
             self._summary_values[key] = val_lbl
             self.summary_card.content_layout.addWidget(container)
@@ -355,10 +360,11 @@ class DashboardPage(BasePage):
 
     def on_leave(self):
         self._resource_timer.stop()
-        self._ping_timer.stop()
         self._info_timer.stop()
         self._discovery_timer.stop()
-        self._monitor_worker = None
+        # Traffic monitor and ping timer keep running so the history stays continuous
+        if self._monitor_worker in self._workers:
+            self._workers.remove(self._monitor_worker)
         if self._devices_scanning:
             self._devices_placeholder.setText(
                 "Discovery is stopping because Dashboard was left. "
@@ -387,8 +393,6 @@ class DashboardPage(BasePage):
         # available for a manual refresh.
         self._sync_discovery_snapshot()
         self._start_startup_scan()
-        # Adapter list also loads in background.
-        self._load_adapters()
 
     def _task_done(self, name: str):
         self._pending.discard(name)
@@ -451,9 +455,11 @@ class DashboardPage(BasePage):
             self.card_loss.set_tile_tint("#351a24", "#ff6b8a")
             self.card_loss.set_value("100", "%", color=Theme.DANGER, subtitle="No response")
             self.card_loss.push_spark(100)
+            traffic_history.add_connectivity(None, 100.0)
             return
         avg_ping = round(sum(r["avg"] for r in reachable) / len(reachable))
         avg_loss = round(sum(r["loss"] for r in reachable) / len(reachable), 1)
+        traffic_history.add_connectivity(avg_ping, avg_loss)
         self.card_internet.set_value("Connected", color=Theme.SUCCESS,
                                      subtitle=f"Ping: {avg_ping} ms")
         if avg_loss < 1:
@@ -495,6 +501,8 @@ class DashboardPage(BasePage):
         w.start()
 
     def _on_eth(self, d: dict):
+        name = d.get("adapter") or adapter_state.get() or "\u2014"
+        self._set_summary("Adapter", f"{name} (not connected)" if "error" in d else name)
         self._set_summary("Public IP", d.get("public_ip", "\u2014"))
         self._set_summary("Local IP", d.get("ip", "\u2014"))
         self._set_summary("Gateway", d.get("gateway", "\u2014"))
@@ -840,55 +848,59 @@ class DashboardPage(BasePage):
         return w
 
     # -- Live monitor (stream) --
-    # -- Adapter selection --
-    def _load_adapters(self):
-        # Populate the adapter dropdown (background, after reveal).
-        w = OneshotWorker(self.core.list_adapters)
-        w.result.connect(self._on_adapters)
-        w.error.connect(lambda e: None)
-        self.register_worker(w)
-        w.start()
+    def _open_traffic_analysis(self):
+        # Open the detailed bandwidth / latency / packet-loss view.
+        from ui.components.traffic_analysis_dialog import TrafficAnalysisDialog
+        dlg = TrafficAnalysisDialog(self)
+        dlg.exec()
 
-    def _on_adapters(self, data):
-        adapters = data.get("items", data) if isinstance(data, dict) else data
-        if not isinstance(adapters, list):
-            return
-        self.adapter_combo.blockSignals(True)
-        # Preserve the Auto entry while refreshing adapter choices.
-        for a in adapters:
-            if not isinstance(a, dict):
-                continue
-            name = a.get("name", "")
-            status = a.get("status", "")
-            if not name:
-                continue
-            label = f"{name}" + ("" if status == "Up" else f"  ({status})")
-            self.adapter_combo.addItem(label, name)
-        self.adapter_combo.blockSignals(False)
-
-    def _on_adapter_changed(self, index):
-        # User picked a different adapter - restart monitor on it.
-        selected = self.adapter_combo.currentData()
-        # Stop current monitor
+    def _on_adapter_setting(self, _name=""):
+        # The adapter was changed in Settings: restart the monitor and refresh the summary
         if self._monitor_worker is not None:
             self._monitor_worker.stop()
             self._monitor_worker = None
-        self._selected_adapter = selected or ""
         self._start_monitor()
+        self._set_summary("Adapter", "\u2026")
+        self._refresh_info()
 
-    def _start_monitor(self):
+    def shutdown(self):
+        # Called when the app closes or pages are rebuilt
+        self._closing = True
+        self._watchdog.stop()
+        self._ping_timer.stop()
         if self._monitor_worker is not None:
+            self._monitor_worker.stop()
+            self._monitor_worker.wait(1500)
+            self._monitor_worker = None
+
+    def _start_monitor(self, reset=True):
+        if self._monitor_worker is not None or self._closing:
             return
-        self.chart.reset()
-        self.card_download.set_value("0.0", "Kbps", color=Theme.ACCENT, subtitle="Live")
-        self.card_upload.set_value("0.0", "Kbps", color=Theme.ACCENT_PURPLE, subtitle="Live")
-        adapter = getattr(self, "_selected_adapter", "")
-        w = StreamWorker(self.core.monitor_stream, adapter)
+        if reset:
+            self.chart.reset()
+            self.card_download.set_value("0.0", "Kbps", color=Theme.ACCENT, subtitle="Live")
+            self.card_upload.set_value("0.0", "Kbps", color=Theme.ACCENT_PURPLE, subtitle="Live")
+        w = StreamWorker(self.core.monitor_stream, adapter_state.get())
         w.result.connect(self._on_monitor)
         w.error.connect(lambda e: self.adapter_status.setText(f"Monitoring: {e}"))
+        w.done.connect(lambda w=w: self._monitor_ended(w))
         self.register_worker(w)
         self._monitor_worker = w
+        self._last_sample = time.time()
+        self._watchdog.start()
         w.start()
+
+    def _monitor_ended(self, w):
+        # The stream stopped on its own: start it again
+        if w is self._monitor_worker and not self._closing:
+            self._monitor_worker = None
+            QTimer.singleShot(1500, lambda: self._start_monitor(reset=False))
+
+    def _check_monitor(self):
+        if self._monitor_worker is not None and time.time() - self._last_sample > 8:
+            self._monitor_worker.stop()
+            self._monitor_worker = None
+            self._start_monitor(reset=False)
 
     def _update_trend(self, card, attr, value):
         """Update the trend badge when both samples are meaningful."""
@@ -910,7 +922,10 @@ class DashboardPage(BasePage):
         adapter = d.get("adapter", "")
         if adapter:
             self.adapter_status.setText(f"Monitoring: {adapter}")
+        self._last_sample = time.time()
         if "dl" in d and "ul" in d:
+            traffic_history.set_adapter(adapter)
+            traffic_history.add_bandwidth(d["dl"], d["ul"])
             self.chart.push(d["dl"], d["ul"])
             # Adaptive units: Kbps / Mbps / Gbps depending on the value
             dl_val, dl_unit = format_speed(d["dl"])
