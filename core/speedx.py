@@ -74,8 +74,8 @@ def probe_network_ul(url: str) -> int:
         elapsed_time: float = time.monotonic() - start_time
         """ If the request is received in less than a second, increase currRequestSize,
         if the currRequestSize is longer than 1 second, exit the loop """
-        if elapsed_time <= 0.5:
-            currRequestSize *= 1.2
+        if elapsed_time <= 0.7:
+            currRequestSize *= 1.2 
         else:
             break
     
@@ -112,8 +112,8 @@ def probe_network_dl(url: str) -> int:
         #print(f"elapsed_time: {elapsed_time}")
         """ If the request is received in less than a second, increase currRequestSize,
         if the currRequestSize is longer than 1 second, exit the loop """
-        if elapsed_time <= 1:
-            currRequestSize *= 1.2
+        if elapsed_time <= 0.7:
+            currRequestSize *= 2
         else:
             break
     
@@ -294,7 +294,7 @@ def upload_speed_test(url: str, speed_time: int) -> dict[str,float | int]:
                 # This is just converted to a format that the UI can understand
                 sent_request_bytes_sent += ul_worker_res["bytes_sent"]
                 sent_request_amount += 1
-        if sent_request_amount == 20:
+        if sent_request_amount == 10:
             """I need to divide the elapsed time by worker_amount, to be honest I don't know why
             but that gives the closest calculations to the actual result (probably needs changing, but it works for now) """
             mbps_to_send = calculate_speed_in_Mbps(sent_request_bytes_sent, time.monotonic() - requests_time) 
@@ -307,7 +307,7 @@ def upload_speed_test(url: str, speed_time: int) -> dict[str,float | int]:
             smoothed_speed: float = smooth_responsiveness * mbps_to_send + (1 - smooth_responsiveness) * previous_smoothed_speed 
             
             previous_smoothed_speed = smoothed_speed
-            yield {"type": "upload", "mbps": smoothed_speed} 
+            yield {"type": "upload", "mbps": round(smoothed_speed,2) } 
 
             sent_request_amount = 0
             sent_request_bytes_sent = 0

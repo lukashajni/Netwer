@@ -2800,14 +2800,14 @@ def stream_speed_test():
 
 
     test_dict_upload: dict[str,float | int] = yield from speedx.upload_speed_test(
-        url=download_url,speed_time=15
+        url=download_url,speed_time=7
     )
     ul_speed_in_Mbps: float = speedx.calculate_speed_in_Mbps(test_dict_upload["total_bytes"], test_dict_upload["elapsed_time"])
     #print(f"Upload speed: {ul_speed_in_Mbps}Mbps")
     yield {"type": "upload", "mbps": round(ul_speed_in_Mbps, 2)}
 
     test_dict_download: dict[str,float | int] = yield from speedx.download_speed_test(
-        url=download_url,speed_time=15
+        url=download_url,speed_time=7
     )
     dl_speed_in_Mbps: float = speedx.calculate_speed_in_Mbps(test_dict_download["total_bytes"], test_dict_download["elapsed_time"])
     #print(f"Download speed: {dl_speed_in_Mbps}Mbps")
