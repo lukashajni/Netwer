@@ -4,7 +4,6 @@ from PyQt6.QtWidgets import QFrame, QHBoxLayout, QLabel, QVBoxLayout, QWidget
 from app.resources import Icons
 from app.theme import Theme, card_bg, card_border
 
-#: Width of the icon rail; the sidebar opens to Theme.SIDEBAR_WIDTH on hover.
 RAIL_WIDTH = 64
 
 
@@ -41,7 +40,6 @@ class NavItem(QFrame):
             self._badge.setFixedHeight(16)
             self._badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
             lay.addWidget(self._badge, 0, Qt.AlignmentFlag.AlignVCenter)
-            # small dot on the icon while the rail is collapsed
             self._dot = QLabel(self)
             self._dot.setFixedSize(7, 7)
             self._dot.setStyleSheet(f"background: {Theme.ACCENT_GLOW}; border-radius: 3px;")
@@ -95,7 +93,6 @@ class NavItem(QFrame):
 
 
 class _SectionHeader(QWidget):
-    """Section title when open, a short divider line when collapsed."""
 
     def __init__(self, label: str, parent=None):
         super().__init__(parent)
@@ -118,7 +115,6 @@ class _SectionHeader(QWidget):
 
 
 class Sidebar(QWidget):
-    """Left navigation. Rests as an icon rail and slides open over the page on hover."""
     navigate = pyqtSignal(str)
 
     def __init__(self, parent=None):
@@ -136,7 +132,7 @@ class Sidebar(QWidget):
         self._anim = QPropertyAnimation(self, b"railWidth", self)
         self._anim.setDuration(170)
         self._anim.setEasingCurve(QEasingCurve.Type.OutCubic)
-        # a short delay stops the rail from flicking open when the mouse only crosses it
+        # small delay so it doesn't open when the mouse just passes over
         self._open_timer = QTimer(self)
         self._open_timer.setSingleShot(True)
         self._open_timer.setInterval(120)
@@ -161,7 +157,6 @@ class Sidebar(QWidget):
             f"border: 1px solid {card_border()};"
             f"border-radius: {Theme.RADIUS_CARD}px; }}")
 
-    # -- open / close --
     def _get_width(self):
         return self._width
 

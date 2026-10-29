@@ -1,5 +1,3 @@
-"""Small shared styles for the redesigned pages (buttons, chips, pills)."""
-
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import QPushButton
 
@@ -8,7 +6,6 @@ from app.theme import Theme, input_bg
 
 
 def button(text: str, icon: str = "", kind: str = "normal", tip: str = "") -> QPushButton:
-    """kind: normal | primary | danger | ai | toggle"""
     b = QPushButton(("  " + text) if (icon and text) else text)
     b.setCursor(Qt.CursorShape.PointingHandCursor)
     if tip:
@@ -59,7 +56,6 @@ SEVERITY_COLORS = {"success": "SUCCESS", "warning": "WARNING", "danger": "DANGER
 
 
 def insight_chip(text: str, detail: str, severity: str) -> QPushButton:
-    """A clickable finding with a coloured severity bar on the left."""
     color = getattr(Theme, SEVERITY_COLORS.get(severity, "ACCENT"))
     label = text + (f"  ·  {detail}" if detail else "")
     b = QPushButton(label)

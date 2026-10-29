@@ -30,7 +30,6 @@ from workers import OneshotWorker, StreamWorker
 
 
 class _ScoreRing(QWidget):
-    """Round 0-100 score, green when healthy."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -201,7 +200,6 @@ class DashboardPage(BasePage):
             win.ask_ai(question)
 
     def _update_hero(self):
-        """Rule-based one-line verdict from the latest ping and the capture."""
         st = self._hero_state
         online, ping, loss = st["online"], st["ping"], st["loss"]
         if online is None:

@@ -1,5 +1,4 @@
 """Tests for the Packet Capture core: dissector, display filters, TCP analysis, pcap files."""
-
 import json
 import os
 import struct

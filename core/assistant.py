@@ -5,7 +5,7 @@ import urllib.error
 import urllib.request
 
 
-# The instructions live in core/ai_prompts.py, which is git ignored.
+# real prompt is in ai_prompts.py (git ignored)
 try:
     from core.ai_prompts import ASSISTANT_PROMPT as SYSTEM_PROMPT
 except ImportError:

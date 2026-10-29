@@ -1,10 +1,4 @@
-"""Live packet capture for the Packet Capture page.
-
-Capturing uses scapy on top of Npcap (Windows) or libpcap (Linux). Frames are
-dissected as they arrive and a few statistics are kept up to date so that the
-page, the AI watch row and the assistant never have to rescan the whole capture.
-"""
-
+"""Live packet capture for the Packet Capture page."""
 import ipaddress
 import struct
 import threading
@@ -27,7 +21,6 @@ class CapturedPacket:
         self.stream = None
 
     def tree(self):
-        """Layer tree for the details panel (dissected again on demand)."""
         return dissect(self.data, tree=True).tree
 
 
@@ -48,7 +41,6 @@ def _is_unicast(ip):
 
 
 def capture_backend():
-    """(ok, message) about whether live capture can work on this machine."""
     try:
         from scapy.all import conf
     except Exception:
@@ -61,7 +53,6 @@ def capture_backend():
 
 
 def list_interfaces():
-    """Interfaces scapy can capture on, the ones with an IPv4 address first."""
     try:
         from scapy.all import get_working_ifaces
         out = []
@@ -86,7 +77,6 @@ class CaptureService:
         self.selected_no = None
         self.reset()
 
-    # -- state --
     def reset(self):
         with getattr(self, "_lock", threading.Lock()):
             self.packets = []
@@ -127,7 +117,6 @@ class CaptureService:
             return self.packets[no - 1]
         return None
 
-    # -- live capture --
     def start(self, iface, bpf=""):
         ok, msg = capture_backend()
         if not ok:
@@ -149,7 +138,6 @@ class CaptureService:
                 pass
 
     def poll_error(self):
-        """Error raised inside the sniffer thread, if it died."""
         s = self._sniffer
         if s is None:
             return ""
@@ -169,7 +157,7 @@ class CaptureService:
             if isinstance(pkt, Ether):
                 data = bytes(pkt)
             elif IP in pkt or IPv6 in pkt:
-                # loopback captures have no Ethernet header; add one so every frame looks alike
+                # loopback has no ethernet header, fake one
                 layer = pkt[IP] if IP in pkt else pkt[IPv6]
                 etype = 0x0800 if IP in pkt else 0x86DD
                 data = b"\x00" * 12 + struct.pack("!H", etype) + bytes(layer)
@@ -179,7 +167,6 @@ class CaptureService:
         except Exception:
             pass
 
-    # -- adding frames and keeping statistics --
     def add_frame(self, data, ts=None):
         ts = time.time() if ts is None else ts
         if len(self.packets) >= MAX_PACKETS:
@@ -279,7 +266,7 @@ class CaptureService:
         elif plen or flags & 1:
             end = (seq + plen + (flags & 1)) & 0xFFFFFFFF
             keepalive = plen <= 1 and f["end"] is not None and seq == (f["end"] - 1) & 0xFFFFFFFF
-            # data that ends at or before what this side already sent is a resend
+            # ends before what we already sent -> resend
             behind = f["end"] is not None and ((f["end"] - end) & 0xFFFFFFFF) < 0x80000000
             if plen and behind and not keepalive:
                 p.tags.add("retrans")
@@ -300,7 +287,6 @@ class CaptureService:
         if flags & 16:
             f["ack"], f["win"] = d.tcp_ack, d.tcp_win
 
-    # -- files --
     def save_pcap(self, path, packets=None):
         packets = self.packets if packets is None else packets
         with open(path, "wb") as fh:
@@ -313,13 +299,12 @@ class CaptureService:
         return len(packets)
 
     def load_file(self, path):
-        """Replace the capture with a .pcap or .pcapng file."""
         self.stop()
         self.reset()
         self.iface, self.iface_ip, self.error = path, "", ""
         frames = list(_read_pcap(path))
         if frames and len(frames[0][1]) >= 34:
-            # guess "this computer" as the private address that talks the most
+            # our ip = the private address that talks the most
             c = Counter()
             for _, data in frames[:2000]:
                 dd = dissect(data)
@@ -331,7 +316,6 @@ class CaptureService:
             self.add_frame(data, ts)
         return len(frames)
 
-    # -- what the AI watch row and the assistant read --
     def host(self, ip):
         return self.names.get(ip) or ip
 
@@ -363,7 +347,6 @@ class CaptureService:
         return out
 
     def summary(self, selected=None):
-        """Compact JSON-able description of the capture for the assistant."""
         n = len(self.packets)
         dur = self.packets[-1].rel if n else 0
         mix_total = sum(self.proto_mix.values()) or 1
@@ -422,7 +405,6 @@ def _mix_bucket(d):
 
 
 def _read_pcap(path):
-    """Yield (timestamp, frame bytes). Uses scapy for pcapng when available."""
     with open(path, "rb") as fh:
         head = fh.read(24)
         magic = struct.unpack("<I", head[:4])[0] if len(head) >= 4 else 0

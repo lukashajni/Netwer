@@ -1,5 +1,4 @@
 """Packet Capture page: a Wireshark-style live capture with the assistant built in."""
-
 import socket
 
 from PyQt6.QtCore import QAbstractTableModel, QModelIndex, QRectF, QSize, Qt, QTimer, pyqtSignal
@@ -35,7 +34,7 @@ COLUMNS = ["No.", "Time", "Source", "Destination", "Protocol", "Length", "Info"]
 QUICK_FILTERS = [("TLS", "tls"), ("DNS", "dns && !mdns"), ("QUIC", "quic"), ("TCP problems", "tcp.analysis.flags"),
                  ("No broadcast", "!(arp || mdns || ssdp || llmnr || nbns || stp)"), ("HTTP", "http")]
 
-# Row colours per traffic class: (dark background, dark text, light background, light text)
+# dark bg, dark fg, light bg, light fg
 ROW_COLORS = {
     "tcp": ("#121a30", "#c4cfee", "#e7e6ff", "#12131a"),
     "tcpctl": ("#1b2030", "#97a1bd", "#a0a0a0", "#12131a"),
@@ -81,7 +80,6 @@ def color_class(p) -> str:
 
 
 def local_ipv4() -> str:
-    """Address this computer uses to reach the internet (no packet is sent)."""
     try:
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         s.connect(("8.8.8.8", 53))
@@ -143,7 +141,6 @@ class PacketModel(QAbstractTableModel):
 
 
 class _RowDelegate(QStyledItemDelegate):
-    """Paints the protocol colour of each row, and the accent colour when selected."""
 
     def paint(self, painter, option, index):
         selected = bool(option.state & QStyle.StateFlag.State_Selected)
@@ -161,7 +158,6 @@ class _RowDelegate(QStyledItemDelegate):
 
 
 class HexView(QWidget):
-    """Offset / hex / ASCII dump with the selected field highlighted."""
     byte_clicked = pyqtSignal(int)
 
     def __init__(self, parent=None):
@@ -240,7 +236,6 @@ class HexView(QWidget):
 
 
 class MixBar(QWidget):
-    """Thin stacked bar of the protocol mix."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -324,7 +319,6 @@ class CapturePage(BasePage):
         self._fill_interfaces()
         self._update_controls()
 
-    # -- construction --
     def _build_toolbar(self):
         row = QHBoxLayout()
         row.setSpacing(8)
@@ -517,20 +511,18 @@ class CapturePage(BasePage):
         self._root.addWidget(split, 1)
         self._update_empty()
 
-    # -- lifecycle --
     def on_enter(self):
         self._sync_all()
         self._timer.start()
 
     def on_leave(self):
-        # the capture keeps running in the background; only the screen stops updating
+        # capture keeps running in the background
         self._timer.stop()
         super().on_leave()
 
     def shutdown(self):
         self.svc.stop()
 
-    # -- interfaces and capture control --
     def _fill_interfaces(self):
         ok, msg = capture_backend()
         self.iface.clear()
@@ -586,7 +578,6 @@ class CapturePage(BasePage):
             self.svc.reset()
             self._sync_all()
 
-    # -- polling --
     def _tick(self):
         err = self.svc.poll_error()
         if err:
@@ -615,7 +606,6 @@ class CapturePage(BasePage):
             self._update_controls()
 
     def _sync_all(self):
-        """Rebuild the list from the service (after a filter change, clear or file open)."""
         pkts = self.svc.since(0)
         self._seen = len(pkts)
         self.model.reset([p for p in pkts if self._pred(p)])
@@ -692,7 +682,6 @@ class CapturePage(BasePage):
             self.select_packet(it["frame"])
         self._ask(it["question"])
 
-    # -- filter --
     def _style_filter(self, state):
         border = {"ok": Theme.SUCCESS, "err": Theme.DANGER}.get(state, Theme.GLASS_BORDER)
         self.filter.setStyleSheet(
@@ -725,11 +714,9 @@ class CapturePage(BasePage):
         self._sync_all()
 
     def set_filter(self, text):
-        """Used by the quick chips, the AI watch row and the assistant's buttons."""
         self.filter.setText(text)
         self._apply_filter()
 
-    # -- selection --
     def _set_follow(self, on):
         self._follow = on
         if on:
@@ -829,7 +816,6 @@ class CapturePage(BasePage):
                 parent = parent.parent()
             self.tree.setCurrentItem(best)
 
-    # -- assistant --
     def _ask(self, question):
         win = self._window or self.window()
         if hasattr(win, "ask_ai"):
@@ -840,7 +826,6 @@ class CapturePage(BasePage):
         if p is not None:
             self._ask(f"Explain packet #{p.no} from my capture ({p.dis.proto}: {p.dis.info[:80]}).")
 
-    # -- files --
     def _open_file(self):
         path, _ = QFileDialog.getOpenFileName(self, "Open capture", "", "Captures (*.pcap *.pcapng *.cap);;All files (*)")
         if not path:

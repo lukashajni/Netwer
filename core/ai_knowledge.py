@@ -1,5 +1,4 @@
-# The instructions live in core/ai_prompts.py, which is git ignored.
-# Without it Netwer falls back to the short public stand-in.
+# real prompts are in ai_prompts.py (git ignored)
 try:
     from core.ai_prompts import APP_GUIDE, SYSTEM_PROMPT
 except ImportError:

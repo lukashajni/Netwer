@@ -191,7 +191,7 @@ class NetworkMap(QWidget):
         self._router_vendor = ""
         self._devices = []
         self._self_node = None
-        # moving dots that show live traffic on the links
+        # traffic dots on the links
         self._dots = []
         self._anim = QTimer(self)
         self._anim.setInterval(30)
@@ -334,9 +334,7 @@ class NetworkMap(QWidget):
         self._paint_dots(p, route)
         p.end()
 
-    # -- live traffic dots --
     def set_traffic(self, dl_mbps: float, ul_mbps: float) -> None:
-        """Spawn dots for one second of traffic: blue flows in, purple flows out."""
         if not self._online or not self.isVisible():
             return
         now = time.monotonic()

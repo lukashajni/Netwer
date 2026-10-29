@@ -1,10 +1,4 @@
-"""Wireshark-style display filters for the Packet Capture page.
-
-Supports protocol names (tcp, dns, tls ...), fields compared with
-== != > < >= <= contains (or eq ne gt lt ge le), and/or/not (&& || !) and
-parentheses, e.g.  tls && ip.addr == 140.82.121.4  or  !(arp || mdns).
-"""
-
+"""Wireshark-style display filters for the Packet Capture page."""
 import re
 
 
@@ -65,7 +59,6 @@ FIELDS = {
     "udp.stream": lambda p: _udp(p, p.stream),
     "port": lambda p: _ports(p) if p.dis.sport is not None else None,
 }
-# Everything the dissector stores in Dissection.fields is filterable too.
 DISSECTOR_FIELDS = {"dns.qry.name", "dns.a", "dns.id", "dns.flags.response", "dns.flags.rcode",
                     "tls.handshake.extensions_server_name", "tls.handshake.type", "tls.alert", "http.host",
                     "http.request", "http.response", "http.response.code", "http.request.method",
@@ -110,7 +103,6 @@ def _number(v):
 
 
 def compile_filter(text: str):
-    """Return a predicate packet -> bool. Raises FilterError with a readable message."""
     text = (text or "").strip()
     if not text:
         return lambda p: True

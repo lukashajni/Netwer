@@ -111,7 +111,6 @@ class TopBar(QWidget):
         sp.addWidget(self._status_text)
         lay.addWidget(self._status_pill)
 
-        # Opens the Netwer AI dock on the right
         self._ai_btn = QPushButton("  Netwer AI")
         self._ai_btn.setCheckable(True)
         self._ai_btn.setCursor(Qt.CursorShape.PointingHandCursor)

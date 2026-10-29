@@ -1,15 +1,10 @@
-"""Stand-in for core/ai_prompts.py, which holds Netwer AI's real instructions and is git ignored.
-
-Copy this file to core/ai_prompts.py and write your own instructions there.
-"""
-
+# copy to ai_prompts.py and put the real prompts there
 APP_GUIDE = [
     ("Dashboard", "Overview of the network and this computer."),
     ("Network Health", "Diagnoses the network and lists findings."),
     ("Packet Capture", "Live packet capture with display filters."),
 ]
 
-# {guide} is replaced with the APP_GUIDE list
 SYSTEM_PROMPT = """You are the assistant built into NETWER, a network diagnostic app.
 
 What Netwer contains:

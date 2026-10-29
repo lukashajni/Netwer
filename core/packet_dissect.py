@@ -1,11 +1,4 @@
-"""Packet dissector for the Packet Capture page.
-
-Turns raw Ethernet frames into a summary row (source, destination, protocol,
-info) plus the fields the display filter and the assistant read. With
-tree=True it also builds the layer tree shown in the details panel; every node
-carries the byte range it came from so the bytes panel can highlight it.
-"""
-
+"""Packet dissector for the Packet Capture page."""
 import struct
 
 ETH_TYPES = {0x0800: "IPv4", 0x0806: "ARP", 0x86DD: "IPv6", 0x8100: "802.1Q VLAN", 0x88CC: "LLDP", 0x888E: "EAPOL"}
@@ -37,7 +30,7 @@ def ip4_str(b: bytes) -> str:
 
 def ip6_str(b: bytes) -> str:
     groups = [f"{(b[i] << 8) | b[i + 1]:x}" for i in range(0, 16, 2)]
-    # compress the longest run of zero groups
+    # :: for the longest zero run
     best, run, start = (0, -1), 0, -1
     for i, g in enumerate(groups + ["x"]):
         if g == "0":
@@ -79,7 +72,6 @@ class Node:
 
 
 class _NoNode:
-    """Stand-in used when no tree is needed, so the parsing code stays the same."""
 
     def add(self, *a, **k):
         return self
@@ -91,7 +83,6 @@ _NO = _NoNode()
 
 
 class Dissection:
-    """Result of dissecting one frame."""
 
     def __init__(self, data: bytes):
         self.data = data
@@ -124,7 +115,6 @@ class _Dissector:
         self.d.tree.append(n)
         return n
 
-    # -- link layer --
     def run(self) -> Dissection:
         b, d = self.data, self.d
         if len(b) < 14:
@@ -173,7 +163,6 @@ class _Dissector:
             d.info = f"DSAP 0x{b[14]:02x} SSAP 0x{b[15]:02x}" if len(b) >= 16 else "LLC"
         return d
 
-    # -- network layer --
     def ipv4(self, o):
         b, d = self.data, self.d
         if len(b) < o + 20:
@@ -224,7 +213,7 @@ class _Dissector:
         n.add(f"Source Address: {src}", o + 8, 16)
         n.add(f"Destination Address: {dst}", o + 24, 16)
         off = o + 40
-        # skip hop-by-hop / routing / destination option headers
+        # skip extension headers
         while nxt in (0, 43, 60) and len(b) >= off + 8:
             nxt, ln = b[off], (b[off + 1] + 1) * 8
             off += ln
@@ -255,7 +244,6 @@ class _Dissector:
         n.add(f"Target MAC address: {tha}", o + 18, 6)
         n.add(f"Target IP address: {tpa}", o + 24, 4)
 
-    # -- transport layer --
     def transport(self, proto, o, end):
         d = self.d
         if proto == 6:
@@ -380,7 +368,6 @@ class _Dissector:
         n.add(f"Type: {d.info} ({t})", o, 1)
         n.add(f"Code: {b[o + 1]}", o + 1, 1)
 
-    # -- application layer --
     def app_tcp(self, p, end, sp, dp):
         b, d = self.data, self.d
         first = b[p]
@@ -447,8 +434,7 @@ class _Dissector:
             d.info = f"{d.sport} → {d.dport} Continuation Data, Len={end - p}"
             d.proto = "TLS"
             return
-        # Record headers of TLS 1.2 and 1.3 look the same; only the hellos tell them
-        # apart. The capture service relabels the rest of the flow once it has seen one.
+        # 1.2 and 1.3 records look the same, capture.py fixes the label per stream
         d.proto = ver_name
         dedup = []
         for x in infos:
@@ -670,7 +656,6 @@ class _Dissector:
 
 
 def dissect(data: bytes, tree: bool = False) -> Dissection:
-    """Dissect an Ethernet frame. Never raises; unknown data stays undecoded."""
     dis = _Dissector(bytes(data), tree)
     try:
         return dis.run()

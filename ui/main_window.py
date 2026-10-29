@@ -61,8 +61,7 @@ class MainWindow(QMainWindow):
         outer.setContentsMargins(20, 20, 20, 20)
         outer.setSpacing(18)
 
-        # The sidebar floats above the pages so it can open over them on hover;
-        # this placeholder keeps the rail's width free in the layout.
+        # sidebar floats over the pages, this keeps the rail's space
         self._rail_slot = QWidget()
         self._rail_slot.setFixedWidth(RAIL_WIDTH)
         outer.addWidget(self._rail_slot)
@@ -97,7 +96,6 @@ class MainWindow(QMainWindow):
         self.stack = QStackedWidget()
         root.addWidget(self.stack, 1)
 
-        # Netwer AI dock; shares its conversation with the panels on other pages
         self.ai_dock = self._build_ai_dock()
         root.addWidget(self.ai_dock)
 
@@ -140,7 +138,6 @@ class MainWindow(QMainWindow):
         self._overlay.hide()
         self._loading_active = False
 
-    # -- Sidebar rail --
     def eventFilter(self, obj, event):
         from PyQt6.QtCore import QEvent
         if obj is self._central and event.type() == QEvent.Type.Resize:
@@ -153,7 +150,6 @@ class MainWindow(QMainWindow):
                                  self._central.height() - m.top() - m.bottom())
         self.sidebar.raise_()
 
-    # -- Netwer AI dock --
     def _build_ai_dock(self):
         from ui.widgets.ai_chat_panel import AIChatPanel
         dock = AIChatPanel()
@@ -168,7 +164,6 @@ class MainWindow(QMainWindow):
         self.ai_dock.toggle()
 
     def ask_ai(self, question: str) -> None:
-        """Open the dock and ask the assistant (used by pages such as Packet Capture)."""
         self._show_panel(None)
         self.ai_dock.ask(question)
 
@@ -672,8 +667,7 @@ class MainWindow(QMainWindow):
             self._overlay.raise_()
 
     def goto(self, key: str) -> None:
-        """Navigate to a page and update the sidebar selection.
-        "filter:<expr>" opens Packet Capture with that display filter applied."""
+        """Navigate to a page and update the sidebar selection."""
         if key.startswith("filter:"):
             page = self._pages.get("capture")
             self.goto("capture")
