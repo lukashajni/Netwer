@@ -45,6 +45,9 @@ class NavItem(QFrame):
             self._dot.setStyleSheet(f"background: {Theme.ACCENT_GLOW}; border-radius: 3px;")
             self._dot.move(31, 9)
 
+        self._bar = QLabel(self)
+        self._bar.setFixedSize(3, 22)
+        self._bar.move(0, 9)
         self._refresh_style()
 
     def set_compact(self, compact: bool) -> None:
@@ -60,9 +63,8 @@ class NavItem(QFrame):
     def _refresh_style(self) -> None:
         if self._active:
             self.setStyleSheet(
-                f"QFrame {{ background: {Theme.GRAD_ACCENT_SOFT};"
-                f"border: 1px solid {Theme.GLASS_BORDER_HI};"
-                f"border-radius: {Theme.RADIUS_CONTROL}px; }}"
+                f"QFrame {{ background: {Theme.BG_ELEVATED}; border: none;"
+                f"border-radius: 8px; }}"
                 f"QLabel {{ background: transparent; border: none; }}"
             )
             self._icon.setPixmap(Icons.pixmap(self._icon_name, 17, Theme.ACCENT))
@@ -73,8 +75,8 @@ class NavItem(QFrame):
         else:
             self.setStyleSheet(
                 f"QFrame {{ background: transparent; border: none;"
-                f"border-radius: {Theme.RADIUS_CONTROL}px; }}"
-                f"QFrame:hover {{ background: {Theme.BG_ELEVATED}; }}"
+                f"border-radius: 8px; }}"
+                f"QFrame:hover {{ background: {card_bg()}; }}"
                 f"QLabel {{ background: transparent; border: none; }}"
             )
             self._icon.setPixmap(Icons.pixmap(self._icon_name, 17, Theme.TEXT_SECONDARY))
@@ -82,6 +84,8 @@ class NavItem(QFrame):
                 f"color: {Theme.TEXT_SECONDARY}; font-size: {Theme.FONT_SIZE_BODY}px;"
                 f"font-weight: 500; background: transparent; border: none;"
             )
+        self._bar.setStyleSheet(f"background: {Theme.ACCENT}; border-radius: 1px;")
+        self._bar.setVisible(self._active)
         if self._badge is not None:
             self._badge.setStyleSheet(
                 f"QLabel {{ background: {Theme.ACCENT_GLOW}; color: {Theme.BG_APP}; border-radius: 4px;"
@@ -153,9 +157,8 @@ class Sidebar(QWidget):
 
     def _apply_style(self):
         self.setStyleSheet(
-            f"#Sidebar {{ background: {card_bg()};"
-            f"border: 1px solid {card_border()};"
-            f"border-radius: {Theme.RADIUS_CARD}px; }}")
+            f"#Sidebar {{ background: {Theme.BG_SIDEBAR}; border: none;"
+            f"border-right: 1px solid {card_border()}; }}")
 
     def _get_width(self):
         return self._width

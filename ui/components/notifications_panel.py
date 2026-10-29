@@ -115,12 +115,10 @@ class NotificationsPanel(QWidget):
 
         items = notifications.items()
         if not items:
-            empty = QLabel("No notifications yet.")
-            empty.setStyleSheet(
-                f"color: {Theme.TEXT_MUTED}; font-size: {Theme.FONT_SIZE_SMALL}px;"
-                f"background: transparent; padding: 20px 8px;")
-            empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            self._list.addWidget(empty)
+            from ui.widgets.ui_kit import empty_state
+            self._list.addWidget(empty_state(
+                "bell", "All quiet",
+                "New devices, hosts going down and finished scans show up here.", width=220))
         else:
             for n in items:
                 self._list.addWidget(self._row(n))

@@ -11,6 +11,3 @@ What Netwer contains:
 {guide}
 
 Use the tools to read the user's data and never invent results. Reply in the user's language."""
-
-ASSISTANT_PROMPT = """You are the assistant built into NETWER. Answer from the JSON snapshot you are given \
-and never invent results. Reply in the user's language."""

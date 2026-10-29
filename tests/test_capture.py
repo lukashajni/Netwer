@@ -191,6 +191,29 @@ class TestCaptureService(unittest.TestCase):
         self.assertEqual(sm["selected_packet"]["tcp_analysis"], ["retrans"])
         self.assertIn("Transmission Control Protocol", sm["selected_packet"]["layers"])
 
+    def test_follow_stream_and_conversations(self):
+        s = self.build()
+        http = next(p for p in s.packets if p.dis.proto == "HTTP")
+        st = s.follow_stream(http.stream)
+        self.assertEqual(st["chunks"][0][0], "client")
+        self.assertTrue(st["chunks"][0][1].startswith(b"GET / HTTP/1.1"))
+        reddit = s.follow_stream(s.packets[2].stream)
+        # the resent segment is not counted twice
+        self.assertEqual(reddit["chunks"], [("server", b"a" * 1000 + b"b" * 1000)])
+        convs = s.conversations()
+        self.assertEqual(convs[0]["b"], "192.168.88.253")
+        self.assertEqual({e["ip"] for e in s.endpoints()}, {PC, GW, "151.101.1.140", "34.223.124.45"})
+
+    def test_no_mac_reaches_the_assistant(self):
+        s = self.build()
+        arp = struct.pack("!HHBBH", 1, 0x0800, 6, 4, 2) + PC_MAC + _ip(PC) + GW_MAC + _ip(GW)
+        s.add_frame(eth(arp, etype=0x0806), 2.0)
+        s.lan_macs["aa:bb:cc:dd:ee:ff"] = {"ip": "192.168.88.24", "first": 1}
+        for no in range(1, s.count() + 1):
+            text = json.dumps(s.summary(selected=no)).lower()
+            for mac in ("a8:a1:59:3c:7e:12", "48:8f:5a:21:0b:c4", "aa:bb:cc:dd:ee:ff", "a8 a1 59 3c 7e 12"):
+                self.assertNotIn(mac, text)
+
     def test_pcap_round_trip(self):
         s = self.build()
         path = os.path.join(tempfile.mkdtemp(), "t.pcap")
@@ -217,6 +240,12 @@ class TestAssistantTools(unittest.TestCase):
         self.assertIn("error", json.loads(tools.call("suggest_action", {"label": "x", "target": "filter:tls &&"})))
         self.assertEqual(json.loads(tools.call("get_capture", {}))["packets"], 1)
         svc.reset()
+
+    def test_current_page(self):
+        from core import ai_tools
+        tools = ai_tools.AppTools({"current_page": {"page": "Ping", "avg_ms": "14.7"}})
+        self.assertEqual(json.loads(tools.call("get_current_page", {}))["avg_ms"], "14.7")
+        self.assertFalse(json.loads(ai_tools.AppTools({}).call("get_current_page", {}))["available"])
 
 
 if __name__ == "__main__":

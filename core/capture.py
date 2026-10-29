@@ -1,5 +1,6 @@
 """Live packet capture for the Packet Capture page."""
 import ipaddress
+import re
 import struct
 import threading
 import time
@@ -319,6 +320,58 @@ class CaptureService:
     def host(self, ip):
         return self.names.get(ip) or ip
 
+    def follow_stream(self, stream):
+        pkts = [p for p in self.packets if p.stream == stream]
+        if not pkts:
+            return None
+        first = pkts[0].dis
+        client = (first.ip_src, first.sport)
+        chunks = []
+        for p in pkts:
+            d = p.dis
+            if not d.payload_len or d.payload_off is None or "retrans" in p.tags:
+                continue
+            data = p.data[d.payload_off:d.payload_off + d.payload_len]
+            side = "client" if (d.ip_src, d.sport) == client else "server"
+            if chunks and chunks[-1][0] == side:
+                chunks[-1][1].extend(data)
+            else:
+                chunks.append((side, bytearray(data)))
+        return {"l4": first.l4, "client": f"{first.ip_src}:{first.sport}", "server": f"{first.ip_dst}:{first.dport}",
+                "server_name": self.host(first.ip_dst), "packets": len(pkts),
+                "encrypted": any(p.dis.proto.startswith(("TLS", "QUIC")) for p in pkts),
+                "chunks": [(side, bytes(data)) for side, data in chunks]}
+
+    def conversations(self):
+        conv = {}
+        for p in self.packets:
+            d = p.dis
+            if not d.ip_src:
+                continue
+            a, b = sorted((d.ip_src, d.ip_dst))
+            c = conv.get((a, b))
+            if c is None:
+                c = conv[(a, b)] = {"a": a, "b": b, "packets": 0, "bytes": 0, "start": p.rel, "end": p.rel,
+                                    "protos": Counter()}
+            c["packets"] += 1
+            c["bytes"] += d.length
+            c["end"] = p.rel
+            c["protos"][d.proto] += 1
+        return sorted(conv.values(), key=lambda c: -c["bytes"])
+
+    def endpoints(self):
+        ep = {}
+        for p in self.packets:
+            d = p.dis
+            for ip, sent in ((d.ip_src, True), (d.ip_dst, False)):
+                if not ip:
+                    continue
+                e = ep.setdefault(ip, {"ip": ip, "packets": 0, "bytes": 0, "sent": 0, "received": 0})
+                e["packets"] += 1
+                e["bytes"] += d.length
+                e["sent" if sent else "received"] += d.length
+        return sorted(ep.values(), key=lambda e: -e["bytes"])
+
     def insights(self):
         out = []
         if self.retrans:
@@ -376,7 +429,7 @@ class CaptureService:
                                       key=lambda x: -x["ms"])[:5]},
             "ping": {"replies": len(self.ping_rtts),
                      "avg_ms": round(sum(x["ms"] for x in self.ping_rtts) / len(self.ping_rtts), 1) if self.ping_rtts else None},
-            "lan_devices_seen": [{"mac": m, "ip": v["ip"], "first_frame": v["first"]} for m, v in list(self.lan_macs.items())[:20]],
+            "lan_devices_seen": [{"ip": v["ip"], "first_frame": v["first"]} for v in list(self.lan_macs.values())[:20]],
             "tls_server_names": [s for s, _ in self.sni.most_common(20)],
             "display_filter": self.view_filter, "displayed_packets": self.displayed,
         }
@@ -386,13 +439,24 @@ class CaptureService:
         return out
 
 
+_MAC = re.compile(r"\b(?:[0-9a-fA-F]{2}[:-]){5}[0-9a-fA-F]{2}\b")
+
+
+def hide_macs(text):
+    # the AI panel promises that no MAC address leaves the computer
+    return _MAC.sub("[MAC hidden]", text)
+
+
 def packet_detail(p):
     d = p.dis
-    tree = "\n".join(n.text() for n in p.tree())
-    return {"number": p.no, "time_s": round(p.rel, 6), "source": d.src, "destination": d.dst, "protocol": d.proto,
-            "length": d.length, "info": d.info, "tcp_analysis": sorted(p.tags),
-            "layers": tree[:5000] + ("\n...(truncated)" if len(tree) > 5000 else ""),
-            "first_bytes_hex": p.data[:96].hex(" ")}
+    tree = hide_macs("\n".join(n.text() for n in p.tree()))
+    out = {"number": p.no, "time_s": round(p.rel, 6), "source": hide_macs(d.src),
+           "destination": hide_macs(d.dst), "protocol": d.proto, "length": d.length, "info": hide_macs(d.info),
+           "tcp_analysis": sorted(p.tags), "layers": tree[:5000] + ("\n...(truncated)" if len(tree) > 5000 else "")}
+    # raw bytes only past the ethernet header, and never for ARP/DHCP which carry MACs inside
+    if d.ip_src and "dhcp" not in d.protos:
+        out["bytes_after_ethernet_hex"] = p.data[14:110].hex(" ")
+    return out
 
 
 def _mix_bucket(d):

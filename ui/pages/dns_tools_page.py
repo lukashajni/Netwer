@@ -14,6 +14,7 @@ from ui.pages.traceroute_page import TraceroutePage
 class DnsToolsPage(BasePage):
     PAGE_TITLE = "DNS Tools"
     PAGE_SUBTITLE = "Resolve domains, reverse-lookup IPs and trace network paths"
+    AI_QUESTION = "Explain the results on the DNS Tools page."
 
     def __init__(self, core, parent=None):
         super().__init__(core, parent)
@@ -110,3 +111,7 @@ class DnsToolsPage(BasePage):
         for panel in self._panels:
             panel.on_leave()
         super().on_leave()
+
+    def ai_context(self):
+        panel = self._panels[self._active]
+        return {"tool": self._tabs_meta[self._active][0], **panel.ai_context()}

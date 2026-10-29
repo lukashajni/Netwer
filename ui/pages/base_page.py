@@ -1,6 +1,7 @@
 """Shared base class for pages, including headers and worker lifecycle."""
 
-from PyQt6.QtWidgets import QLabel, QVBoxLayout, QWidget
+from PyQt6.QtCore import Qt
+from PyQt6.QtWidgets import QHBoxLayout, QLabel, QVBoxLayout, QWidget
 
 from app.theme import Theme
 
@@ -9,6 +10,7 @@ class BasePage(QWidget):
     # Subclasses set this - used for title and navigation.
     PAGE_TITLE = "Page"
     PAGE_SUBTITLE = ""
+    AI_QUESTION = ""   # header "Ask Netwer AI" button asks this
 
     def __init__(self, core, parent=None, embedded=False):
         """Initialize a page, optionally without its own header."""
@@ -36,13 +38,17 @@ class BasePage(QWidget):
 
     # -- Header --
     def _build_header(self) -> None:
+        row = QHBoxLayout()
+        row.setSpacing(10)
+        text = QVBoxLayout()
+        text.setSpacing(2)
         title = QLabel(self.PAGE_TITLE)
         title.setStyleSheet(
             f"color: {Theme.TEXT_PRIMARY}; font-family: {Theme.FONT_FAMILY};"
             f"font-size: {Theme.FONT_SIZE_TITLE}px; font-weight: 600;"
             f"background: transparent;"
         )
-        self._root.addWidget(title)
+        text.addWidget(title)
 
         if self.PAGE_SUBTITLE:
             sub = QLabel(self.PAGE_SUBTITLE)
@@ -51,7 +57,29 @@ class BasePage(QWidget):
                 f"font-size: {Theme.FONT_SIZE_SMALL}px;"
                 f"background: transparent;"
             )
-            self._root.addWidget(sub)
+            text.addWidget(sub)
+        row.addLayout(text, 1)
+
+        # pages put their own buttons here, next to the AI button
+        self.header_actions = QHBoxLayout()
+        self.header_actions.setSpacing(8)
+        row.addLayout(self.header_actions)
+        if self.AI_QUESTION:
+            from ui.widgets.ui_kit import button
+            self.btn_page_ai = button("Ask Netwer AI", "ai", "ai")
+            self.btn_page_ai.clicked.connect(lambda: self.ask_ai(self.AI_QUESTION))
+            row.addWidget(self.btn_page_ai, 0, Qt.AlignmentFlag.AlignVCenter)
+        self._root.addLayout(row)
+
+    # -- Netwer AI --
+    def ai_context(self) -> dict:
+        """What the assistant may read about this page's latest results."""
+        return {}
+
+    def ask_ai(self, question: str) -> None:
+        win = self._window or self.window()
+        if hasattr(win, "ask_ai"):
+            win.ask_ai(question)
 
     # -- Worker management --
     def set_window(self, window) -> None:

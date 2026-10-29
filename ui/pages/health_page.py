@@ -18,7 +18,6 @@ from app.resources import Icons
 from app.theme import Theme
 from core import diagnostics as diag
 from ui.pages.base_page import BasePage
-from ui.widgets.ai_chat_panel import AIChatPanel
 from ui.widgets.card import Card
 from workers import StreamWorker
 
@@ -132,15 +131,14 @@ class HealthPage(BasePage):
 
         # Netwer AI opens only when asked for.
         self.btn_ai = QPushButton("  Ask AI")
-        self.btn_ai.setCheckable(True)
         self.btn_ai.setIcon(Icons.get("ai", Theme.ACCENT))
         self.btn_ai.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_ai.setStyleSheet(
             f"QPushButton {{ background: {Theme.GLASS_INPUT}; color: {Theme.TEXT_PRIMARY};"
             f"border: 1px solid {Theme.GLASS_BORDER_HI}; border-radius: {Theme.RADIUS_CONTROL}px;"
             f"padding: 11px 20px; font-size: 13.5px; font-weight: 600; }}"
-            f"QPushButton:hover {{ border-color: {Theme.ACCENT}; }}"
-            f"QPushButton:checked {{ background: {Theme.BG_ELEVATED}; border-color: {Theme.ACCENT}; }}")
+            f"QPushButton:hover {{ border-color: {Theme.ACCENT}; }}")
+        self.btn_ai.clicked.connect(self._open_ai)
         bar.addWidget(self.btn_ai)
         self.body_layout.addLayout(bar)
 
@@ -180,12 +178,11 @@ class HealthPage(BasePage):
         self._findings_layout = QVBoxLayout(inner)
         self._findings_layout.setContentsMargins(0, 0, 6, 0)
         self._findings_layout.setSpacing(9)
-        self._findings_placeholder = QLabel(
-            "Press \u201cDiagnose my network\u201d and NETWER will work out "
-            "where the problem is.")
-        self._findings_placeholder.setWordWrap(True)
-        self._findings_placeholder.setStyleSheet(
-            f"color: {Theme.TEXT_MUTED}; font-size: 12.5px;")
+        from ui.widgets.ui_kit import empty_state
+        self._findings_placeholder = empty_state(
+            "resources", "No diagnosis yet",
+            "Press \u201cDiagnose my network\u201d and NETWER checks your adapter, router, "
+            "internet and DNS, then explains what is wrong in plain language.")
         self._findings_layout.addWidget(self._findings_placeholder)
         self._findings_layout.addStretch()
         self._findings_area.setWidget(inner)
@@ -205,42 +202,21 @@ class HealthPage(BasePage):
         self.metrics_card.hide()
         left.addWidget(self.metrics_card)
         columns.addLayout(left, 1)
-
-        self.ai_panel = AIChatPanel()
-        self.ai_panel.navigate.connect(self._navigate)
-        self.ai_panel.expanded.connect(self._on_ai_expanded)
-        self._hidden_for_ai = []
-        self.ai_panel.toggled.connect(self.btn_ai.setChecked)
-        self.btn_ai.clicked.connect(self.ai_panel.toggle)
-        columns.addWidget(self.ai_panel)
-        self._columns = columns
         self.body_layout.addLayout(columns, 1)
 
-    def _on_ai_expanded(self, on: bool):
-        self._columns.setStretch(0, 0 if on else 1)
-        self._columns.setStretch(1, 1 if on else 0)
-        if on:
-            self._hidden_for_ai = [w for w in (self.verdict, self.findings_card, self.metrics_card, self.status) if w.isVisible()]
-            for w in self._hidden_for_ai:
-                w.hide()
-        else:
-            for w in self._hidden_for_ai:
-                w.show()
-            self._hidden_for_ai = []
+    def _dock(self):
+        win = self._window or self.window()
+        return getattr(win, "ai_dock", None)
+
+    def _open_ai(self):
+        if self._report:
+            self.ask_ai("Explain my network diagnosis and tell me what to fix first.")
+        elif self._dock() is not None:
+            self._dock().open()
 
     def _ask_about(self, finding):
-        self.ai_panel.ask_about(finding)
-
-    def _navigate(self, target: str):
-        """Open a tool from a button inside an AI answer."""
-        if target == "health_run":
-            self._run()
-            return
-        win = self._window or self.window()
-        if target.startswith("scan:") and hasattr(win, "scan_ports_for"):
-            win.scan_ports_for(target[5:])
-        elif hasattr(win, "goto"):
-            win.goto(target)
+        if self._dock() is not None:
+            self._dock().ask_about(finding)
 
     # -- Run --
     def _run(self):
@@ -309,7 +285,8 @@ class HealthPage(BasePage):
                 self._findings_layout.count() - 1, _FindingRow(f, self._ask_about))
 
         self._show_metrics(report.get("measurements", {}))
-        self.ai_panel.set_report(report)
+        if self._dock() is not None:
+            self._dock().set_report(report)
         self.status.setText("Done.")
         activity.add("Network diagnosis", report["headline"],
                      kind=("error" if report["severity"] == diag.CRITICAL

@@ -58,8 +58,8 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(central)
 
         outer = QHBoxLayout(central)
-        outer.setContentsMargins(20, 20, 20, 20)
-        outer.setSpacing(18)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
 
         # sidebar floats over the pages, this keeps the rail's space
         self._rail_slot = QWidget()
@@ -73,7 +73,7 @@ class MainWindow(QMainWindow):
         right = QWidget()
         right_col = QVBoxLayout(right)
         right_col.setContentsMargins(0, 0, 0, 0)
-        right_col.setSpacing(18)
+        right_col.setSpacing(0)
         outer.addWidget(right, 1)
 
         self.topbar = TopBar()
@@ -84,6 +84,7 @@ class MainWindow(QMainWindow):
         self.topbar.suggestion_chosen.connect(self.open_suggestion)
         self.topbar.suggestion_provider = self.search_suggestions
         self.topbar.toggle_ai.connect(self._toggle_ai)
+        self.topbar.open_capture.connect(lambda: self.goto("capture"))
         right_col.addWidget(self.topbar)
 
         row = QWidget()
@@ -98,6 +99,17 @@ class MainWindow(QMainWindow):
 
         self.ai_dock = self._build_ai_dock()
         root.addWidget(self.ai_dock)
+
+        from PyQt6.QtCore import QTimer
+        self._capture_alerted = set()
+        self._capture_watch = QTimer(self)
+        self._capture_watch.setInterval(3000)
+        self._capture_watch.timeout.connect(self._watch_capture)
+        self._bar_timer = QTimer(self)
+        self._bar_timer.setInterval(1000)
+        self._bar_timer.timeout.connect(self._update_bar)
+        self._bar_timer.start()
+        QTimer.singleShot(0, self._update_bar)
 
         self.settings_panel = SettingsPanel()
         self.settings_panel.closed.connect(lambda: self._show_panel(None))
@@ -178,8 +190,46 @@ class MainWindow(QMainWindow):
         else:
             self.goto(target)
 
+    def current_page_context(self) -> dict:
+        page = self._pages.get(self._current_key)
+        if page is None:
+            return {}
+        return {"page": page.PAGE_TITLE, **(page.ai_context() or {})}
+
     def set_capture_state(self, on: bool) -> None:
         self.topbar.set_capturing(on)
+        if on:
+            self._capture_alerted = set()
+            self._capture_watch.start()
+
+    def _update_bar(self):
+        from core.capture import get_capture_service
+        svc = get_capture_service()
+        if svc.running and svc.count():
+            last = int(svc.packets[-1].rel)
+            self.topbar.set_capture_rate(svc.per_sec.get(last - 1, 0))
+        else:
+            self.topbar.set_capture_rate(None)
+        if not getattr(self, "_adapter_known", False):
+            from app.traffic_history import traffic_history
+            from ui.pages.capture_page import local_ipv4
+            name = traffic_history.adapter or ""
+            if name:
+                self._adapter_known = True
+                self.topbar.set_adapter(name, local_ipv4())
+
+    def _watch_capture(self):
+        # bell notifications for serious capture findings, once per finding per capture
+        from app.notifications import notifications
+        from core.capture import get_capture_service
+        svc = get_capture_service()
+        for it in svc.insights():
+            key = (it["filter"], it["detail"]) if it["severity"] == "danger" else it["filter"]
+            if it["severity"] in ("danger", "warning") and key not in self._capture_alerted:
+                self._capture_alerted.add(key)
+                notifications.notify_capture_finding(it["text"], it["detail"], it["severity"])
+        if not svc.running:
+            self._capture_watch.stop()
 
     # -- Sliding panels --
     def _toggle_settings(self):
@@ -394,6 +444,8 @@ class MainWindow(QMainWindow):
         for i, key in enumerate(keys[:9], start=1):
             sc = QShortcut(QKeySequence(f"Ctrl+{i}"), self)
             sc.activated.connect(lambda k=key: self.goto(k))
+        find = QShortcut(QKeySequence("Ctrl+K"), self)
+        find.activated.connect(self.topbar.focus_search)
         esc = QShortcut(QKeySequence("Escape"), self)
         esc.activated.connect(self._stop_current)
 
@@ -594,6 +646,10 @@ class MainWindow(QMainWindow):
         q = " ".join(raw.split())          # collapse whitespace
         if not q:
             return
+        # a question goes to Netwer AI, a short name jumps to the tool
+        if q.endswith("?") or len(q.split()) > 3:
+            self.ask_ai(query.strip())
+            return
 
         # A device match takes priority only when the query is clearly not a
         # tool name - otherwise "ping" would open a device called "ping".
@@ -646,8 +702,7 @@ class MainWindow(QMainWindow):
             self.sidebar.set_active(target)
             self._navigate(target)
         else:
-            notifications.push(
-                "Search", f"No tool matches \u201c{query}\u201d.", kind="info")
+            self.ask_ai(query.strip())
 
     # -- Navigation --
     def _navigate(self, key: str) -> None:

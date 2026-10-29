@@ -19,6 +19,7 @@ from app.resources import Icons
 from app.theme import Theme
 from ui.pages.base_page import BasePage
 from ui.widgets.card import Card
+from ui.widgets.ui_kit import InsightRow
 from ui.widgets.host_input import HostInput
 from ui.widgets.progress_bar import ProgressBar
 from workers import StreamWorker
@@ -40,9 +41,19 @@ STATE_COLORS = {
 }
 
 
+# open ports worth a warning: port -> (severity, short name)
+RISKY_PORTS = {
+    21: ("danger", "FTP, unencrypted"), 23: ("danger", "Telnet, unencrypted"), 5900: ("danger", "VNC"),
+    445: ("warning", "SMB file sharing"), 139: ("warning", "NetBIOS"), 3389: ("warning", "Remote Desktop"),
+    8291: ("warning", "MikroTik Winbox"), 1900: ("warning", "UPnP"), 80: ("warning", "web admin over HTTP"),
+    8080: ("warning", "web admin over HTTP"), 22: ("info", "SSH"),
+}
+
+
 class PortScannerPage(BasePage):
     PAGE_TITLE = "Port Scanner"
     PAGE_SUBTITLE = "Discover open, closed and filtered ports on any host"
+    AI_QUESTION = "Explain the open ports from my last port scan. Is anything a security risk?"
 
     COL_PORT = 90
     COL_PROTO = 90
@@ -60,6 +71,8 @@ class PortScannerPage(BasePage):
 
         self._build_toolbar()
         self._build_summary()
+        self.findings = InsightRow(self.ask_ai)
+        self.body_layout.addWidget(self.findings)
         self._build_table()
         self.body_layout.addStretch(0)
 
@@ -391,6 +404,7 @@ class PortScannerPage(BasePage):
         return spec
 
     def _start(self):
+        self.findings.set_items([])
         target = self.target_input.text().strip()
         if not target:
             self.status_label.setText("Enter a host to scan.")
@@ -464,6 +478,23 @@ class PortScannerPage(BasePage):
                 self._rows_layout.insertWidget(
                     self._rows_layout.count() - 1, self._port_row(d))
 
+    def _update_findings(self):
+        target = self.target_input.text().strip()
+        open_ports = sorted(r["port"] for r in self._results if r["state"] == "open")
+        items = []
+        for port in open_ports:
+            if port in RISKY_PORTS:
+                sev, name = RISKY_PORTS[port]
+                items.append({"severity": sev, "text": f"{port} {name}", "detail": "",
+                              "question": f"Port {port} ({name}) is open on {target}. Is that a risk, and how do I close it?"})
+        if not open_ports:
+            items.append({"severity": "success", "text": "No open ports", "detail": target,
+                          "question": f"My port scan of {target} found no open ports. What does that mean?"})
+        elif not items:
+            items.append({"severity": "success", "text": "Nothing risky open", "detail": f"{len(open_ports)} open",
+                          "question": "Explain the open ports from my last port scan. Is anything a security risk?"})
+        self.findings.set_items(items)
+
     def _update_chips(self):
         self.chip_open.setText(f"{self._counts['open']} open")
         self.chip_closed.setText(f"{self._counts['closed']} closed")
@@ -492,6 +523,7 @@ class PortScannerPage(BasePage):
             self.status_label.setStyleSheet(
                 f"color: {Theme.TEXT_SECONDARY}; font-size: {Theme.FONT_SIZE_BODY}px;")
             self._repaint_rows()
+            self._update_findings()
             activity.add("Port scan",
                          f"{self.target_input.text().strip()} \u00b7 "
                          f"{n_open} open", kind="success")
@@ -568,3 +600,6 @@ class PortScannerPage(BasePage):
                          kind="success")
         except Exception as e:
             self.status_label.setText(f"Export failed: {e}")
+
+    def ai_context(self):
+        return {"target": self.target_input.text().strip(), "results": self._results[:80]}

@@ -10,7 +10,6 @@ from app.activity import activity
 from app.resources import Icons
 from app.theme import Theme
 from ui.pages.base_page import BasePage
-from ui.widgets.ai_chat_panel import AIChatPanel
 from ui.widgets.progress_bar import ProgressBar
 from ui.widgets.speed_verdict import ConnectionVerdict
 from ui.widgets.sparkline import Sparkline
@@ -46,13 +45,6 @@ class SpeedTestPage(BasePage):
         self._build_progress()
         self._left.addStretch(1)
         columns.addWidget(self._left_box, 1)
-        self._columns = columns
-        # Netwer AI docked next to the test, closed until asked for
-        self.ai_panel = AIChatPanel()
-        self.ai_panel.navigate.connect(self._open_target)
-        self.ai_panel.toggled.connect(self.btn_ai.setChecked)
-        self.ai_panel.expanded.connect(self._on_ai_expanded)
-        columns.addWidget(self.ai_panel)
         self.body_layout.addLayout(columns, 1)
 
     # -- UI --
@@ -69,14 +61,12 @@ class SpeedTestPage(BasePage):
         self.btn_ai = QPushButton("  Ask AI")
         self.btn_ai.setIcon(Icons.get("ai", Theme.ACCENT))
         self.btn_ai.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.btn_ai.setCheckable(True)
-        self.btn_ai.setToolTip("Open Netwer AI next to the test")
+        self.btn_ai.setToolTip("Ask Netwer AI about the result")
         self.btn_ai.setStyleSheet(
             f"QPushButton {{ background: transparent; color: {Theme.ACCENT}; border: none;"
             f"border-radius: 8px; padding: 9px 16px;"
             f"font-size: {Theme.FONT_SIZE_BODY}px; font-weight: 600; }}"
-            f"QPushButton:hover {{ background: {Theme.BG_ELEVATED}; }}"
-            f"QPushButton:checked {{ background: {Theme.BG_ELEVATED}; }}")
+            f"QPushButton:hover {{ background: {Theme.BG_ELEVATED}; }}")
         self.btn_ai.clicked.connect(self._toggle_ai)
         row.addWidget(self.btn_ai)
 
@@ -320,22 +310,13 @@ class SpeedTestPage(BasePage):
                          f"\u2193 {d.get('dl', 0):g} / \u2191 {d.get('ul', 0):g} Mbps",
                          kind="success")
 
-    def _on_ai_expanded(self, on: bool):
-        # full screen: the test hides and the chat takes the whole page
-        self._columns.setStretch(0, 0 if on else 1)
-        self._columns.setStretch(1, 1 if on else 0)
-        self._left_box.setVisible(not on)
-
     def _toggle_ai(self):
-        self.ai_panel.toggle()
-
-    def _open_target(self, target: str):
-        # buttons inside the AI answers
-        win = self._window or self.window()
-        if target.startswith("scan:") and hasattr(win, "scan_ports_for"):
-            win.scan_ports_for(target[5:])
-        elif hasattr(win, "goto"):
-            win.goto("health" if target == "health_run" else target)
+        if self._last_result:
+            self.ask_ai("Explain my speed test result. Is it good for what I do?")
+        else:
+            win = self._window or self.window()
+            if hasattr(win, "ai_dock"):
+                win.ai_dock.open()
 
     def _set_phase(self, name, fraction, color):
         self._phase = name
@@ -365,3 +346,9 @@ class SpeedTestPage(BasePage):
                 self._set_card_active(card, False)
             self._cancelled_by_user = False
         self._stop()
+
+    def ai_context(self):
+        return {"server": self.server_label.text(), "status": self.phase_label.text(),
+                "last_result": self._last_result,
+                "download_mbps": self.card_dl["value"].text(), "upload_mbps": self.card_ul["value"].text(),
+                "ping_ms": self.card_ping["value"].text()}

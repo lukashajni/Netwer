@@ -24,11 +24,11 @@ from PyQt6.QtWidgets import (
 )
 
 from app.theme import Theme, card_bg, card_border, input_bg, is_dark
-from core.capture import capture_backend, get_capture_service, list_interfaces
+from core.capture import MAX_PACKETS, capture_backend, get_capture_service, list_interfaces
 from core.display_filter import ALL_NAMES, FilterError, compile_filter
 from ui.pages.base_page import BasePage
 from ui.widgets.sparkline import Sparkline
-from ui.widgets.ui_kit import button, chip, insight_chip, style_button
+from ui.widgets.ui_kit import InsightRow, button, chip, style_button
 
 COLUMNS = ["No.", "Time", "Source", "Destination", "Protocol", "Length", "Info"]
 QUICK_FILTERS = [("TLS", "tls"), ("DNS", "dns && !mdns"), ("QUIC", "quic"), ("TCP problems", "tcp.analysis.flags"),
@@ -305,6 +305,7 @@ class CapturePage(BasePage):
         self._scrolling = False
         self._tick_n = 0
         self._items = []
+        self._limit_shown = False
 
         self._root.setSpacing(10)
         self._build_toolbar()
@@ -341,7 +342,20 @@ class CapturePage(BasePage):
         self.btn_follow.setChecked(True)
         self.btn_follow.toggled.connect(self._set_follow)
         row.addWidget(self.btn_follow)
+        self.bpf = QLineEdit()
+        self.bpf.setPlaceholderText("Capture filter, e.g. port 53 or host 1.1.1.1")
+        self.bpf.setToolTip("BPF syntax. Only matching packets are captured at all.")
+        self.bpf.setMinimumWidth(260)
+        self.bpf.returnPressed.connect(self._toggle_capture)
+        self.bpf.setStyleSheet(
+            f"QLineEdit {{ background: {input_bg()}; color: {Theme.TEXT_PRIMARY}; border: 1px solid {Theme.GLASS_BORDER};"
+            f"border-radius: {Theme.RADIUS_CONTROL - 3}px; padding: 5px 10px; font-family: {Theme.FONT_MONO};"
+            f"font-size: {Theme.FONT_SIZE_SMALL}px; }} QLineEdit:disabled {{ color: {Theme.TEXT_MUTED}; }}")
+        row.addWidget(self.bpf)
         row.addStretch()
+        self.btn_stats = button("Statistics", "monitor", tip="Conversations and endpoints")
+        self.btn_stats.clicked.connect(self._show_stats)
+        row.addWidget(self.btn_stats)
         self.btn_open = button("Open", "export", tip="Open a .pcap or .pcapng file")
         self.btn_open.clicked.connect(self._open_file)
         row.addWidget(self.btn_open)
@@ -423,20 +437,8 @@ class CapturePage(BasePage):
         self._root.addWidget(box)
 
     def _build_watch(self):
-        row = QHBoxLayout()
-        row.setSpacing(8)
-        lbl = QLabel("AI WATCH")
-        lbl.setStyleSheet(f"color: {Theme.ACCENT_GLOW}; font-size: 10px; font-weight: 700; letter-spacing: 1.2px;")
-        row.addWidget(lbl)
-        self._watch_row = QHBoxLayout()
-        self._watch_row.setSpacing(8)
-        row.addLayout(self._watch_row)
-        self._watch_empty = QLabel("Findings appear here while you capture.")
-        self._watch_empty.setStyleSheet(f"color: {Theme.TEXT_MUTED}; font-size: {Theme.FONT_SIZE_SMALL}px;")
-        self._watch_row.addWidget(self._watch_empty)
-        row.addStretch()
-        self._watch_sig = None
-        self._root.addLayout(row)
+        self.watch = InsightRow(self._ask, "AI WATCH")
+        self._root.addWidget(self.watch)
 
     def _build_panes(self):
         split = QSplitter(Qt.Orientation.Vertical)
@@ -480,6 +482,9 @@ class CapturePage(BasePage):
         self.details = _Panel("Packet details")
         self.btn_explain = button("Explain packet", "ai", "ai")
         self.btn_explain.clicked.connect(self._explain_selected)
+        self.btn_stream = button("Follow stream", "list")
+        self.btn_stream.clicked.connect(self._follow_stream)
+        self.details.head.addWidget(self.btn_stream)
         self.details.head.addWidget(self.btn_explain)
         self.tree = QTreeWidget()
         self.tree.setHeaderHidden(True)
@@ -550,12 +555,13 @@ class CapturePage(BasePage):
             if not name:
                 return
             try:
-                self.svc.start(name)
+                self.svc.start(name, self.bpf.text().strip())
             except Exception as exc:
                 self.banner.setText(f"Could not start the capture: {exc}")
                 self.banner.show()
                 return
             self.banner.hide()
+            self._limit_shown = False
             self._sync_all()
             self.btn_follow.setChecked(True)
         self._update_controls()
@@ -565,6 +571,7 @@ class CapturePage(BasePage):
         self.btn_start.setText("  Stop" if on else "  Start")
         style_button(self.btn_start, "danger" if on else "primary", "stop" if on else "play")
         self.iface.setEnabled(not on and self.iface.count() > 0 and self.iface.currentData() is not None)
+        self.bpf.setEnabled(not on)
         win = self._window
         if win is not None and hasattr(win, "set_capture_state"):
             win.set_capture_state(on)
@@ -579,6 +586,12 @@ class CapturePage(BasePage):
             self._sync_all()
 
     def _tick(self):
+        if self.svc.truncated and not self._limit_shown:
+            self._limit_shown = True
+            self.banner.setText(f"The capture stopped at {MAX_PACKETS:,} packets to keep memory in check. "
+                                "Save it, then clear and start again, or use a capture filter.")
+            self.banner.show()
+            self._update_controls()
         err = self.svc.poll_error()
         if err:
             self.banner.setText(f"The capture stopped: {err}")
@@ -657,30 +670,12 @@ class CapturePage(BasePage):
         s.view_filter = self._filter_text
 
     def _update_watch(self):
-        items = self.svc.insights()
-        sig = [(i["text"], i["detail"]) for i in items]
-        if sig == self._watch_sig:
-            return
-        self._watch_sig = sig
-        while self._watch_row.count():
-            w = self._watch_row.takeAt(0).widget()
-            if w is not None and w is not self._watch_empty:
-                w.deleteLater()
-        if not items:
-            self._watch_row.addWidget(self._watch_empty)
-            self._watch_empty.show()
-            return
-        self._watch_empty.hide()
-        for it in items[:5]:
-            b = insight_chip(it["text"], it["detail"], it["severity"])
-            b.clicked.connect(lambda _=False, it=it: self._on_insight(it))
-            self._watch_row.addWidget(b)
+        self.watch.set_items([{**i, "before": lambda i=i: self._apply_insight(i)} for i in self.svc.insights()])
 
-    def _on_insight(self, it):
+    def _apply_insight(self, it):
         self.set_filter(it["filter"])
         if it.get("frame"):
             self.select_packet(it["frame"])
-        self._ask(it["question"])
 
     def _style_filter(self, state):
         border = {"ok": Theme.SUCCESS, "err": Theme.DANGER}.get(state, Theme.GLASS_BORDER)
@@ -748,8 +743,10 @@ class CapturePage(BasePage):
             self.bytes_panel.note.setText("")
             self.hex.set_data(b"")
             self.btn_explain.setEnabled(False)
+            self.btn_stream.setEnabled(False)
             return
         self.btn_explain.setEnabled(True)
+        self.btn_stream.setEnabled(p.stream is not None)
         d = p.dis
         self.details.note.setText(f"#{p.no} · {d.proto}")
         self.hex.set_data(p.data)
@@ -820,6 +817,16 @@ class CapturePage(BasePage):
         win = self._window or self.window()
         if hasattr(win, "ask_ai"):
             win.ask_ai(question)
+
+    def _follow_stream(self):
+        p = self.svc.packet(self.svc.selected_no)
+        if p is not None and p.stream is not None:
+            from ui.components.capture_dialogs import FollowStreamDialog
+            FollowStreamDialog(self.svc, p.stream, self.set_filter, self).exec()
+
+    def _show_stats(self):
+        from ui.components.capture_dialogs import StatisticsDialog
+        StatisticsDialog(self.svc, self.set_filter, self).exec()
 
     def _explain_selected(self):
         p = self.svc.packet(self.svc.selected_no)

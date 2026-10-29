@@ -23,6 +23,8 @@ TOOLS = [
     _tool("get_recent_activity", "Recent Netwer notifications such as new devices or hosts going down."),
     _tool("get_app_guide", "Describe a Netwer page or feature and how to use it.",
           {"topic": {"type": "string", "description": "Page or feature name, e.g. Port Scanner. Leave empty for all."}}),
+    _tool("get_current_page", "The page the user has open right now and its latest results "
+          "(ping stats, sweep devices, DNS lookup, traceroute hops, speed test, ...). Use it for 'these results' questions."),
     _tool("get_capture", "Packet Capture summary: packets, protocol mix, top remote hosts, TCP retransmissions, "
           "unencrypted traffic, DNS and ping timing, LAN devices seen, TLS server names, current filter and the selected packet."),
     _tool("get_packet", "Full layer-by-layer details of one captured packet (frame number as shown in the packet list).",
@@ -124,6 +126,9 @@ class AppTools:
         topic = (a.get("topic") or "").lower().strip()
         rows = [{"title": t, "description": d} for t, d in APP_GUIDE if not topic or topic in t.lower() or topic in d.lower()]
         return {"topics": rows or [{"title": t, "description": d} for t, d in APP_GUIDE]}
+
+    def _t_get_current_page(self, a):
+        return self.snap.get("current_page") or {"available": False}
 
     def _t_get_capture(self, a):
         c = self.snap.get("capture")

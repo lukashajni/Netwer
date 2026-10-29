@@ -25,6 +25,7 @@ class DnsLookupPage(BasePage):
 
     def __init__(self, core, parent=None, embedded=False):
         super().__init__(core, parent, embedded=embedded)
+        self._last = None
         self._worker = None
         self._build_toolbar()
         self._build_stats()
@@ -95,10 +96,9 @@ class DnsLookupPage(BasePage):
         self._rows.setSpacing(0)
         self.results_card.content_layout.addLayout(self._rows)
         self.results_card.content_layout.addStretch()
-        self._placeholder = QLabel("Enter a domain and press Resolve.")
-        self._placeholder.setStyleSheet(
-            f"color: {Theme.TEXT_MUTED}; font-size: {Theme.FONT_SIZE_SMALL}px;"
-            f"background: transparent; padding: 12px 2px;")
+        from ui.widgets.ui_kit import empty_state
+        self._placeholder = empty_state("dns", "Look up a domain",
+                                        "Type a name like cloudflare.com and press Resolve to see its IPv4 and IPv6 addresses.")
         self._rows.addWidget(self._placeholder)
         self.body_layout.addWidget(self.results_card)
 
@@ -166,6 +166,7 @@ class DnsLookupPage(BasePage):
         w.start()
 
     def _on_result(self, d: dict):
+        self._last = d
         canonical = d.get("canonical", "") or "\u2014"
         ipv4 = d.get("ipv4", []) or []
         ipv6 = d.get("ipv6", []) or []
@@ -204,3 +205,6 @@ class DnsLookupPage(BasePage):
         self._worker = None
         self.btn.setEnabled(True)
         self.btn.setText("  Resolve")
+
+    def ai_context(self):
+        return {"query": self.input.text().strip(), "result": self._last}

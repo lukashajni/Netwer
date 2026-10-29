@@ -193,6 +193,10 @@ class SettingsPanel(QWidget):
             "Alert on a new device on the network",
             store.get_setting("notify_new_device", True),
             lambda v: store.set_setting("notify_new_device", v))
+        self.notif_capture = self._check(
+            "Alert on problems found in a packet capture",
+            store.get_setting("notify_capture", True),
+            lambda v: store.set_setting("notify_capture", v))
 
         # -- Monitoring --
         self._section("Monitoring")

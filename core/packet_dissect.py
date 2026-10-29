@@ -98,6 +98,7 @@ class Dissection:
         self.sport = self.dport = None
         self.tcp_seq = self.tcp_ack = self.tcp_flags = self.tcp_win = None
         self.payload_len = 0
+        self.payload_off = None
         self.fields = {}          # extra filter fields: dns.qry.name, tls sni, http host, ...
         self.tree = []
 
@@ -271,6 +272,7 @@ class _Dissector:
         plen = max(0, end - o - hl)
         d.l4, d.sport, d.dport = "tcp", sp, dp
         d.tcp_seq, d.tcp_ack, d.tcp_flags, d.tcp_win, d.payload_len = seq, ack, flags, win, plen
+        d.payload_off = o + hl
         d.protos.append("tcp")
         d.proto = "TCP"
         fl = ", ".join(flag_names(flags))
@@ -288,7 +290,7 @@ class _Dissector:
         f = n.add(f"Flags: 0x{flags:03x} ({fl})", o + 12, 2)
         for name, bit in reversed(TCP_FLAGS):
             f.add(f"{name}: {'Set' if flags & bit else 'Not set'}", o + 13, 1)
-        n.add(f"Window: {win}", o + 14, 2)
+        n.add(f"Window: {win} (raw, before window scaling)", o + 14, 2)
         n.add(f"Checksum: 0x{csum:04x} [unverified]", o + 16, 2)
         if hl > 20:
             n.add(f"Options: ({hl - 20} bytes)", o + 20, hl - 20)
@@ -304,6 +306,7 @@ class _Dissector:
         sp, dp, ln, csum = struct.unpack("!HHHH", b[o:o + 8])
         d.l4, d.sport, d.dport = "udp", sp, dp
         d.payload_len = max(0, min(end, o + ln) - o - 8)
+        d.payload_off = o + 8
         d.protos.append("udp")
         d.proto, d.info = "UDP", f"{sp} → {dp} Len={d.payload_len}"
         n = self.node(f"User Datagram Protocol, Src Port: {sp}, Dst Port: {dp}", o, 8)

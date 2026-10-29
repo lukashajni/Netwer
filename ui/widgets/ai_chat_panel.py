@@ -614,6 +614,12 @@ class AIChatPanel(QWidget):
                 snap["capture"] = cap.summary()
         except Exception:
             pass
+        win = self.window()
+        if hasattr(win, "current_page_context"):
+            try:
+                snap["current_page"] = win.current_page_context()
+            except Exception:
+                pass
         return snap
 
     # -- streaming --

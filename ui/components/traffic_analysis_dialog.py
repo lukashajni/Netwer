@@ -140,6 +140,10 @@ class TrafficAnalysisDialog(QDialog):
         note.setStyleSheet(f"color: {Theme.TEXT_MUTED}; font-size: {Theme.FONT_SIZE_TINY}px;")
         foot.addWidget(note)
         foot.addStretch()
+        from ui.widgets.ui_kit import button
+        ask = button("Ask Netwer AI", "ai", "ai")
+        ask.clicked.connect(self._ask_ai)
+        foot.addWidget(ask)
         close = QPushButton("Close")
         close.setCursor(Qt.CursorShape.PointingHandCursor)
         close.setStyleSheet(
@@ -534,3 +538,9 @@ class TrafficAnalysisDialog(QDialog):
         if not lines:
             add(Theme.TEXT_MUTED, "Collecting data\u2026 highlights appear after a few seconds.")
         self._highlights.setText("<br>".join(lines[:5]))
+
+    def _ask_ai(self):
+        win = self.parentWidget().window() if self.parentWidget() else None
+        self.accept()
+        if hasattr(win, "ask_ai"):
+            win.ask_ai("Look at my traffic history: speed, latency and packet loss. Is anything unusual, and what caused the spikes?")

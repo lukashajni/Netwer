@@ -191,6 +191,10 @@ class DeviceDetailsDialog(QDialog):
 
         # -- Buttons --
         btns = QHBoxLayout()
+        from ui.widgets.ui_kit import button
+        ask = button("Ask Netwer AI", "ai", "ai")
+        ask.clicked.connect(self._ask_ai)
+        btns.addWidget(ask)
         btns.addStretch()
         close = QPushButton("Close")
         close.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -203,6 +207,21 @@ class DeviceDetailsDialog(QDialog):
         root.addLayout(btns)
 
         self._start_scan()
+
+
+    def _ask_ai(self):
+        win = self.parentWidget().window() if self.parentWidget() else None
+        self.accept()
+        if hasattr(win, "ask_ai"):
+            win.ask_ai(self._question())
+
+    def _question(self):
+        from ui.widgets.network_map import device_display_name
+        d = self._dev
+        ports = ", ".join(str(p.get("port")) + (f" {p.get('service')}" if p.get("service") else "")
+                          for p in self._open_ports) or "none found yet"
+        return (f"Tell me about the device {device_display_name(d)} ({d.get('ip', '')}, maker "
+                f"{d.get('vendor') or 'unknown'}). Open ports: {ports}. What is it, and is anything risky?")
 
     # -- Custom device name --
     def _edit_name(self):

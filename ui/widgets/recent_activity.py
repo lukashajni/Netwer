@@ -2,7 +2,6 @@ from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtWidgets import QFrame, QHBoxLayout, QLabel, QScrollArea, QVBoxLayout, QWidget
 
 from app.activity import activity, time_ago
-from app.resources import Icons
 from app.theme import Theme
 
 _KIND_ICON = {
@@ -71,16 +70,15 @@ class RecentActivity(QWidget):
         w = QWidget()
         w.setStyleSheet("background: transparent;")
         row = QHBoxLayout(w)
-        row.setContentsMargins(0, 5, 0, 5)
+        row.setContentsMargins(0, 8, 0, 8)
         row.setSpacing(9)
 
-        icon_name, color = _KIND_ICON.get(entry.get("kind", "success"),
-                                          _KIND_ICON["success"])
-        icon = QLabel()
-        icon.setPixmap(Icons.pixmap(icon_name, 14, color))
-        icon.setStyleSheet("background: transparent;")
-        icon.setAlignment(Qt.AlignmentFlag.AlignTop)
-        row.addWidget(icon)
+        _icon_name, color = _KIND_ICON.get(entry.get("kind", "success"),
+                                           _KIND_ICON["success"])
+        bar = QLabel()
+        bar.setFixedWidth(4)
+        bar.setStyleSheet(f"background: {color}; border-radius: 2px;")
+        row.addWidget(bar)
 
         text_box = QVBoxLayout()
         text_box.setSpacing(1)
@@ -95,7 +93,7 @@ class RecentActivity(QWidget):
         if detail:
             d = QLabel(detail)
             d.setStyleSheet(
-                f"color: {Theme.TEXT_MUTED}; font-family: {Theme.FONT_MONO};"
+                f"color: {Theme.TEXT_MUTED};"
                 f"font-size: {Theme.FONT_SIZE_TINY}px; background: transparent;"
             )
             text_box.addWidget(d)

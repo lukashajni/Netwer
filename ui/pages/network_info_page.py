@@ -24,6 +24,7 @@ from workers import OneshotWorker
 class NetworkInfoPage(BasePage):
     PAGE_TITLE = "Network Information"
     PAGE_SUBTITLE = "Detailed configuration for each network adapter"
+    AI_QUESTION = "Explain my network adapter settings. Is anything misconfigured?"
 
     def __init__(self, core, parent=None):
         super().__init__(core, parent)
@@ -52,6 +53,10 @@ class NetworkInfoPage(BasePage):
         toolbar.addWidget(self.btn_refresh)
 
         self.body_layout.addLayout(toolbar)
+        from ui.widgets.ui_kit import InsightRow
+        self.findings = InsightRow(self.ask_ai)
+        self.body_layout.addWidget(self.findings)
+        self._last = None
 
         # -- Details card with the table --
         self.details_card = Card("Adapter Details", "network")
@@ -202,6 +207,39 @@ class NetworkInfoPage(BasePage):
         self.info_table.add_row("MTU", str(d.get("mtu", "")))
 
         self._status.setText("")
+        self._last = {k: v for k, v in d.items() if k != "mac"}
+        self._update_findings(d)
+
+    def _update_findings(self, d):
+        items = []
+        ip, gw, dns = d.get("ipv4", "") or "", d.get("gateway", "") or "", d.get("dns", "") or ""
+        if d.get("status") and d.get("status") != "Up":
+            items.append({"severity": "danger", "text": "Adapter is down", "detail": d.get("status"),
+                          "question": "My network adapter shows as down. How do I bring it back up?"})
+        if ip.startswith("169.254."):
+            items.append({"severity": "danger", "text": "No address from the router", "detail": ip,
+                          "question": f"My adapter has the address {ip}. Why didn't the router give me an address?"})
+        if str(d.get("dhcp", "")).lower() in ("disabled", "no", "false"):
+            items.append({"severity": "info", "text": "Static IP", "detail": ip,
+                          "question": "My adapter uses a static IP instead of DHCP. Is that set up correctly?"})
+        if dns and gw and gw in dns:
+            items.append({"severity": "info", "text": "DNS through the router", "detail": dns,
+                          "question": "My DNS server is my router. Should I switch to a public DNS like 1.1.1.1?"})
+        speed = str(d.get("link_speed", ""))
+        if speed in ("10 Mbps", "100 Mbps"):
+            items.append({"severity": "warning", "text": f"Link only {speed}", "detail": "",
+                          "question": f"My wired link runs at only {speed}. Could the cable or port be the problem?"})
+        elif speed:
+            items.append({"severity": "success", "text": f"Link {speed}", "detail": "",
+                          "question": f"My adapter links at {speed}. Is that the limit of my internet speed?"})
+        mtu = str(d.get("mtu", ""))
+        if mtu and mtu != "1500":
+            items.append({"severity": "info", "text": f"MTU {mtu}", "detail": "",
+                          "question": f"My adapter MTU is {mtu}, not 1500. What does that mean?"})
+        self.findings.set_items(items)
+
+    def ai_context(self):
+        return {"adapter": self._last} if self._last else {}
 
     def _show_error(self, msg):
         self.info_table.clear()
