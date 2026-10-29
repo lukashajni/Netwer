@@ -2,8 +2,10 @@
 
 import time
 
-from PyQt6.QtCore import Qt, QTimer
+from PyQt6.QtCore import QPointF, QRectF, Qt, QTimer
+from PyQt6.QtGui import QColor, QFont, QPainter, QPen
 from PyQt6.QtWidgets import (
+    QFrame,
     QHBoxLayout,
     QLabel,
     QProgressBar,
@@ -13,45 +15,183 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from app.adapter_state import adapter_state
 from app.formatting import format_speed
 from app.resources import Icons
-from app.theme import Theme
+from app.theme import Theme, card_bg, card_border
+from app.traffic_history import traffic_history
 from core.discovery import get_discovery_service
 from ui.pages.base_page import BasePage
-from ui.widgets.card import Card, kv_row
-from ui.widgets.gauge import Gauge
-from ui.widgets.live_chart import LiveChart
-from ui.widgets.stat_card import StatCard
+from ui.widgets.card import Card
 from workers import OneshotWorker, StreamWorker
+
+
+class _ScoreRing(QWidget):
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setFixedSize(96, 96)
+        self._score = None
+
+    def set_score(self, score):
+        self._score = score
+        self.update()
+
+    def paintEvent(self, _):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        r = QRectF(8, 8, 80, 80)
+        p.setPen(QPen(QColor(Theme.BORDER), 8))
+        p.drawEllipse(r)
+        s = self._score
+        color = QColor(Theme.TEXT_MUTED if s is None else Theme.SUCCESS if s >= 85
+                       else Theme.WARNING if s >= 65 else Theme.DANGER)
+        if s is not None:
+            pen = QPen(color, 8)
+            pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+            p.setPen(pen)
+            p.drawArc(r, 90 * 16, -int(360 * 16 * s / 100))
+        f = QFont(Theme.FONT_MONO_PRIMARY)
+        f.setPixelSize(22)
+        f.setBold(True)
+        p.setFont(f)
+        p.setPen(color)
+        p.drawText(r, Qt.AlignmentFlag.AlignCenter, "\u2014" if s is None else str(s))
+        p.end()
+
+
+class _Kpi(QFrame):
+    def __init__(self, label, icon=None, parent=None):
+        super().__init__(parent)
+        self.setObjectName("Kpi")
+        self.setStyleSheet(f"#Kpi {{ background: {card_bg()}; border: 1px solid {card_border()};"
+                           f"border-radius: {Theme.RADIUS_CARD}px; }} #Kpi QLabel {{ background: transparent; }}")
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(14, 12, 14, 12)
+        lay.setSpacing(3)
+        head = QHBoxLayout()
+        head.setSpacing(6)
+        if icon:
+            ic = QLabel()
+            ic.setPixmap(Icons.pixmap(icon, 13, Theme.ACCENT if icon == "download" else Theme.ACCENT_PURPLE))
+            head.addWidget(ic)
+        t = QLabel(label)
+        t.setStyleSheet(f"color: {Theme.TEXT_MUTED}; font-size: {Theme.FONT_SIZE_TINY + 0.5}px;")
+        head.addWidget(t)
+        head.addStretch()
+        lay.addLayout(head)
+        self._value = QLabel("—")
+        self._value.setTextFormat(Qt.TextFormat.RichText)
+        lay.addWidget(self._value)
+        self._sub = QLabel("")
+        lay.addWidget(self._sub)
+        lay.addStretch()
+        self.set_value("—")
+
+    def set_value(self, value, unit="", color=None, subtitle="", sub_color=None):
+        col = color or Theme.TEXT_PRIMARY
+        self._value.setText(
+            f"<span style='color:{col}; font-family:{Theme.FONT_MONO}; font-size:22px; font-weight:600;'>{value}</span>"
+            + (f"<span style='color:{Theme.TEXT_MUTED}; font-size:11px;'> {unit}</span>" if unit else ""))
+        self._sub.setText(subtitle)
+        self._sub.setStyleSheet(f"color: {sub_color or Theme.TEXT_MUTED}; font-size: {Theme.FONT_SIZE_TINY}px;")
+
+
+class _AuroraHero(QFrame):
+    """Card with slowly drifting colour blobs behind its content."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, False)
+        self._t = 0.0
+        self._timer = QTimer(self)
+        self._timer.setInterval(40)
+        self._timer.timeout.connect(self._tick)
+        self._timer.start()
+
+    def _tick(self):
+        if self.isVisible():
+            self._t += 0.04
+            self.update()
+
+    def paintEvent(self, _):
+        import math
+        from PyQt6.QtGui import QPainterPath, QRadialGradient
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        r = QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
+        path = QPainterPath()
+        path.addRoundedRect(r, Theme.RADIUS_CARD, Theme.RADIUS_CARD)
+        p.setClipPath(path)
+        p.fillRect(self.rect(), QColor("#121a36"))
+        w, h, t = self.width(), self.height(), self._t
+        blobs = [("#5b8cff", 0.25 + 0.18 * math.sin(t * 0.7), 0.30 + 0.25 * math.cos(t * 0.5), 0.50, 80),
+                 ("#8b6dff", 0.65 + 0.20 * math.cos(t * 0.6), 0.65 + 0.20 * math.sin(t * 0.8), 0.55, 85),
+                 ("#33d6a6", 0.85 + 0.12 * math.sin(t * 0.9 + 1), 0.15 + 0.20 * math.cos(t * 0.7 + 2), 0.35, 45),
+                 ("#c86dff", 0.10 + 0.10 * math.cos(t * 0.5 + 3), 0.85 + 0.10 * math.sin(t * 0.6), 0.40, 50)]
+        for color, fx, fy, fr, alpha in blobs:
+            g = QRadialGradient(QPointF(w * fx, h * fy), w * fr)
+            c = QColor(color)
+            c.setAlpha(alpha)
+            g.setColorAt(0, c)
+            c2 = QColor(color)
+            c2.setAlpha(0)
+            g.setColorAt(1, c2)
+            p.fillRect(self.rect(), g)
+        p.setClipping(False)
+        p.setPen(QPen(QColor("#2b3561"), 1))
+        p.setBrush(Qt.BrushStyle.NoBrush)
+        p.drawPath(path)
+        p.end()
+
+
+class _ShareBar(QWidget):
+    def __init__(self, fraction, parent=None):
+        super().__init__(parent)
+        self._f = max(0.0, min(1.0, fraction))
+        self.setFixedHeight(5)
+
+    def paintEvent(self, _):
+        from PyQt6.QtGui import QLinearGradient
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(QColor(Theme.BORDER))
+        p.drawRoundedRect(QRectF(self.rect()), 2.5, 2.5)
+        g = QLinearGradient(0, 0, self.width(), 0)
+        g.setColorAt(0, QColor(Theme.ACCENT))
+        g.setColorAt(1, QColor(Theme.ACCENT_PURPLE))
+        p.setBrush(g)
+        p.drawRoundedRect(QRectF(0, 0, self.width() * self._f, self.height()), 2.5, 2.5)
+        p.end()
 
 
 class DashboardPage(BasePage):
     PAGE_TITLE = "Dashboard"
-    PAGE_SUBTITLE = "Overview of your network and system status"
+    PAGE_SUBTITLE = "Your network at a glance"
+
+    def _build_header(self):
+        super()._build_header()
+        # the subtitle shows adapter, address and gateway once they are known
+        labels = [w for w in self.findChildren(QLabel) if w.text() == self.PAGE_SUBTITLE]
+        self._subtitle_label = labels[0] if labels else None
 
     def __init__(self, core, parent=None):
         super().__init__(core, parent)
 
         self._monitor_worker = None
-        self._resource_timer = QTimer(self)
-        self._resource_timer.setInterval(1500)
-        self._resource_timer.timeout.connect(self._refresh_resources)
-        self._resource_worker = None
-
-        self._boot_epoch = None
+        self._closing = False
+        self._last_sample = time.time()
+        self._watchdog = QTimer(self)             # restarts the monitor if it stalls
+        self._watchdog.setInterval(5000)
+        self._watchdog.timeout.connect(self._check_monitor)
+        adapter_state.changed.connect(self._on_adapter_setting)
 
         # Refresh connectivity for the ping and loss sparklines.
         self._ping_timer = QTimer(self)
         self._ping_timer.setInterval(5000)
         self._ping_timer.timeout.connect(self._refresh_internet)
         self._internet_worker = None
-
-        # Refresh network details to reflect adapter and address changes.
-        self._info_timer = QTimer(self)
-        self._info_timer.setInterval(4000)
-        self._info_timer.timeout.connect(self._refresh_info)
-        self._wifi_worker = None
-        self._eth_worker = None
 
         self._loaded_once = False
         self._pending = set()
@@ -78,117 +218,238 @@ class DashboardPage(BasePage):
         scroll.setWidget(inner)
         self.body_layout.addWidget(scroll)
 
-        self._build_stat_cards()
+        self._build_hero_row()
         self._build_middle_row()
         self._build_bottom_row()
+        self._grid.addStretch(1)
 
-    # -- UI CONSTRUCTION -- 
-    def _build_stat_cards(self):
+        from ui.widgets.ui_kit import button
+        btn = button("Open Packet Capture", "capture")
+        btn.clicked.connect(lambda: self._window and self._window.goto("capture"))
+        self.header_actions.addWidget(btn)
+
+        self._hero_state = {"online": None, "ping": None, "loss": None}
+        self._capture_timer = QTimer(self)
+        self._capture_timer.setInterval(1000)
+        self._capture_timer.timeout.connect(self._refresh_capture_card)
+        self._capture_timer.timeout.connect(self._maybe_update_map)
+
+    # -- UI CONSTRUCTION --
+    def _build_hero_row(self):
+        from ui.widgets.ui_kit import button
         row = QHBoxLayout()
         row.setSpacing(Theme.GAP)
-        self.card_internet = StatCard("internet", "Internet Status", spark_color=Theme.SUCCESS)
-        self.card_download = StatCard("download", "Download Speed", spark_color=Theme.ACCENT)
-        self.card_upload = StatCard("upload", "Upload Speed", spark_color=Theme.ACCENT_PURPLE)
-        self.card_loss = StatCard("packet_loss", "Packet Loss", spark_color=Theme.SUCCESS)
-        self.card_devices = StatCard("devices", "Devices online")
-        for c in (self.card_internet, self.card_download, self.card_upload,
-                  self.card_loss, self.card_devices):
-            c.setFixedHeight(180)
-            row.addWidget(c)
+
+        hero = _AuroraHero()
+        hero.setFixedHeight(142)
+        lay = QHBoxLayout(hero)
+        lay.setContentsMargins(20, 14, 20, 14)
+        lay.setSpacing(18)
+        self.score_ring = _ScoreRing()
+        lay.addWidget(self.score_ring)
+        col = QVBoxLayout()
+        col.setSpacing(4)
+        eyebrow = QHBoxLayout()
+        eyebrow.setSpacing(6)
+        spark = QLabel()
+        spark.setPixmap(Icons.pixmap("ai", 12, "#c9bdff"))
+        spark.setStyleSheet("background: transparent;")
+        eyebrow.addWidget(spark)
+        tag = QLabel("NETWER AI SUMMARY")
+        tag.setStyleSheet("color: #c9bdff; font-size: 10px; font-weight: 700; letter-spacing: 1.3px;"
+                          "background: transparent;")
+        eyebrow.addWidget(tag)
+        eyebrow.addStretch()
+        col.addLayout(eyebrow)
+        self.hero_title = QLabel("Checking your network…")
+        # the card is always dark, so its text keeps light colours in every theme
+        self.hero_title.setStyleSheet("color: #eef2ff; font-size: 17px; font-weight: 600; background: transparent;")
+        col.addWidget(self.hero_title)
+        self.hero_text = QLabel("")
+        self.hero_text.setWordWrap(True)
+        self.hero_text.setTextFormat(Qt.TextFormat.RichText)
+        self.hero_text.setStyleSheet(f"color: #c9d2ee; font-size: {Theme.FONT_SIZE_SMALL}px; background: transparent;")
+        col.addWidget(self.hero_text)
+        btns = QHBoxLayout()
+        self.btn_hero_ai = button("Ask what to improve", kind="ai")
+        self.btn_hero_ai.clicked.connect(lambda: self._ask_ai(
+            "Look at my network status, devices and traffic. Is anything wrong, and what should I improve?"))
+        btns.addWidget(self.btn_hero_ai)
+        btns.addStretch()
+        col.addLayout(btns)
+        lay.addLayout(col, 1)
+        row.addWidget(hero, 5)
+
+        kpis = QHBoxLayout()
+        kpis.setSpacing(Theme.GAP)
+        self.card_download = _Kpi("Download", "download")
+        self.card_upload = _Kpi("Upload", "upload")
+        self.card_internet = _Kpi("Latency")
+        self.card_retrans = _Kpi("TCP retransmits")
+        self.card_devices = _Kpi("Devices")
+        for c in (self.card_download, self.card_upload, self.card_internet, self.card_retrans, self.card_devices):
+            c.setFixedHeight(142)
+            kpis.addWidget(c)
+        self.card_retrans.set_value("—", subtitle="start a packet capture")
+        row.addLayout(kpis, 7)
         self._grid.addLayout(row, 0)
 
+    def _build_capture_card(self, height):
+        from ui.pages.capture_page import MixBar
+        from ui.widgets.ui_kit import button
+        self.capture_card = Card("Packet capture")
+        self.capture_card.setFixedHeight(height)
+        self.capture_count = QLabel("")
+        self.capture_count.setStyleSheet(f"color: {Theme.TEXT_MUTED}; font-family: {Theme.FONT_MONO}; font-size: 11px;")
+        self.capture_card.header_layout.insertWidget(1, self.capture_count)
+        self.btn_open_capture = button("Open")
+        self.btn_open_capture.clicked.connect(lambda: self._window and self._window.goto("capture"))
+        self.capture_card.header_layout.addWidget(self.btn_open_capture)
+        self.capture_status = QLabel("Not capturing. Open Packet Capture and press Start.")
+        self.capture_status.setWordWrap(True)
+        self.capture_status.setStyleSheet(f"color: {Theme.TEXT_MUTED}; font-size: {Theme.FONT_SIZE_SMALL}px;")
+        self.capture_card.content_layout.addWidget(self.capture_status)
+        self.capture_mix = MixBar()
+        self.capture_mix.setFixedHeight(9)
+        self.capture_card.content_layout.addWidget(self.capture_mix)
+        self.capture_legend = QLabel("")
+        self.capture_legend.setTextFormat(Qt.TextFormat.RichText)
+        self.capture_legend.setStyleSheet(f"color: {Theme.TEXT_SECONDARY}; font-size: {Theme.FONT_SIZE_TINY}px;")
+        self.capture_card.content_layout.addWidget(self.capture_legend)
+        self._capture_hosts = QVBoxLayout()
+        self._capture_hosts.setSpacing(8)
+        self.capture_card.content_layout.addSpacing(6)
+        self.capture_card.content_layout.addLayout(self._capture_hosts)
+        self.capture_card.content_layout.addStretch()
+        return self.capture_card
+
+    def _ask_ai(self, question):
+        win = self._window or self.window()
+        if hasattr(win, "ask_ai"):
+            win.ask_ai(question)
+
+    def _update_hero(self):
+        st = self._hero_state
+        online, ping, loss = st["online"], st["ping"], st["loss"]
+        if online is None:
+            return
+        devices = len(getattr(self, "_all_devices", None) or [])
+        from core.capture import get_capture_service
+        cap = get_capture_service()
+        if not online:
+            score, title = 5, "You are offline"
+            text = "Netwer gets no answer from the internet. Run Network Health to find where it stops."
+        else:
+            score = 100
+            score -= 25 if loss >= 5 else 10 if loss >= 1 else 0
+            score -= 15 if ping > 120 else 6 if ping > 60 else 0
+            tcp = sum(c["tcp"] for c in cap.conv.values())
+            rpct = cap.retrans / tcp * 100 if tcp else 0
+            score -= 10 if rpct > 3 else 3 if rpct > 1 else 0
+            score -= 3 if cap.plaintext else 0
+            title = ("Your network is healthy" if score >= 85 else
+                     "Your network works, with a few issues" if score >= 65 else "Your connection has problems")
+            text = f"Internet answers in <b>{ping} ms</b> with <b>{loss}%</b> packet loss"
+            text += f", {devices} device{'s' if devices != 1 else ''} online." if devices else "."
+            if cap.count():
+                if cap.retrans:
+                    worst = max(cap.conv.items(), key=lambda kv: kv[1]["retrans"])
+                    text += f" The capture shows {cap.retrans} TCP retransmissions, mostly to {cap.host(worst[0])}."
+                if cap.plaintext:
+                    proto, host = next(iter(cap.plaintext))
+                    text += f" One connection to {host} uses unencrypted {proto}."
+        self.score_ring.set_score(max(0, min(100, score)))
+        self.hero_title.setText(title)
+        self.hero_text.setText(text)
+
+    def _refresh_capture_card(self):
+        from core.capture import get_capture_service
+        from ui.pages.capture_page import MIX_COLORS
+        cap = get_capture_service()
+        n = cap.count()
+        while self._capture_hosts.count():
+            item = self._capture_hosts.takeAt(0)
+            if item.layout() is not None:
+                while item.layout().count():
+                    w = item.layout().takeAt(0).widget()
+                    if w is not None:
+                        w.deleteLater()
+            elif item.widget() is not None:
+                item.widget().deleteLater()
+        tcp = sum(c["tcp"] for c in cap.conv.values())
+        if tcp:
+            worst = max(cap.conv.items(), key=lambda kv: kv[1]["retrans"])
+            self.card_retrans.set_value(f"{cap.retrans / tcp * 100:.1f}", "%",
+                                        color=Theme.WARNING if cap.retrans / tcp > 0.02 else Theme.TEXT_PRIMARY,
+                                        subtitle=f"{cap.retrans} resent" + (f" · {cap.host(worst[0])}" if cap.retrans else ""))
+        if not n:
+            self.capture_count.setText("")
+            self.capture_status.setText("Capturing… waiting for packets." if cap.running
+                                        else "Not capturing. Open Packet Capture and press Start.")
+            self.capture_status.show()
+            self.capture_mix.set_parts([])
+            self.capture_legend.setText("")
+            return
+        self.capture_status.hide()
+        size = cap.total_bytes
+        size_s = f"{size / 1048576:.2f} MB" if size >= 1048576 else f"{size / 1024:.0f} KB"
+        self.capture_count.setText(f"{n:,} packets · {size_s}")
+        parts = cap.proto_mix.most_common(8)
+        self.capture_mix.set_parts(parts)
+        tot = sum(v for _, v in parts) or 1
+        self.capture_legend.setText("&nbsp;&nbsp;".join(
+            f"<span style='color:{MIX_COLORS.get(k, Theme.TEXT_MUTED)}'>■</span> {k} "
+            f"<span style='color:{Theme.TEXT_MUTED}; font-family:{Theme.FONT_MONO}'>{v * 100 / tot:.1f}%</span>"
+            for k, v in parts[:7]))
+        top = sorted(cap.conv.items(), key=lambda kv: -kv[1]["bytes"])[:4]
+        biggest = top[0][1]["bytes"] if top else 1
+        for ip, c in top:
+            line = QHBoxLayout()
+            name = QLabel(cap.host(ip))
+            name.setStyleSheet(f"color: {Theme.TEXT_BODY}; font-size: {Theme.FONT_SIZE_SMALL}px; background: transparent;")
+            size = QLabel(f"{c['bytes'] / 1024:.1f} KB")
+            size.setStyleSheet(f"color: {Theme.TEXT_MUTED}; font-family: {Theme.FONT_MONO}; font-size: 11px; background: transparent;")
+            line.addWidget(name)
+            line.addStretch()
+            line.addWidget(size)
+            self._capture_hosts.addLayout(line)
+            self._capture_hosts.addWidget(_ShareBar(c["bytes"] / biggest))
+        self._update_hero()
+
     def _build_middle_row(self):
+        from ui.widgets.network_map import NetworkMap
+        from ui.widgets.throughput_chart import ThroughputChart
         row = QHBoxLayout()
         row.setSpacing(Theme.GAP)
+        HEIGHT = 310
 
-        MIDDLE_HEIGHT = 340  # minimum height so left and right columns align
-
-        monitor_card = Card("Live Network Monitor", "monitor")
-        monitor_card.setMinimumHeight(MIDDLE_HEIGHT)  # grows in fullscreen
-        # Adapter selector in the card header (right side)
-        from PyQt6.QtWidgets import QComboBox
-        self.adapter_combo = QComboBox()
-        self.adapter_combo.setMinimumWidth(180)
-        self.adapter_combo.setStyleSheet(
-            f"QComboBox {{ background: {Theme.BG_ELEVATED}; color: {Theme.TEXT_BODY};"
-            f"border: 1px solid {Theme.BORDER_STRONG}; border-radius: 6px;"
-            f"padding: 3px 8px; font-size: {Theme.FONT_SIZE_TINY}px; }}"
-            f"QComboBox::drop-down {{ border: none; width: 18px; }}"
-            f"QComboBox QAbstractItemView {{ background: {Theme.BG_ELEVATED};"
-            f"color: {Theme.TEXT_BODY}; selection-background-color: {Theme.ACCENT};"
-            f"border: 1px solid {Theme.BORDER_STRONG}; outline: none; }}"
-        )
-        self.adapter_combo.addItem("Auto (recommended)", "")
-        self.adapter_combo.currentIndexChanged.connect(self._on_adapter_changed)
-        monitor_card.header_layout.addWidget(self.adapter_combo)
-
-        # Legend row (Download = blue, Upload = purple) + live peak/avg stats
+        chart_card = Card("Throughput")
+        chart_card.setFixedHeight(HEIGHT)
         legend = QHBoxLayout()
-        legend.setSpacing(16)
+        legend.setSpacing(12)
         legend.addWidget(self._legend_item("Download", Theme.ACCENT))
         legend.addWidget(self._legend_item("Upload", Theme.ACCENT_PURPLE))
-        legend.addStretch()
-        # Peak / Avg readouts (updated live, hover the graph for per-point).
-        self.stat_peak = QLabel("Peak \u2014")
-        self.stat_avg = QLabel("Avg \u2014")
-        for lbl in (self.stat_peak, self.stat_avg):
-            lbl.setStyleSheet(
-                f"color: {Theme.TEXT_SECONDARY}; font-size: {Theme.FONT_SIZE_TINY}px;"
-                f"font-family: {Theme.FONT_MONO}; background: transparent;")
-            legend.addWidget(lbl)
-        monitor_card.content_layout.addLayout(legend)
+        chart_card.header_layout.addLayout(legend)
+        self.chart = ThroughputChart()
+        self.chart.clicked.connect(self._open_traffic_analysis)
+        chart_card.content_layout.addWidget(self.chart, 1)
+        row.addWidget(chart_card, 7)
 
-        self.chart = LiveChart(max_points=60)
-        monitor_card.content_layout.addWidget(self.chart, 1)
-
-        # Small label showing which adapter is currently monitored
-        self.adapter_status = QLabel("Monitoring: detecting…")
-        self.adapter_status.setStyleSheet(
-            f"color: {Theme.TEXT_MUTED}; font-size: {Theme.FONT_SIZE_TINY}px;"
-            f"background: transparent;"
-        )
-        monitor_card.content_layout.addWidget(self.adapter_status)
-
-        row.addWidget(monitor_card, 3)
-
-        right_col = QVBoxLayout()
-        right_col.setSpacing(Theme.GAP)
-
-        self.summary_card = Card("Network Summary", "summary")
-        self._summary_values = {}
-        for key in ("Public IP", "Local IP", "Gateway", "DNS", "MAC Address"):
-            container, val_lbl = kv_row(key, "\u2014", mono=True)
-            self._summary_values[key] = val_lbl
-            self.summary_card.content_layout.addWidget(container)
-        right_col.addWidget(self.summary_card)
-
-        self.wifi_card = Card("WiFi", "wifi")
-        wifi_body = QHBoxLayout()
-        wifi_body.setSpacing(14)
-        wifi_left = QVBoxLayout()
-        wifi_left.setSpacing(0)   # stretch springs handle spacing in fullscreen
-        wifi_left.addStretch()
-        self._wifi_values = {}
-        wifi_keys = ("Connection", "SSID", "Signal", "Channel")
-        for i, key in enumerate(wifi_keys):
-            container, val_lbl = kv_row(key, "\u2014", mono=(key == "Signal"))
-            self._wifi_values[key] = val_lbl
-            wifi_left.addWidget(container)
-            # Even vertical spring between rows (not after the last one), so the
-            # rows spread out to fill the card when the window is maximized.
-            if i < len(wifi_keys) - 1:
-                wifi_left.addStretch(1)
-        wifi_left.addStretch()
-        wifi_body.addLayout(wifi_left, 1)
-        from ui.widgets.wifi_signal import WiFiSignal
-        self.wifi_signal = WiFiSignal(92)
-        self.wifi_signal.set_disconnected()
-        wifi_body.addWidget(self.wifi_signal, 0,
-                            Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignHCenter)
-        self.wifi_card.content_layout.addLayout(wifi_body)
-        right_col.addWidget(self.wifi_card)
-
-        row.addLayout(right_col, 2)
+        self.map_card = Card("Network map")
+        self.map_card.setFixedHeight(HEIGHT)
+        self.map_count = QLabel("")
+        self.map_count.setStyleSheet(f"color: {Theme.TEXT_MUTED}; font-family: {Theme.FONT_MONO}; font-size: 11px;")
+        self.map_card.header_layout.insertWidget(1, self.map_count)
+        legend_map = QHBoxLayout()
+        legend_map.setSpacing(12)
+        legend_map.addWidget(self._legend_item("in", Theme.ACCENT))
+        legend_map.addWidget(self._legend_item("out", Theme.ACCENT_PURPLE))
+        legend_map.addWidget(self._legend_item("multicast", "#7d86a0"))
+        self.map_card.header_layout.addLayout(legend_map)
+        self.network_map = NetworkMap()
+        self.network_map.node_clicked.connect(self._open_device_details)
+        self.map_card.content_layout.addWidget(self.network_map, 1)
+        row.addWidget(self.map_card, 5)
         self._grid.addLayout(row, 0)
 
     def _legend_item(self, text, color):
@@ -216,28 +477,7 @@ class DashboardPage(BasePage):
 
         BOTTOM_HEIGHT = 300
 
-        from ui.widgets.network_map import NetworkMap
-        self.map_card = Card("Network Map", "network")
-        self.map_card.setFixedHeight(BOTTOM_HEIGHT)
-        self.btn_expand_map = QPushButton("  Expand")
-        self.btn_expand_map.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.btn_expand_map.setIcon(Icons.get("network", Theme.ACCENT))
-        self.btn_expand_map.setStyleSheet(
-            f"QPushButton {{ background: {Theme.GLASS_INPUT};"
-            f"color: {Theme.TEXT_SECONDARY};"
-            f"border: 1px solid {Theme.GLASS_BORDER};"
-            f"border-radius: {Theme.RADIUS_CONTROL}px;"
-            f"padding: 5px 12px; font-size: 12px; }}"
-            f"QPushButton:hover {{ border-color: {Theme.GLASS_BORDER_HI};"
-            f"color: {Theme.TEXT_PRIMARY}; }}")
-        self.btn_expand_map.clicked.connect(self._open_topology)
-        self.map_card.header_layout.addWidget(self.btn_expand_map)
-        self.network_map = NetworkMap()
-        self.network_map.node_clicked.connect(self._open_device_details)
-        self.map_card.content_layout.addWidget(self.network_map)
-        row.addWidget(self.map_card, 2)
-
-        self.devices_card = Card("Top Devices", "devices")
+        self.devices_card = Card("Devices", "devices")
         self.devices_card.setFixedHeight(BOTTOM_HEIGHT)
 
         # Rescan button in the card header - re-runs the network scan,
@@ -296,13 +536,11 @@ class DashboardPage(BasePage):
         self.devices_card.content_layout.addWidget(dev_scroll)
         row.addWidget(self.devices_card, 2)
 
-        # Third column - Recent Activity stacked above "System Resources"
-        right_col = QVBoxLayout()
-        right_col.setSpacing(Theme.GAP)
+        row.addWidget(self._build_capture_card(BOTTOM_HEIGHT), 2)
 
         from ui.widgets.recent_activity import RecentActivity
         self.activity_card = Card("Recent Activity", "check")
-        self.activity_card.setFixedHeight(130)
+        self.activity_card.setFixedHeight(BOTTOM_HEIGHT)
 
         self.btn_view_all = QPushButton("View All")
         self.btn_view_all.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -316,24 +554,7 @@ class DashboardPage(BasePage):
 
         self.recent_activity = RecentActivity(limit=5)
         self.activity_card.content_layout.addWidget(self.recent_activity)
-        right_col.addWidget(self.activity_card)
-
-        self.resources_card = Card("System Resources", "resources")
-        self.resources_card.setFixedHeight(BOTTOM_HEIGHT - 130 - Theme.GAP)
-        gauges = QHBoxLayout()
-        gauges.setSpacing(0)
-        gauges.setContentsMargins(8, 0, 8, 0)
-        self.gauge_cpu = Gauge("CPU", Theme.ACCENT)
-        self.gauge_ram = Gauge("Memory", Theme.ACCENT_PURPLE)
-        self.gauge_disk = Gauge("Disk", Theme.SUCCESS)
-        for g in (self.gauge_cpu, self.gauge_ram, self.gauge_disk):
-            gauges.addStretch(1)
-            gauges.addWidget(g)
-            gauges.addStretch(1)
-        self.resources_card.content_layout.addLayout(gauges)
-        right_col.addWidget(self.resources_card)
-
-        row.addLayout(right_col, 2)
+        row.addWidget(self.activity_card, 2)
 
         self._grid.addLayout(row, 0)
 
@@ -345,20 +566,18 @@ class DashboardPage(BasePage):
         else:
             # Restart timers stopped by on_leave().
             self._start_monitor()
-            self._resource_timer.start()
             self._ping_timer.start()
-            self._info_timer.start()
-            self._refresh_resources()
-            self._refresh_info()
             self._sync_discovery_snapshot()
         self._discovery_timer.start()
+        self._capture_timer.start()
+        self._refresh_capture_card()
 
     def on_leave(self):
-        self._resource_timer.stop()
-        self._ping_timer.stop()
-        self._info_timer.stop()
+        self._capture_timer.stop()
         self._discovery_timer.stop()
-        self._monitor_worker = None
+        # Traffic monitor and ping timer keep running so the history stays continuous
+        if self._monitor_worker in self._workers:
+            self._workers.remove(self._monitor_worker)
         if self._devices_scanning:
             self._devices_placeholder.setText(
                 "Discovery is stopping because Dashboard was left. "
@@ -375,20 +594,14 @@ class DashboardPage(BasePage):
             self._window.begin_loading()
             self._window.loading_progress("Checking connectivity…")
 
-        self._pending = {"internet", "sysinfo", "summary", "wifi", "resources"}
+        self._pending = {"internet"}
 
         self._load_internet_status()
-        self._load_uptime()
-        self._load_summary()
-        self._load_wifi()
-        self._refresh_resources(initial=True)
         self._start_monitor()
         # Fill Top Devices and the Network Map right away; Rescan stays
         # available for a manual refresh.
         self._sync_discovery_snapshot()
         self._start_startup_scan()
-        # Adapter list also loads in background.
-        self._load_adapters()
 
     def _task_done(self, name: str):
         self._pending.discard(name)
@@ -399,30 +612,13 @@ class DashboardPage(BasePage):
         if self._window:
             self._window.loading_progress("Ready")
             self._window.end_loading()
-        self._resource_timer.start()
         self._ping_timer.start()
-        self._info_timer.start()
 
     def _show_all_activity(self):
         # Open the full activity history in a dialog.
         from ui.components.activity_dialog import ActivityDialog
         dlg = ActivityDialog(self)
         dlg.exec()
-
-    def _refresh_info(self):
-        """Refresh Wi-Fi and Ethernet details periodically."""
-        if self._wifi_worker is None or not self._wifi_worker.isRunning():
-            w = OneshotWorker(self.core.get_wifi_info)
-            w.result.connect(self._on_wifi)
-            w.error.connect(lambda e: self._wifi_error())
-            self._wifi_worker = w
-            w.start()
-        if self._eth_worker is None or not self._eth_worker.isRunning():
-            w2 = OneshotWorker(self.core.get_ethernet_info)
-            w2.result.connect(self._on_eth)
-            w2.error.connect(lambda e: None)
-            self._eth_worker = w2
-            w2.start()
 
     def _refresh_internet(self):
         if self._internet_worker is not None and self._internet_worker.isRunning():
@@ -437,7 +633,7 @@ class DashboardPage(BasePage):
     def _load_internet_status(self):
         w = OneshotWorker(self.core.ping_quick)
         w.result.connect(self._on_internet)
-        w.error.connect(lambda e: self.card_internet.set_value("N/A", color=Theme.DANGER))
+        w.error.connect(lambda e: self.card_internet.set_value("—", "ms", color=Theme.DANGER, subtitle="No answer"))
         w.done.connect(lambda: self._task_done("internet"))
         self.register_worker(w)
         w.start()
@@ -447,128 +643,20 @@ class DashboardPage(BasePage):
         reachable = [r for r in items if not r.get("unreachable")]
         self._internet_online = bool(reachable)
         if not reachable:
-            self.card_internet.set_value("Offline", color=Theme.DANGER)
-            self.card_loss.set_tile_tint("#351a24", "#ff6b8a")
-            self.card_loss.set_value("100", "%", color=Theme.DANGER, subtitle="No response")
-            self.card_loss.push_spark(100)
+            self._hero_state.update(online=False)
+            self._update_hero()
+            self.card_internet.set_value("—", "ms", color=Theme.DANGER, subtitle="Offline")
+            traffic_history.add_connectivity(None, 100.0)
             return
         avg_ping = round(sum(r["avg"] for r in reachable) / len(reachable))
         avg_loss = round(sum(r["loss"] for r in reachable) / len(reachable), 1)
-        self.card_internet.set_value("Connected", color=Theme.SUCCESS,
-                                     subtitle=f"Ping: {avg_ping} ms")
-        if avg_loss < 1:
-            loss_color, tile, note = Theme.SUCCESS, ("#123528", "#33d6a6"), "Excellent"
-        elif avg_loss < 5:
-            loss_color, tile, note = Theme.WARNING, ("#332916", "#f5b545"), "Fair"
-        else:
-            loss_color, tile, note = Theme.DANGER, ("#351a24", "#ff6b8a"), "Poor"
-        self.card_loss.set_tile_tint(*tile)
-        self.card_loss.set_value(f"{avg_loss}", "%", color=loss_color,
-                                 subtitle=note)
-        # Feed sparklines: ping trend on the internet card, loss on its card
-        self.card_internet.push_spark(avg_ping)
-        self.card_loss.push_spark(avg_loss)
-
-    def _load_uptime(self):
-        w = OneshotWorker(self.core.get_system_info)
-        w.result.connect(self._on_sysinfo)
-        w.error.connect(lambda e: None)
-        w.done.connect(lambda: self._task_done("sysinfo"))
-        self.register_worker(w)
-        w.start()
-
-    def _on_sysinfo(self, data: dict):
-        d = data.get("days", 0)
-        h = data.get("hours", 0)
-        m = data.get("minutes", 0)
-        self._boot_epoch = time.time() - (d * 86400 + h * 3600 + m * 60)
-
-    def _tick_uptime(self):
-        pass
-
-    def _load_summary(self):
-        w = OneshotWorker(self.core.get_ethernet_info)
-        w.result.connect(self._on_eth)
-        w.error.connect(lambda e: None)
-        w.done.connect(lambda: self._task_done("summary"))
-        self.register_worker(w)
-        w.start()
-
-    def _on_eth(self, d: dict):
-        self._set_summary("Public IP", d.get("public_ip", "\u2014"))
-        self._set_summary("Local IP", d.get("ip", "\u2014"))
-        self._set_summary("Gateway", d.get("gateway", "\u2014"))
-        self._set_summary("DNS", d.get("dns", "\u2014"))
-        self._set_summary("MAC Address", d.get("mac", "\u2014"))
-        # Remember gateway for the network map
-        self._gateway = d.get("gateway", "\u2014")
-        self._maybe_update_map()
-
-    def _set_summary(self, key: str, value: str, color: str = None):
-        lbl = self._summary_values.get(key)
-        if lbl:
-            lbl.setText(str(value))
-            if color:
-                lbl.setStyleSheet(
-                    f"color: {color}; font-family: {Theme.FONT_MONO};"
-                    f"font-size: {Theme.FONT_SIZE_SMALL}px; background: transparent;"
-                )
-
-    def _load_wifi(self):
-        w = OneshotWorker(self.core.get_wifi_info)
-        w.result.connect(self._on_wifi)
-        w.error.connect(lambda e: self._wifi_error())
-        w.done.connect(lambda: self._task_done("wifi"))
-        self.register_worker(w)
-        w.start()
-
-    def _on_wifi(self, d: dict):
-        if not d or d.get("ssid") in (None, "", "\u2014"):
-            self._wifi_error()
-            return
-        self._set_wifi("Connection", "WiFi", Theme.SUCCESS)
-        self._set_wifi("SSID", d.get("ssid", "\u2014"))
-        signal = d.get("signal", "\u2014")
-        self._set_wifi("Signal", str(signal), Theme.SUCCESS)
-        self._set_wifi("Channel", str(d.get("channel", "\u2014")))
-        # Update the visual signal indicator. signal may be like "-42 dBm"
-        # or a percentage, try to derive a 0-100 strength.
-        pct = self._signal_to_percent(signal)
-        self.wifi_signal.set_signal(pct)
-
-    def _signal_to_percent(self, signal) -> float:
-        """Convert a percentage, dBm reading, or number to signal strength."""
-        try:
-            s = str(signal).strip().lower()
-            if "%" in s:
-                return max(0, min(100, float(s.replace("%", "").strip())))
-            if "dbm" in s:
-                dbm = float(s.replace("dbm", "").strip())
-                # -30 dBm ≈ 100%, -90 dBm ≈ 0%
-                return max(0, min(100, (dbm + 90) / 60 * 100))
-            val = float(s)
-            if val < 0:  # looks like dBm
-                return max(0, min(100, (val + 90) / 60 * 100))
-            return max(0, min(100, val))
-        except (ValueError, TypeError):
-            return 50.0
-
-    def _wifi_error(self):
-        self._set_wifi("Connection", "Wired / N/A", Theme.TEXT_MUTED)
-        for k in ("SSID", "Signal", "Channel"):
-            self._set_wifi(k, "\u2014")
-        self.wifi_signal.set_disconnected()
-
-    def _set_wifi(self, key: str, value: str, color: str = None):
-        lbl = self._wifi_values.get(key)
-        if lbl:
-            lbl.setText(str(value))
-            if color:
-                font = Theme.FONT_MONO if key == "Signal" else Theme.FONT_DATA
-                lbl.setStyleSheet(
-                    f"color: {color}; font-family: '{font}';"
-                    f"font-size: {Theme.FONT_SIZE_SMALL}px; background: transparent;"
-                )
+        traffic_history.add_connectivity(avg_ping, avg_loss)
+        self._hero_state.update(online=True, ping=avg_ping, loss=avg_loss)
+        self._update_hero()
+        ping_color = Theme.SUCCESS if avg_ping < 60 else Theme.WARNING if avg_ping < 150 else Theme.DANGER
+        self.card_internet.set_value(f"{avg_ping}", "ms", color=ping_color, subtitle=f"ping · {avg_loss}% loss",
+                                     sub_color=Theme.SUCCESS if avg_loss < 1 else Theme.WARNING)
+        self.network_map.set_wan(f"{avg_ping} ms")
 
     def _on_rescan_clicked(self):
         self._silent_scan = False
@@ -660,13 +748,12 @@ class DashboardPage(BasePage):
             if event.get("cancelled"):
                 self._devices_placeholder.setText(
                     f"Scan cancelled · {event.get('found', 0)} partial result(s) retained.")
+                self._devices_placeholder.show()
             else:
-                self._device_progress.setValue(100)
-                count = int(event.get("found", 0))
-                self._devices_placeholder.setText(
-                    f"Scan complete · {count} device(s) found." if count else
-                    "No devices responded or were present in the neighbor cache.")
-            self._devices_placeholder.show()
+                self._device_progress.hide()
+                if not int(event.get("found", 0)):
+                    self._devices_placeholder.setText("No devices responded.")
+                    self._devices_placeholder.show()
             self._sync_discovery_snapshot()
 
     def _on_scan_done(self):
@@ -684,10 +771,10 @@ class DashboardPage(BasePage):
             self._devices_placeholder.show()
         elif snapshot["status"] == "complete":
             count = len(snapshot["devices"])
-            self._devices_placeholder.setText(
-                f"Scan complete · {count} device(s) found." if count else
-                "No devices responded or were present in the neighbor cache.")
-            self._devices_placeholder.show()
+            self._device_progress.hide()
+            if not count:
+                self._devices_placeholder.setText("No devices responded.")
+                self._devices_placeholder.show()
             from app.activity import activity
             activity.add("Network scan completed", f"{count} devices found", kind="success")
             if not self._silent_scan:
@@ -731,13 +818,11 @@ class DashboardPage(BasePage):
             if snapshot.get("status") in ("idle", "complete"):
                 self._devices_placeholder.setText(
                     "Press Rescan to discover devices." if snapshot.get("status") == "idle"
-                    else "No devices responded or were present in the neighbor cache.")
+                    else "No devices responded.")
                 self._devices_placeholder.show()
             return
         responding = sum(1 for d in devices if d.get("reachability") == "reachable")
-        cached = len(devices) - responding
-        self.card_devices.set_value(str(len(devices)), color=Theme.WARNING,
-                                    subtitle=f"{responding} responding · {cached} cached")
+        self.card_devices.set_value(str(len(devices)), subtitle=f"{responding} responding")
         self._devices_placeholder.hide()
         for dev in devices[:100]:
             idx = max(0, self._devices_container.count() - 2)
@@ -783,17 +868,27 @@ class DashboardPage(BasePage):
 
     def _maybe_update_map(self):
         """Update the topology map once we have both gateway and devices."""
-        gateway = getattr(self, "_gateway", None)
-        devices = getattr(self, "_all_devices", None)
-        if gateway and devices:
-            # Find router vendor from the device whose IP is equal to the gateway
-            router_vendor = ""
-            for d in devices:
-                if d.get("ip") == gateway:
-                    router_vendor = d.get("vendor", "") or ""
-                    break
-            self.network_map.set_topology(gateway, devices, router_vendor,
-                                          online=getattr(self, "_internet_online", True))
+        devices = list(getattr(self, "_all_devices", None) or [])
+        gateway = getattr(self, "_gateway", None) or next(
+            (d.get("ip") for d in devices if d.get("is_gateway")), None)
+        if not (gateway and devices):
+            return
+        router_vendor = next((d.get("vendor", "") or "" for d in devices if d.get("ip") == gateway), "")
+        # devices only the packet capture has seen show up on the map as new
+        from core.capture import get_capture_service
+        known = {d.get("ip") for d in devices}
+        new = [v["ip"] for v in get_capture_service().lan_macs.values()
+               if v.get("ip") and ":" not in v["ip"] and v["ip"] not in known and v["ip"] != gateway]
+        devices += [{"ip": ip, "hostname": "", "vendor": "", "kind": ""} for ip in dict.fromkeys(new)]
+        self.network_map.set_topology(gateway, devices, router_vendor,
+                                      online=getattr(self, "_internet_online", True))
+        self.network_map.set_new(new)
+        shown = len(devices)
+        self.map_count.setText(f"{shown} devices" + (f" · {len(set(new))} new" if new else ""))
+        if new:
+            self.card_devices.set_value(str(shown), subtitle=f"{len(set(new))} new via capture",
+                                        sub_color=Theme.ACCENT_GLOW)
+        self._update_subtitle()
 
     @staticmethod
     def device_display_name(dev: dict) -> str:
@@ -802,93 +897,99 @@ class DashboardPage(BasePage):
         return _n(dev)
 
     def _device_row(self, dev: dict) -> QWidget:
-        w = QWidget()
-        w.setStyleSheet("background: transparent;")
-        row = QHBoxLayout(w)
-        row.setContentsMargins(0, 3, 0, 3)
-        name = self.device_display_name(dev)
         from ui.widgets.network_map import guess_device_icon
+        w = QFrame()
+        w.setObjectName("DevRow")
+        w.setStyleSheet(f"#DevRow {{ background: transparent; border: none; border-top: 1px solid {card_border()}; }}"
+                        "#DevRow QLabel { background: transparent; border: none; }")
+        row = QHBoxLayout(w)
+        row.setContentsMargins(0, 9, 0, 9)
+        row.setSpacing(10)
         icon = QLabel()
-        icon.setFixedSize(18, 18)
-        icon.setPixmap(Icons.pixmap(guess_device_icon(dev), 16, Theme.TEXT_SECONDARY))
-        icon.setStyleSheet("background: transparent;")
-        n = QLabel(str(name)[:22])
-        n.setStyleSheet(f"color: {Theme.TEXT_BODY}; font-family: {Theme.FONT_DATA}; font-size: {Theme.FONT_SIZE_SMALL}px; background: transparent;")
-        ip = QLabel(dev.get("ip", ""))
-        ip.setStyleSheet(f"color: {Theme.TEXT_MUTED}; font-family: {Theme.FONT_MONO}; font-size: {Theme.FONT_SIZE_TINY}px; background: transparent;")
-        vendor_name = dev.get("vendor", "")
-        if vendor_name == "Unknown":
-            vendor_name = "—"
-        vendor = QLabel(vendor_name)
-        vendor.setStyleSheet(f"color: {Theme.ACCENT}; font-family: {Theme.FONT_DATA}; font-size: {Theme.FONT_SIZE_TINY}px; background: transparent;")
-        reachability = dev.get("reachability")
-        status_text, status_color = {
-            "reachable": ("Responding", Theme.SUCCESS),
-            "cached": ("Neighbor cache", Theme.WARNING),
-        }.get(reachability, ("Discovered", Theme.TEXT_MUTED))
-        status = QLabel(status_text)
-        status.setStyleSheet(f"color: {status_color}; font-size: {Theme.FONT_SIZE_TINY}px; background: transparent;")
+        icon.setFixedSize(32, 32)
+        icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        kind = guess_device_icon(dev)
+        icon.setPixmap(Icons.pixmap(kind if kind in ("dev_pc", "dev_router", "dev_phone", "dev_tv", "dev_laptop")
+                                    else "dev_generic", 16, Theme.TEXT_SECONDARY))
+        icon.setStyleSheet(f"background: {Theme.BG_ELEVATED}; border: 1px solid {card_border()}; border-radius: 8px;")
         row.addWidget(icon)
-        row.addSpacing(6)
-        row.addWidget(n)
-        row.addStretch()
-        row.addWidget(ip)
-        row.addSpacing(10)
-        row.addWidget(vendor)
-        row.addSpacing(10)
-        row.addWidget(status)
+        col = QVBoxLayout()
+        col.setSpacing(1)
+        name = self.device_display_name(dev)
+        if dev.get("is_self"):
+            name = f"{name} (this device)"
+        n = QLabel(str(name)[:34])
+        n.setStyleSheet(f"color: {Theme.TEXT_PRIMARY}; font-size: {Theme.FONT_SIZE_SMALL}px; font-weight: 500;")
+        col.addWidget(n)
+        vendor = dev.get("vendor", "")
+        detail = (dev.get("mac") or "")[:8].lower() if dev.get("is_gateway") else vendor
+        sub = QLabel(dev.get("ip", "") + (f" · {detail}" if detail and detail != "Unknown" else ""))
+        sub.setStyleSheet(f"color: {Theme.TEXT_MUTED}; font-family: {Theme.FONT_MONO}; font-size: 11px;")
+        col.addWidget(sub)
+        row.addLayout(col, 1)
+        if dev.get("is_gateway"):
+            text, color = "Gateway", Theme.SUCCESS
+        elif dev.get("reachability") == "reachable" or dev.get("is_self"):
+            text, color = "Online", Theme.SUCCESS
+        else:
+            text, color = "Seen earlier", Theme.TEXT_MUTED
+        badge = QLabel(text)
+        badge.setStyleSheet(f"color: {color}; border: 1px solid {color}; border-radius: 5px; padding: 1px 6px;"
+                            f"font-size: 10.5px;")
+        row.addWidget(badge)
         return w
 
     # -- Live monitor (stream) --
-    # -- Adapter selection --
-    def _load_adapters(self):
-        # Populate the adapter dropdown (background, after reveal).
-        w = OneshotWorker(self.core.list_adapters)
-        w.result.connect(self._on_adapters)
-        w.error.connect(lambda e: None)
-        self.register_worker(w)
-        w.start()
+    def _open_traffic_analysis(self):
+        # Open the detailed bandwidth / latency / packet-loss view.
+        from ui.components.traffic_analysis_dialog import TrafficAnalysisDialog
+        dlg = TrafficAnalysisDialog(self)
+        dlg.exec()
 
-    def _on_adapters(self, data):
-        adapters = data.get("items", data) if isinstance(data, dict) else data
-        if not isinstance(adapters, list):
-            return
-        self.adapter_combo.blockSignals(True)
-        # Preserve the Auto entry while refreshing adapter choices.
-        for a in adapters:
-            if not isinstance(a, dict):
-                continue
-            name = a.get("name", "")
-            status = a.get("status", "")
-            if not name:
-                continue
-            label = f"{name}" + ("" if status == "Up" else f"  ({status})")
-            self.adapter_combo.addItem(label, name)
-        self.adapter_combo.blockSignals(False)
-
-    def _on_adapter_changed(self, index):
-        # User picked a different adapter - restart monitor on it.
-        selected = self.adapter_combo.currentData()
-        # Stop current monitor
+    def _on_adapter_setting(self, _name=""):
+        # The adapter was changed in Settings: restart the monitor
         if self._monitor_worker is not None:
             self._monitor_worker.stop()
             self._monitor_worker = None
-        self._selected_adapter = selected or ""
         self._start_monitor()
 
-    def _start_monitor(self):
+    def shutdown(self):
+        # Called when the app closes or pages are rebuilt
+        self._closing = True
+        self._watchdog.stop()
+        self._ping_timer.stop()
         if self._monitor_worker is not None:
+            self._monitor_worker.stop()
+            self._monitor_worker.wait(1500)
+            self._monitor_worker = None
+
+    def _start_monitor(self, reset=True):
+        if self._monitor_worker is not None or self._closing:
             return
-        self.chart.reset()
-        self.card_download.set_value("0.0", "Kbps", color=Theme.ACCENT, subtitle="Live")
-        self.card_upload.set_value("0.0", "Kbps", color=Theme.ACCENT_PURPLE, subtitle="Live")
-        adapter = getattr(self, "_selected_adapter", "")
-        w = StreamWorker(self.core.monitor_stream, adapter)
+        if reset:
+            self.card_download.set_value("0.0", "Kbps", color=Theme.ACCENT, subtitle="Live")
+            self.card_upload.set_value("0.0", "Kbps", color=Theme.ACCENT_PURPLE, subtitle="Live")
+        w = StreamWorker(self.core.monitor_stream, adapter_state.get())
         w.result.connect(self._on_monitor)
-        w.error.connect(lambda e: self.adapter_status.setText(f"Monitoring: {e}"))
+        w.error.connect(lambda e: None)
+        w.done.connect(lambda w=w: self._monitor_ended(w))
         self.register_worker(w)
         self._monitor_worker = w
+        self._last_sample = time.time()
+        self._watchdog.start()
         w.start()
+
+    def _monitor_ended(self, w):
+        # The stream stopped on its own: start it again
+        if w is self._monitor_worker and not self._closing:
+            self._monitor_worker = None
+            QTimer.singleShot(1500, lambda: self._start_monitor(reset=False))
+
+    def _check_monitor(self):
+        if self._monitor_worker is not None and time.time() - self._last_sample > 8:
+            self._monitor_worker.stop()
+            self._monitor_worker = None
+            self._start_monitor(reset=False)
 
     def _update_trend(self, card, attr, value):
         """Update the trend badge when both samples are meaningful."""
@@ -906,50 +1007,45 @@ class DashboardPage(BasePage):
             card.set_badge(f"\u2193 {abs(pct)}%", positive=False)
 
     def _on_monitor(self, d: dict):
-        # Show which adapter is actually being monitored
         adapter = d.get("adapter", "")
-        if adapter:
-            self.adapter_status.setText(f"Monitoring: {adapter}")
+        self._last_sample = time.time()
+        if adapter and adapter != getattr(self, "_adapter_name", ""):
+            self._adapter_name = adapter
+            self.network_map.set_link_label(adapter)
+            self._update_subtitle()
         if "dl" in d and "ul" in d:
+            traffic_history.set_adapter(adapter)
+            traffic_history.add_bandwidth(d["dl"], d["ul"])
             self.chart.push(d["dl"], d["ul"])
-            # Adaptive units: Kbps / Mbps / Gbps depending on the value
+            self.network_map.set_traffic(d["dl"], d["ul"], self._lan_talkers())
             dl_val, dl_unit = format_speed(d["dl"])
             ul_val, ul_unit = format_speed(d["ul"])
-            self.card_download.set_value(dl_val, dl_unit,
-                                         color=Theme.ACCENT, subtitle="Live")
-            self.card_upload.set_value(ul_val, ul_unit,
-                                       color=Theme.ACCENT_PURPLE, subtitle="Live")
-            self.card_download.push_spark(d["dl"])
-            self.card_upload.push_spark(d["ul"])
-            # Live trend badge - % change vs the previous sample.
-            self._update_trend(self.card_download, "_prev_dl", d["dl"])
-            self._update_trend(self.card_upload, "_prev_ul", d["ul"])
+            self.card_download.set_value(dl_val, dl_unit.lower(), subtitle="live")
+            self.card_upload.set_value(ul_val, ul_unit.lower(), subtitle="live")
 
-            # Live peak/avg readouts from the chart's rolling buffer.
-            st = self.chart.stats()
-            dpk, dpk_u = format_speed(st["download"]["max"])
-            upk, upk_u = format_speed(st["upload"]["max"])
-            dav, dav_u = format_speed(st["download"]["avg"])
-            uav, uav_u = format_speed(st["upload"]["avg"])
-            self.stat_peak.setText(
-                f"Peak \u2193{dpk}{dpk_u} \u2191{upk}{upk_u}")
-            self.stat_avg.setText(
-                f"Avg \u2193{dav}{dav_u} \u2191{uav}{uav_u}")
+    def _lan_talkers(self):
+        # LAN devices that sent multicast or broadcast in the last second of the capture
+        from core.capture import get_capture_service
+        cap = get_capture_service()
+        if not cap.running or not cap.count():
+            return set()
+        now = cap.packets[-1].rel
+        out = set()
+        for p in reversed(cap.packets[-400:]):
+            if p.rel < now - 1:
+                break
+            if p.dis.proto in ("MDNS", "SSDP", "LLMNR", "NBNS", "ARP"):
+                out.add(p.dis.ip_src or p.dis.fields.get("arp.src.proto_ipv4"))
+        return out
 
-    # -- System resources (timer) --
-    def _refresh_resources(self, initial: bool = False):
-        if self._resource_worker is not None and self._resource_worker.isRunning():
-            return
-        w = OneshotWorker(self.core.get_system_resources)
-        w.result.connect(self._on_resources)
-        w.error.connect(lambda e: None)
-        if initial:
-            w.done.connect(lambda: self._task_done("resources"))
-        self._resource_worker = w
-        w.start()
+    def _update_subtitle(self):
+        from ui.pages.capture_page import local_ipv4
+        parts = [getattr(self, "_adapter_name", "")] + [local_ipv4()]
+        devices = getattr(self, "_all_devices", None) or []
+        gw = next((d for d in devices if d.get("is_gateway")), None)
+        if gw:
+            parts.append(f"gateway {self.device_display_name(gw)} {gw.get('ip', '')}")
+        text = " · ".join(x for x in parts if x)
+        if text and getattr(self, "_subtitle_label", None) is not None:
+            self._subtitle_label.setText(text)
 
-    def _on_resources(self, d: dict):
-        if "cpu_percent" in d:
-            self.gauge_cpu.set_value(d["cpu_percent"])
-            self.gauge_ram.set_value(d["ram_percent"], "Memory")
-            self.gauge_disk.set_value(d["disk_percent"], "Disk")

@@ -10,8 +10,9 @@ from app.theme import Theme
 class Sparkline(QWidget):
     HEIGHT = 32   # shared so cards without a sparkline can reserve the space
 
-    def __init__(self, color: str, max_points: int = 40, parent=None):
+    def __init__(self, color: str, max_points: int = 40, parent=None, transparent: bool = False):
         super().__init__(parent)
+        self._transparent = transparent
         self._color = color
         self._data = deque(maxlen=max_points)
         self.setFixedHeight(self.HEIGHT)
@@ -28,9 +29,10 @@ class Sparkline(QWidget):
     def paintEvent(self, event):
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        glass = getattr(Theme, "GLASS_ENABLED", True)
-        p.fillRect(self.rect(),
-                   QColor(Theme.GLASS_CARD if glass else Theme.BG_CARD))
+        if not self._transparent:
+            glass = getattr(Theme, "GLASS_ENABLED", True)
+            p.fillRect(self.rect(),
+                       QColor(Theme.GLASS_CARD if glass else Theme.BG_CARD))
 
         if len(self._data) < 2:
             p.end()

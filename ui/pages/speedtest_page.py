@@ -4,13 +4,14 @@ import time
 from threading import Event
 
 from PyQt6.QtCore import Qt, QTimer
-from PyQt6.QtWidgets import QFrame, QHBoxLayout, QLabel, QPushButton, QVBoxLayout
+from PyQt6.QtWidgets import QFrame, QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
 
 from app.activity import activity
 from app.resources import Icons
 from app.theme import Theme
 from ui.pages.base_page import BasePage
 from ui.widgets.progress_bar import ProgressBar
+from ui.widgets.speed_verdict import ConnectionVerdict
 from ui.widgets.sparkline import Sparkline
 from workers import StreamWorker
 
@@ -27,15 +28,24 @@ class SpeedTestPage(BasePage):
         self._phase = ""
         self._cancel_event = None
         self._cancelled_by_user = False
+        self._last_result = None
 
         self._timer = QTimer(self)
         self._timer.setInterval(200)
         self._timer.timeout.connect(self._tick)
 
         self._build_toolbar()
+        columns = QHBoxLayout()
+        columns.setSpacing(0)
+        self._left_box = QWidget()
+        self._left = QVBoxLayout(self._left_box)
+        self._left.setContentsMargins(0, 0, 0, 0)
+        self._left.setSpacing(Theme.GAP)
         self._build_readouts()
         self._build_progress()
-        self.body_layout.addStretch(1)
+        self._left.addStretch(1)
+        columns.addWidget(self._left_box, 1)
+        self.body_layout.addLayout(columns, 1)
 
     # -- UI --
     def _build_toolbar(self):
@@ -47,6 +57,18 @@ class SpeedTestPage(BasePage):
             f"color: {Theme.TEXT_SECONDARY}; font-size: {Theme.FONT_SIZE_BODY}px;"
             f"background: transparent;")
         row.addWidget(self.server_label, 1)
+
+        self.btn_ai = QPushButton("  Ask AI")
+        self.btn_ai.setIcon(Icons.get("ai", Theme.ACCENT))
+        self.btn_ai.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_ai.setToolTip("Ask Netwer AI about the result")
+        self.btn_ai.setStyleSheet(
+            f"QPushButton {{ background: transparent; color: {Theme.ACCENT}; border: none;"
+            f"border-radius: 8px; padding: 9px 16px;"
+            f"font-size: {Theme.FONT_SIZE_BODY}px; font-weight: 600; }}"
+            f"QPushButton:hover {{ background: {Theme.BG_ELEVATED}; }}")
+        self.btn_ai.clicked.connect(self._toggle_ai)
+        row.addWidget(self.btn_ai)
 
         self.btn = QPushButton("  Start test")
         self.btn.setIcon(Icons.get("play", "#ffffff"))
@@ -60,7 +82,7 @@ class SpeedTestPage(BasePage):
 
     def _style_button(self, running: bool):
         color = Theme.DANGER if running else Theme.ACCENT
-        hover = Theme.DANGER_HOVER if running else Theme.ACCENT_PURPLE
+        hover = Theme.DANGER_HOVER if running else Theme.ACCENT_HOVER
         self.btn.setStyleSheet(
             f"QPushButton {{ background: {color}; color: white; border: none;"
             f"border-radius: 8px; padding: 9px 20px;"
@@ -75,13 +97,13 @@ class SpeedTestPage(BasePage):
         self.card_ping = self._big_readout("packet_loss", "Ping", Theme.SUCCESS, "ms")
         for c in (self.card_dl, self.card_ul, self.card_ping):
             row.addWidget(c["frame"], 1)
-        self.body_layout.addLayout(row)
+        self._left.addLayout(row)
 
     def _big_readout(self, icon, label, color, unit):
         frame = QFrame()
         frame.setObjectName("Readout")
         frame.setStyleSheet(
-            f"#Readout {{ background: {Theme.BG_CARD}; border: 1px solid {Theme.BORDER};"
+            f"#Readout {{ background: {Theme.BG_CARD}; border: none;"
             f"border-radius: {Theme.RADIUS_CARD}px; }}"
             f"#Readout QLabel {{ background: transparent; border: none; }}")
         frame.setFixedHeight(168)
@@ -125,7 +147,7 @@ class SpeedTestPage(BasePage):
         lay.addStretch()
 
         # Live sparkline trace (fills during that phase)
-        spark = Sparkline(color, max_points=50)
+        spark = Sparkline(color, max_points=50, transparent=True)
         lay.addWidget(spark)
 
         return {"frame": frame, "value": value, "color": color,
@@ -136,14 +158,14 @@ class SpeedTestPage(BasePage):
         color = card["color"]
         if active:
             card["frame"].setStyleSheet(
-                f"#Readout {{ background: {Theme.BG_CARD};"
-                f"border: 2px solid {color};"
+                f"#Readout {{ background: {Theme.BG_ELEVATED};"
+                f"border: none;"
                 f"border-radius: {Theme.RADIUS_CARD}px; }}"
                 f"#Readout QLabel {{ background: transparent; border: none; }}")
         else:
             card["frame"].setStyleSheet(
                 f"#Readout {{ background: {Theme.BG_CARD};"
-                f"border: 1px solid {Theme.BORDER};"
+                f"border: none;"
                 f"border-radius: {Theme.RADIUS_CARD}px; }}"
                 f"#Readout QLabel {{ background: transparent; border: none; }}")
 
@@ -152,7 +174,7 @@ class SpeedTestPage(BasePage):
         card.setObjectName("SpeedProgress")
         card.setStyleSheet(
             f"#SpeedProgress {{ background: {Theme.BG_CARD};"
-            f"border: 1px solid {Theme.BORDER}; border-radius: {Theme.RADIUS_CARD}px; }}"
+            f"border: none; border-radius: {Theme.RADIUS_CARD}px; }}"
             f"#SpeedProgress QLabel {{ background: transparent; border: none; }}")
         lay = QVBoxLayout(card)
         lay.setContentsMargins(14, 12, 14, 12)
@@ -173,7 +195,10 @@ class SpeedTestPage(BasePage):
         self.progress = ProgressBar(height=8)
         lay.addWidget(self.progress)
 
-        self.body_layout.addWidget(card)
+        self._left.addWidget(card)
+
+        self.verdict = ConnectionVerdict()
+        self._left.addWidget(self.verdict)
 
     # --Lifecycle --
     def on_leave(self):
@@ -192,6 +217,8 @@ class SpeedTestPage(BasePage):
 
     def _start(self):
         self._running = True
+        self._last_result = None
+        self.verdict.clear()
         self._cancelled_by_user = False
         self._cancel_event = Event()
         self._start_time = time.time()
@@ -277,9 +304,19 @@ class SpeedTestPage(BasePage):
                 self._set_card_active(c, False)
             self.phase_label.setText(
                 f"<span style='color:{Theme.SUCCESS};'>\u2713 Test complete</span>")
+            self.verdict.set_result(d.get("dl", 0), d.get("ul", 0), d.get("ping", 0), d.get("jitter"), d.get("loss"))
+            self._last_result = d
             activity.add("Speed test",
                          f"\u2193 {d.get('dl', 0):g} / \u2191 {d.get('ul', 0):g} Mbps",
                          kind="success")
+
+    def _toggle_ai(self):
+        if self._last_result:
+            self.ask_ai("Explain my speed test result. Is it good for what I do?")
+        else:
+            win = self._window or self.window()
+            if hasattr(win, "ai_dock"):
+                win.ai_dock.open()
 
     def _set_phase(self, name, fraction, color):
         self._phase = name
@@ -309,3 +346,9 @@ class SpeedTestPage(BasePage):
                 self._set_card_active(card, False)
             self._cancelled_by_user = False
         self._stop()
+
+    def ai_context(self):
+        return {"server": self.server_label.text(), "status": self.phase_label.text(),
+                "last_result": self._last_result,
+                "download_mbps": self.card_dl["value"].text(), "upload_mbps": self.card_ul["value"].text(),
+                "ping_ms": self.card_ping["value"].text()}

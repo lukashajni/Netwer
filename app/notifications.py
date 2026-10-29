@@ -56,6 +56,12 @@ class NotificationCenter:
             return
         self.push("New device on network", f"{name} ({ip})", kind="info")
 
+    def notify_capture_finding(self, text, detail, severity):
+        from app.store import store
+        if not store.get_setting("notify_capture", True):
+            return
+        self.push(f"Packet capture: {text}", detail, kind="error" if severity == "danger" else "warning")
+
     def items(self):
         return list(self._items)
 

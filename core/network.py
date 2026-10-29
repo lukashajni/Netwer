@@ -164,7 +164,34 @@ def convert_adapter_details_into_network_config(details):
             "mac": details["mac"], "adapter": details["name"]}
 
 
+_SELECTED_ADAPTER = ""
+
+
+def set_selected_adapter(name):
+    global _SELECTED_ADAPTER
+    _SELECTED_ADAPTER = name or ""
+
+
+def get_selected_adapter():
+    return _SELECTED_ADAPTER
+
+
+def _config_for_adapter(name):
+    d = get_adapter_details(name)
+    if "error" in d:
+        return None                      # adapter is gone, fall back to auto
+    if not d.get("ipv4"):
+        return {"error": f"{d.get('name', name)} has no IPv4 address", "adapter": d.get("name", name)}
+    return {"ip": d["ipv4"], "prefix": d.get("prefix") or 24, "gateway": d.get("gateway") or "N/A",
+            "dns": d.get("dns") or "N/A", "mac": d.get("mac") or "N/A",
+            "adapter": d.get("name", name), "ipv6": d.get("ipv6", "")}
+
+
 def get_network_config():
+    if _SELECTED_ADAPTER:
+        cfg = _config_for_adapter(_SELECTED_ADAPTER)
+        if cfg is not None:
+            return cfg
     try:
         if platform.system() == "Windows":
             return windows_network.active_network_config()
@@ -320,26 +347,69 @@ _PUBLIC_IP_CACHE = None
 _PUBLIC_IP_CACHE_AT = 0
 
 
+_BRACKET_IP_RE = re.compile(r'[\[(]\s*(\d{1,3}(?:\.\d{1,3}){3})\s*[\])]')
+
+
+def _valid_ip(text):
+    parts = text.split(".")
+    return len(parts) == 4 and all(p.isdigit() and int(p) <= 255 for p in parts)
+
+
+def _hop_address(rest):
+    # tracert prints "name [1.2.3.4]". Reverse-DNS names often hold the address backwards
+    # (206.180.250.142.bc.googleusercontent.com), so the bracketed one wins.
+    bracket = _BRACKET_IP_RE.search(rest)
+    if bracket and _valid_ip(bracket.group(1)):
+        return bracket.group(1)
+    candidates = [m for m in _IP_RE.findall(rest) if _valid_ip(m)]
+    return candidates[-1] if candidates else None
+
+
 def _parse_hop_line(line):
     match = _HOP_RE.match(line.rstrip())
     if not match:
         return None
     ttl, rest = int(match.group(1)), match.group(2)
-    ip_match = _IP_RE.search(rest)
-    if not ip_match:
+    ip = _hop_address(rest)
+    if not ip:
         return {"ttl": ttl, "timeout": True}
     times = [float(x.replace(",", ".")) for x in _MS_RE.findall(rest)]
-    ip = ip_match.group(1)
     host_match = re.search(r'([A-Za-z0-9][A-Za-z0-9.\-]*[A-Za-z0-9])\s*[\[(]\s*' + re.escape(ip), rest)
     hostname = host_match.group(1) if host_match and host_match.group(1) != ip else ip
     return {"ttl": ttl, "ip": ip, "hostname": hostname, "times": times,
             "avg": round(sum(times) / len(times)) if times else None}
 
 
+_REPLY_IP_RE = re.compile(r'(\d{1,3}(?:\.\d{1,3}){3}):')
+
+
+def _probe_ttl(resolved, ttl, tries=2):
+    # ping with a fixed ttl for hops tracert missed
+    windows = platform.system() == "Windows"
+    for _ in range(tries):
+        cmd = (["ping", "-n", "1", "-i", str(ttl), "-w", "1500", resolved]
+               if windows else ["ping", "-c", "1", "-t", str(ttl), "-W", "2", resolved])
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True, errors="replace",
+                                    timeout=8, **_no_window())
+            output = (result.stdout or "") + (result.stderr or "")
+        except Exception:
+            continue
+        # reply lines have ip then colon, works on any language
+        match = _REPLY_IP_RE.search(output) or _FROM_RE.search(output)
+        if match and _valid_ip(match.group(1)):
+            ip = match.group(1)
+            timing = _TIME_RE.search(output)
+            avg = round(float(timing.group(1).replace(",", "."))) if timing else None
+            return {"ttl": ttl, "ip": ip, "hostname": ip,
+                    "times": [avg] if avg is not None else [], "avg": avg}
+    return None
+
+
 def _system_trace(resolved, max_hops):
-    cmd = (["tracert", "-h", str(max_hops), "-w", "1000", resolved]
+    cmd = (["tracert", "-d", "-h", str(max_hops), "-w", "2000", resolved]   # -d: no name lookups
            if platform.system() == "Windows" else
-           ["traceroute", "-m", str(max_hops), "-w", "2", "-q", "1", resolved])
+           ["traceroute", "-n", "-m", str(max_hops), "-w", "2", "-q", "1", resolved])
     try:
         proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
                                 text=True, errors="replace", **_no_window())
@@ -354,6 +424,11 @@ def _system_trace(resolved, max_hops):
             if hop is None or hop["ttl"] <= seen:
                 continue
             seen = hop["ttl"]
+            if hop.get("timeout"):
+                # tracert missed it, try ping
+                retry = _probe_ttl(resolved, hop["ttl"])
+                if retry:
+                    hop = retry
             yield hop
             if hop.get("ip") == resolved:
                 break
@@ -380,7 +455,7 @@ def _ping_trace(resolved, max_hops):
         except Exception:
             yield {"ttl": ttl, "timeout": True}
             continue
-        match = _FROM_RE.search(output)
+        match = _REPLY_IP_RE.search(output) or _FROM_RE.search(output)
         if not match:
             yield {"ttl": ttl, "timeout": True}
             continue
@@ -678,22 +753,39 @@ def _sum_counters(iface_names):
     return recv, sent
 
 
-def monitor_stream(adapter_name="", max_samples=600):
+def _traffic_label(adapter_name, ifaces):
+    if adapter_name:
+        return adapter_name
+    if not ifaces:
+        return "No active adapter"
+    return ifaces[0] if len(ifaces) == 1 else f"All physical adapters ({len(ifaces)})"
+
+
+def monitor_stream(adapter_name="", max_samples=None):
     if not PSUTIL_AVAILABLE:
         yield {"error": "psutil is required for Network Monitor. pip install psutil"}
         return
     ifaces = _pick_traffic_ifaces(adapter_name)
-    if not ifaces:
-        yield {"error": "No active network interface found"}
-        return
-    label = adapter_name or (ifaces[0] if len(ifaces) == 1 else f"All physical adapters ({len(ifaces)})")
-    prev_recv, prev_sent = _sum_counters(ifaces)
+    prev_recv, prev_sent = _sum_counters(ifaces) if ifaces else (0, 0)
     prev_time, total_dl, total_ul = time.time(), 0.0, 0.0
+    last_pick, count = time.time(), 0
     yield {"dl": 0.0, "ul": 0.0, "total_dl": 0.0, "total_ul": 0.0,
-           "adapter": label, "iface": ",".join(ifaces)}
-    for _ in range(max_samples):
+           "adapter": _traffic_label(adapter_name, ifaces), "iface": ",".join(ifaces), "waiting": not ifaces}
+    while max_samples is None or count < max_samples:
+        count += 1
         time.sleep(1)
-        cur_recv, cur_sent = _sum_counters(ifaces)
+        try:
+            # Interfaces can disappear and come back (sleep, reconnect), so look again now and then
+            if not ifaces or time.time() - last_pick > 10:
+                last_pick = time.time()
+                fresh = _pick_traffic_ifaces(adapter_name)
+                if fresh != ifaces:
+                    ifaces = fresh
+                    prev_recv, prev_sent = _sum_counters(ifaces) if ifaces else (0, 0)
+                    prev_time = time.time()
+            cur_recv, cur_sent = _sum_counters(ifaces) if ifaces else (0, 0)
+        except Exception:
+            continue
         now = time.time()
         elapsed = max(now - prev_time, 0.001)
         prev_time = now
@@ -702,8 +794,8 @@ def monitor_stream(adapter_name="", max_samples=600):
         dl_mbps, ul_mbps = round(dl * 8 / elapsed / 1_048_576, 2), round(ul * 8 / elapsed / 1_048_576, 2)
         total_dl += dl / 1_048_576
         total_ul += ul / 1_048_576
-        yield {"dl": dl_mbps, "ul": ul_mbps, "total_dl": round(total_dl, 2),
-               "total_ul": round(total_ul, 2), "adapter": label, "iface": ",".join(ifaces)}
+        yield {"dl": dl_mbps, "ul": ul_mbps, "total_dl": round(total_dl, 2), "total_ul": round(total_ul, 2),
+               "adapter": _traffic_label(adapter_name, ifaces), "iface": ",".join(ifaces), "waiting": not ifaces}
 
 
 def get_bandwidth_today():
@@ -794,7 +886,9 @@ def speedtest_stream(cancel_event=None):
             elif kind == "result":
                 yield {"type": "result", "ping": round(event["ping"]["latency"], 1),
                         "dl": round(event["download"]["bandwidth"] * 8 / 1_048_576, 2),
-                        "ul": round(event["upload"]["bandwidth"] * 8 / 1_048_576, 2)}
+                        "ul": round(event["upload"]["bandwidth"] * 8 / 1_048_576, 2),
+                        "jitter": round(event["ping"].get("jitter", 0) or 0, 1),
+                        "loss": round(event.get("packetLoss", 0) or 0, 1)}
     except Exception as exc:
         yield {"error": str(exc)}
     finally:

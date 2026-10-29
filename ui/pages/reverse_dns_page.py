@@ -25,6 +25,7 @@ class ReverseDnsPage(BasePage):
 
     def __init__(self, core, parent=None, embedded=False):
         super().__init__(core, parent, embedded=embedded)
+        self._last = None
         self._worker = None
         self._build_toolbar()
         self._build_stats()
@@ -95,7 +96,9 @@ class ReverseDnsPage(BasePage):
         self._rows.setSpacing(0)
         self.results_card.content_layout.addLayout(self._rows)
         self.results_card.content_layout.addStretch()
-        self._set_message("Enter an IP address and press Lookup.")
+        from ui.widgets.ui_kit import empty_state
+        self._rows.addWidget(empty_state("reverse_dns", "Find the name behind an IP",
+                                         "Type an address like 8.8.8.8 and press Lookup to see its hostname."))
         self.body_layout.addWidget(self.results_card)
 
     def _set_message(self, text, color=None):
@@ -164,6 +167,7 @@ class ReverseDnsPage(BasePage):
         w.start()
 
     def _on_result(self, d: dict):
+        self._last = d
         ip = d.get("ip", "") or "\u2014"
         hostname = d.get("hostname", "") or "\u2014"
         aliases = d.get("aliases", []) or []
@@ -196,3 +200,6 @@ class ReverseDnsPage(BasePage):
         self._worker = None
         self.btn.setEnabled(True)
         self.btn.setText("  Lookup")
+
+    def ai_context(self):
+        return {"query": self.input.text().strip(), "result": self._last}

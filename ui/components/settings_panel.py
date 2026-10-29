@@ -16,6 +16,36 @@ from app.store import store
 from app.theme import ACCENT_PRESETS, THEMES, Theme, current_accent_name, current_theme_name
 
 
+class _AdapterCombo(QComboBox):
+    # Reloads the adapter list every time it opens
+    def showPopup(self):
+        self.reload()
+        super().showPopup()
+
+    def reload(self):
+        from app.adapter_state import adapter_state
+        from core import network
+        current = adapter_state.get()
+        try:
+            adapters = network.list_adapters()
+            adapters = adapters.get("items", adapters) if isinstance(adapters, dict) else adapters
+        except Exception:
+            adapters = []
+        self.blockSignals(True)
+        self.clear()
+        self.addItem("Auto (recommended)", "")
+        for a in sorted(adapters or [], key=lambda a: (a.get("status") != "Up", a.get("name", ""))):
+            name, status = a.get("name", ""), a.get("status", "")
+            if name:
+                self.addItem(name if status == "Up" else f"{name}  ({status})", name)
+        idx = self.findData(current)
+        if idx < 0 and current:
+            self.addItem(f"{current}  (not found)", current)
+            idx = self.count() - 1
+        self.setCurrentIndex(max(idx, 0))
+        self.blockSignals(False)
+
+
 class SettingsPanel(QWidget):
     theme_changed = pyqtSignal(str)      # theme name
     accent_changed = pyqtSignal(str)     # accent name
@@ -95,18 +125,44 @@ class SettingsPanel(QWidget):
             store.get_setting("glass_enabled", True),
             lambda v: self.glass_toggled.emit(v))
 
+        # -- Network --
+        self._section("Network")
+        row = QWidget()
+        rl = QHBoxLayout(row)
+        rl.setContentsMargins(0, 4, 0, 4)
+        lbl = QLabel("Adapter")
+        lbl.setObjectName("SettingsLabel")
+        lbl.setStyleSheet(f"color: {Theme.TEXT_BODY}; font-size: {Theme.FONT_SIZE_SMALL}px;"
+                          f"background: transparent;")
+        rl.addWidget(lbl)
+        rl.addStretch()
+        self.adapter_combo = _AdapterCombo()
+        self.adapter_combo.setFixedWidth(210)
+        self.adapter_combo.setStyleSheet(self._combo_style())
+        self.adapter_combo.reload()
+        self.adapter_combo.currentIndexChanged.connect(self._on_adapter)
+        rl.addWidget(self.adapter_combo)
+        self._body.addWidget(row)
+        hint = QLabel("Used by the Dashboard, Network Information, Network Health and scans.")
+        hint.setWordWrap(True)
+        hint.setStyleSheet(f"color: {Theme.TEXT_FAINT}; font-size: {Theme.FONT_SIZE_TINY}px;"
+                           f"background: transparent;")
+        self._body.addWidget(hint)
+
         # -- Display --
         self._section("Display")
         from app import display as display_res
-        self._resolution_labels = list(display_res.RESOLUTIONS.values())
-        self._resolution_keys = list(display_res.RESOLUTIONS.keys())
+        self._resolution_labels = list(display_res.RESOLUTIONS.values()) + [display_res.CUSTOM_LABEL]
+        self._resolution_keys = list(display_res.RESOLUTIONS.keys()) + ["custom"]
         current_res_key = store.get_setting("resolution", "auto")
-        current_res_label = display_res.RESOLUTIONS.get(
-            current_res_key, display_res.RESOLUTIONS["auto"])
+        custom_now = display_res.parse_custom(current_res_key)
+        current_res_label = (display_res.CUSTOM_LABEL if custom_now else
+                             display_res.RESOLUTIONS.get(current_res_key, display_res.RESOLUTIONS["auto"]))
         self.resolution_combo = self._combo(
             "Resolution", self._resolution_labels, current_res_label,
             self._on_resolution)
         self.resolution_combo.setFixedWidth(190)
+        self._build_custom_resolution(custom_now)
 
         # -- Scanning --
         self._section("Scanning")
@@ -137,6 +193,10 @@ class SettingsPanel(QWidget):
             "Alert on a new device on the network",
             store.get_setting("notify_new_device", True),
             lambda v: store.set_setting("notify_new_device", v))
+        self.notif_capture = self._check(
+            "Alert on problems found in a packet capture",
+            store.get_setting("notify_capture", True),
+            lambda v: store.set_setting("notify_capture", v))
 
         # -- Monitoring --
         self._section("Monitoring")
@@ -226,18 +286,77 @@ class SettingsPanel(QWidget):
         return cb
 
     # -- Actions --
+    def _on_adapter(self, _index):
+        from app.adapter_state import adapter_state
+        adapter_state.set(self.adapter_combo.currentData() or "")
+
     def _on_theme(self, name):
         self.theme_changed.emit(name)
 
     def _on_accent(self, name):
         self.accent_changed.emit(name)
 
+    def _build_custom_resolution(self, current):
+        from PyQt6.QtWidgets import QSpinBox
+
+        from app import display as display_res
+        self._custom_row = QWidget()
+        lay = QHBoxLayout(self._custom_row)
+        lay.setContentsMargins(0, 2, 0, 6)
+        lay.setSpacing(6)
+        lay.addStretch()
+        box_style = (f"QSpinBox {{ background: {Theme.BG_ELEVATED}; color: {Theme.TEXT_BODY};"
+                     f"border: 1px solid {Theme.BORDER}; border-radius: 6px; padding: 5px 8px;"
+                     f"font-size: {Theme.FONT_SIZE_SMALL}px; }}")
+        self._custom_w = QSpinBox()
+        self._custom_w.setRange(*(display_res.CUSTOM_MIN[0], display_res.CUSTOM_MAX[0]))
+        self._custom_h = QSpinBox()
+        self._custom_h.setRange(*(display_res.CUSTOM_MIN[1], display_res.CUSTOM_MAX[1]))
+        for box, value in ((self._custom_w, (current or (1920, 1080))[0]), (self._custom_h, (current or (1920, 1080))[1])):
+            box.setButtonSymbols(QSpinBox.ButtonSymbols.NoButtons)
+            box.setFixedWidth(64)
+            box.setValue(value)
+            box.setStyleSheet(box_style)
+        times = QLabel("\u00d7")
+        times.setStyleSheet(f"color: {Theme.TEXT_MUTED}; background: transparent;")
+        apply_btn = QPushButton("Apply")
+        apply_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        apply_btn.setStyleSheet(
+            f"QPushButton {{ background: {Theme.ACCENT}; color: white; border: none; border-radius: 6px;"
+            f"padding: 5px 12px; font-size: {Theme.FONT_SIZE_SMALL}px; font-weight: 600; }}"
+            f"QPushButton:hover {{ background: {Theme.ACCENT_HOVER}; }}")
+        apply_btn.clicked.connect(self._apply_custom_resolution)
+        for w in (self._custom_w, times, self._custom_h, apply_btn):
+            lay.addWidget(w)
+        self._body.addWidget(self._custom_row)
+        hint = QLabel(f"Width {display_res.CUSTOM_MIN[0]}-{display_res.CUSTOM_MAX[0]}, "
+                      f"height {display_res.CUSTOM_MIN[1]}-{display_res.CUSTOM_MAX[1]}. Press Apply to use it.")
+        hint.setStyleSheet(f"color: {Theme.TEXT_FAINT}; font-size: {Theme.FONT_SIZE_TINY}px; background: transparent;")
+        self._custom_hint = hint
+        self._body.addWidget(hint)
+        self._set_custom_visible(bool(current))
+
+    def _set_custom_visible(self, visible):
+        self._custom_row.setVisible(visible)
+        self._custom_hint.setVisible(visible)
+
+    def _apply_custom_resolution(self):
+        from app import display as display_res
+        key = display_res.custom_key(self._custom_w.value(), self._custom_h.value())
+        w, h = display_res.parse_custom(key)
+        self._custom_w.setValue(w)
+        self._custom_h.setValue(h)
+        self.resolution_changed.emit(key)
+
     def _on_resolution(self, label):
         try:
             idx = self._resolution_labels.index(label)
         except ValueError:
             return
-        self.resolution_changed.emit(self._resolution_keys[idx])
+        is_custom = self._resolution_keys[idx] == "custom"
+        self._set_custom_visible(is_custom)
+        if not is_custom:
+            self.resolution_changed.emit(self._resolution_keys[idx])
 
     def _clear_data(self):
         store.clear_recent_hosts()
@@ -247,6 +366,9 @@ class SettingsPanel(QWidget):
 
     def _reset(self):
         store.reset_settings()
+        from app.adapter_state import adapter_state
+        adapter_state.set("")
+        self.adapter_combo.reload()
         self.offline_mode.setChecked(True)
         self.offline_mode_toggled.emit(True)
         self.schedule_on.setChecked(False)

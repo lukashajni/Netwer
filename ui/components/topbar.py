@@ -1,18 +1,17 @@
 from PyQt6.QtCore import QRectF, QStringListModel, Qt, QTimer, pyqtSignal
-from PyQt6.QtGui import QAction, QBrush, QColor, QPainter, QRadialGradient
+from PyQt6.QtGui import QBrush, QColor, QPainter, QRadialGradient
 from PyQt6.QtWidgets import (
     QCompleter,
     QFrame,
     QHBoxLayout,
     QLabel,
     QLineEdit,
-    QMenu,
     QPushButton,
     QWidget,
 )
 
 from app.resources import Icons
-from app.theme import THEMES, Theme, card_bg, card_border, current_theme_name, is_dark
+from app.theme import Theme, card_bg, card_border
 
 
 class _GlowDot(QWidget):
@@ -60,28 +59,38 @@ class TopBar(QWidget):
     theme_selected = pyqtSignal(str)
     search_submitted = pyqtSignal(str)
     suggestion_chosen = pyqtSignal(dict)
+    toggle_ai = pyqtSignal()
+    open_capture = pyqtSignal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setFixedHeight(Theme.TOPBAR_HEIGHT)
         self._unread = 0
+        self._capturing = False
         self._build()
         self.refresh_theme()
 
     def _build(self):
         lay = QHBoxLayout(self)
-        lay.setContentsMargins(16, 10, 14, 10)
-        lay.setSpacing(12)
+        lay.setContentsMargins(16, 10, 16, 10)
+        lay.setSpacing(10)
 
-        # Search field (visual, like the preview) - a read-only prompt that
-        # focuses the global search. Fills the available width.
+        # search box: jumps to a tool, or asks Netwer AI when it reads like a question
+        self._search_box = QFrame()
+        self._search_box.setObjectName("SearchBox")
+        sb = QHBoxLayout(self._search_box)
+        sb.setContentsMargins(10, 0, 8, 0)
+        sb.setSpacing(8)
+        self._search_icon = QLabel()
+        sb.addWidget(self._search_icon)
         self._search = QLineEdit()
-        self._search.setPlaceholderText(
-            "Search devices, run a trace, jump to a tool…")
-        self._search.setClearButtonEnabled(True)
+        self._search.setPlaceholderText("Ask Netwer AI about your network, or jump to a tool…")
         self._search.returnPressed.connect(self._on_search_submit)
         self._search.textEdited.connect(self._on_search_typed)
-        lay.addWidget(self._search, 1)
+        sb.addWidget(self._search, 1)
+        self._kbd = QLabel("Ctrl K")
+        sb.addWidget(self._kbd)
+        lay.addWidget(self._search_box, 1)
 
         # QCompleter owns the popup lifecycle and keyboard handling.
         self._suggest_model = QStringListModel([])
@@ -97,35 +106,52 @@ class TopBar(QWidget):
         # callable set by MainWindow: (text) -> list of suggestion dicts
         self.suggestion_provider = None
 
-        # Status pill reports the local app state, not network health.
-        self._status_pill = QFrame()
-        self._status_pill.setObjectName("StatusPill")
+        # adapter in use
+        self._adapter_pill = QFrame()
+        self._adapter_pill.setObjectName("Pill")
+        ap = QHBoxLayout(self._adapter_pill)
+        ap.setContentsMargins(11, 0, 12, 0)
+        ap.setSpacing(7)
+        self._adapter_icon = QLabel()
+        ap.addWidget(self._adapter_icon)
+        self._adapter_text = QLabel("Detecting adapter…")
+        self._adapter_text.setTextFormat(Qt.TextFormat.RichText)
+        ap.addWidget(self._adapter_text)
+        lay.addWidget(self._adapter_pill)
+
+        # capture state, click opens Packet Capture
+        self._status_pill = QPushButton()
+        self._status_pill.setObjectName("CapPill")
+        self._status_pill.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._status_pill.clicked.connect(self.open_capture.emit)
         sp = QHBoxLayout(self._status_pill)
-        sp.setContentsMargins(13, 6, 14, 6)
-        sp.setSpacing(8)
-        self._status_dot = _GlowDot(Theme.SUCCESS)
+        sp.setContentsMargins(10, 0, 12, 0)
+        sp.setSpacing(7)
+        self._status_dot = _GlowDot(Theme.TEXT_MUTED, 14)
         sp.addWidget(self._status_dot, 0, Qt.AlignmentFlag.AlignVCenter)
-        self._status_text = QLabel("NETWER is running")
+        self._status_text = QLabel("Capture off")
         sp.addWidget(self._status_text)
         lay.addWidget(self._status_pill)
 
-        # Theme switcher
-        self._theme_btn = QPushButton()
-        self._theme_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._theme_btn.clicked.connect(self._show_theme_menu)
-        lay.addWidget(self._theme_btn)
+        self._ai_btn = QPushButton("  Netwer AI")
+        self._ai_btn.setCheckable(True)
+        self._ai_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._ai_btn.clicked.connect(self.toggle_ai.emit)
+        lay.addWidget(self._ai_btn)
 
         # Notifications bell
         self._bell = QPushButton()
         self._bell.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._bell.setFixedSize(38, 38)
+        self._bell.setFixedSize(34, 34)
+        self._bell.setToolTip("Notifications")
         self._bell.clicked.connect(self.toggle_notifications.emit)
         lay.addWidget(self._bell)
 
         # Settings gear
         self._gear = QPushButton()
         self._gear.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._gear.setFixedSize(38, 38)
+        self._gear.setFixedSize(34, 34)
+        self._gear.setToolTip("Settings")
         self._gear.clicked.connect(self.toggle_settings.emit)
         lay.addWidget(self._gear)
 
@@ -191,25 +217,6 @@ class TopBar(QWidget):
             self.search_submitted.emit(text)
             self._search.clear()
 
-    # -- Theme menu --
-    def _show_theme_menu(self):
-        menu = QMenu(self)
-        menu.setStyleSheet(
-            f"QMenu {{ background: {Theme.BG_ELEVATED};"
-            f"border: 1px solid {Theme.BORDER_STRONG}; border-radius: 8px;"
-            f"padding: 4px; }}"
-            f"QMenu::item {{ color: {Theme.TEXT_BODY}; padding: 7px 26px 7px 12px;"
-            f"border-radius: 5px; font-size: {Theme.FONT_SIZE_SMALL}px; }}"
-            f"QMenu::item:selected {{ background: {Theme.ACCENT}; color: white; }}")
-        cur = current_theme_name()
-        for name, pal in THEMES.items():
-            mark = "\u2713  " if name == cur else "     "
-            act = QAction(f"{mark}{name}", menu)
-            act.triggered.connect(lambda _=False, n=name: self.theme_selected.emit(n))
-            menu.addAction(act)
-        menu.exec(self._theme_btn.mapToGlobal(
-            self._theme_btn.rect().bottomLeft()))
-
     # -- Notifications badge --
     def set_unread(self, count: int):
         self._unread = count
@@ -218,47 +225,81 @@ class TopBar(QWidget):
     # -- Theme application --
     def refresh_theme(self):
         """Re-skin the bar to the current theme (called after a theme change)."""
-        self.setFixedHeight(Theme.TOPBAR_HEIGHT)
+        self.setFixedHeight(54)
         self.setObjectName("TopBar")
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.setStyleSheet(
-            f"#TopBar {{ background: {card_bg()};"
-            f"border: 1px solid {card_border()};"
-            f"border-radius: {Theme.RADIUS_CARD}px; }}")
+            f"#TopBar {{ background: {Theme.BG_APP}; border: none; border-bottom: 1px solid {card_border()}; }}"
+            f"QLabel {{ background: transparent; }}")
+        box = f"background: {card_bg()}; border: 1px solid {card_border()}; border-radius: 9px;"
+        self._search_box.setFixedHeight(34)
+        self._search_box.setStyleSheet(f"#SearchBox {{ {box} }}")
         self._search.setStyleSheet(
-            f"QLineEdit {{ background: {Theme.GLASS_INPUT};"
-            f"color: {Theme.TEXT_BODY}; border: 1px solid {Theme.GLASS_BORDER};"
-            f"border-radius: {Theme.RADIUS_CONTROL}px; padding: 9px 13px;"
-            f"font-size: {Theme.FONT_SIZE_SMALL}px; }}"
-            f"QLineEdit:focus {{ border-color: {Theme.GLASS_BORDER_HI}; }}")
+            f"QLineEdit {{ background: transparent; border: none; color: {Theme.TEXT_PRIMARY};"
+            f"font-size: {Theme.FONT_SIZE_SMALL}px; padding: 0; }}")
+        self._search_icon.setPixmap(Icons.pixmap("search", 15, Theme.TEXT_MUTED))
+        self._kbd.setStyleSheet(
+            f"color: {Theme.TEXT_MUTED}; font-family: {Theme.FONT_MONO}; font-size: 10px;"
+            f"border: 1px solid {Theme.BORDER_STRONG}; border-radius: 5px; padding: 1px 5px;")
+        for pill in (self._adapter_pill, self._status_pill):
+            pill.setFixedHeight(34)
+        self._adapter_pill.setStyleSheet(f"#Pill {{ {box} }}")
+        self._adapter_icon.setPixmap(Icons.pixmap("dev_pc", 15, Theme.TEXT_SECONDARY))
+        self._adapter_text.setStyleSheet(f"color: {Theme.TEXT_SECONDARY}; font-size: {Theme.FONT_SIZE_SMALL}px;")
         self._status_pill.setStyleSheet(
-            f"#StatusPill {{ background: {Theme.GLASS_INPUT};"
-            f"border: 1px solid {card_border()};"
-            f"border-radius: {Theme.RADIUS_CONTROL}px; }}")
-        self._status_text.setStyleSheet(
-            f"color: {Theme.SUCCESS}; background: transparent;"
-            f"font-size: {Theme.FONT_SIZE_SMALL}px; font-weight: 500;")
-        self._status_dot.set_color(Theme.SUCCESS)
-
-        icon = "moon" if is_dark() else "sun"
-        accent = Theme.ACCENT_PURPLE if is_dark() else Theme.WARNING
-        self._theme_btn.setText(f"  {current_theme_name()}  ")
-        self._theme_btn.setIcon(Icons.get(icon, accent))
-        self._theme_btn.setStyleSheet(
-            f"QPushButton {{ background: {Theme.GLASS_INPUT};"
-            f"color: {Theme.TEXT_BODY}; border: 1px solid {Theme.GLASS_BORDER};"
-            f"border-radius: {Theme.RADIUS_CONTROL}px; padding: 7px 13px;"
-            f"font-size: {Theme.FONT_SIZE_SMALL}px; }}"
-            f"QPushButton:hover {{ border-color: {Theme.GLASS_BORDER_HI}; }}")
-
+            f"#CapPill {{ {box} }} #CapPill:hover {{ border-color: {Theme.GLASS_BORDER_HI}; }}")
+        self._render_status()
+        self._ai_btn.setFixedHeight(34)
+        self._ai_btn.setIcon(Icons.get("ai", "#d9d0ff"))
+        self._ai_btn.setStyleSheet(
+            f"QPushButton {{ background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #2a2550, stop:1 #1c2445);"
+            f"color: #d9d0ff; border: 1px solid #5a4a9a; border-radius: 9px;"
+            f"padding: 0 13px; font-size: {Theme.FONT_SIZE_SMALL}px; font-weight: 500; }}"
+            f"QPushButton:hover {{ border-color: {Theme.ACCENT_GLOW}; }}"
+            f"QPushButton:checked {{ background: #3a3070; }}")
         self._icon_btn_style(self._gear, "settings")
         self._render_bell()
+
+    def focus_search(self):
+        self._search.setFocus()
+        self._search.selectAll()
+
+    def set_adapter(self, name: str, ip: str):
+        if name:
+            self._adapter_text.setText(
+                f"{name} · <span style='font-family:{Theme.FONT_MONO}'>{ip}</span>" if ip else name)
+
+    def set_capture_rate(self, pps):
+        self._rate = pps
+        self._render_status()
+
+    def set_ai_open(self, on: bool):
+        self._ai_btn.setChecked(on)
+
+    def set_capturing(self, on: bool):
+        self._capturing = on
+        self._render_status()
+
+    def _render_status(self):
+        color = Theme.DANGER if self._capturing else Theme.TEXT_MUTED
+        rate = getattr(self, "_rate", None)
+        if self._capturing:
+            text = f"Capturing · {rate} pkt/s" if rate is not None else "Capturing"
+        else:
+            text = "Capture off"
+        self._status_text.setText(text)
+        self._status_text.setStyleSheet(
+            f"color: {Theme.TEXT_SECONDARY}; background: transparent; font-size: {Theme.FONT_SIZE_SMALL}px;")
+        self._status_dot.set_color(color)
+        # a QPushButton does not size itself to a child layout
+        self._status_pill.setFixedWidth(self._status_pill.layout().sizeHint().width())
 
     def _icon_btn_style(self, btn, icon_name):
         btn.setIcon(Icons.get(icon_name, Theme.TEXT_SECONDARY))
         btn.setStyleSheet(
-            f"QPushButton {{ background: {Theme.GLASS_INPUT};"
+            f"QPushButton {{ background: {card_bg()};"
             f"border: 1px solid {card_border()};"
-            f"border-radius: {Theme.RADIUS_CONTROL}px; }}"
+            f"border-radius: 9px; }}"
             f"QPushButton:hover {{ border-color: {Theme.GLASS_BORDER_HI}; }}")
 
     def _render_bell(self):

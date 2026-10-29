@@ -14,6 +14,7 @@ from workers import OneshotWorker
 class SystemInfoPage(BasePage):
     PAGE_TITLE = "System Information"
     PAGE_SUBTITLE = "Hardware, operating system, and live resources"
+    AI_QUESTION = "Is anything on this computer slowing down my network?"
 
     def __init__(self, core, parent=None):
         super().__init__(core, parent)
@@ -31,6 +32,9 @@ class SystemInfoPage(BasePage):
         self._uptime_timer.timeout.connect(self._tick_uptime)
 
         self._build_headline_row()
+        from ui.widgets.ui_kit import InsightRow
+        self.findings = InsightRow(self.ask_ai)
+        self.body_layout.addWidget(self.findings)
         self._build_detail_row()
         self.body_layout.addStretch(1)
 
@@ -194,6 +198,27 @@ class SystemInfoPage(BasePage):
         self._set("Total RAM", f"{ram_total} GB" if ram_total else None)
         self._set("Python Version", d.get("python_version"))
 
+    def _update_findings(self, d):
+        import time
+        items = []
+        if d["disk_percent"] >= 90:
+            items.append({"severity": "warning", "text": "Disk almost full", "detail": f"{d['disk_percent']:.0f}%",
+                          "question": f"My disk is {d['disk_percent']:.0f}% full. Can that slow down my PC or network, and what can I clean up?"})
+        if d["ram_percent"] >= 85:
+            items.append({"severity": "warning", "text": "Memory almost full", "detail": "",
+                          "question": "My memory is almost full. Can that make my network feel slow?"})
+        if d["cpu_percent"] >= 85:
+            items.append({"severity": "warning", "text": "CPU busy", "detail": "",
+                          "question": "My CPU is very busy. Could that affect my network speed?"})
+        if self._boot_epoch and time.time() - self._boot_epoch > 14 * 86400:
+            days = int((time.time() - self._boot_epoch) // 86400)
+            items.append({"severity": "info", "text": f"Not restarted for {days} days", "detail": "",
+                          "question": f"My PC hasn't restarted for {days} days. Should I restart it?"})
+        if not items:
+            items.append({"severity": "success", "text": "Resources OK", "detail": "",
+                          "question": "Is anything on this computer slowing down my network?"})
+        self.findings.set_items(items)
+
     def _set(self, key, value):
         lbl = self._details.get(key)
         if lbl:
@@ -222,6 +247,7 @@ class SystemInfoPage(BasePage):
     def _on_resources(self, d: dict):
         if "cpu_percent" not in d:
             return
+        self._update_findings(d)
         self.bar_cpu.set_value(d["cpu_percent"])
         self.bar_ram.set_value(
             d["ram_percent"],

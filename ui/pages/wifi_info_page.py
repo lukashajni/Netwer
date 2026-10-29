@@ -16,6 +16,7 @@ from app.resources import Icons
 from app.theme import Theme
 from ui.pages.base_page import BasePage
 from ui.widgets.card import Card, kv_row
+from ui.widgets.channel_analyzer import ChannelAnalyzer
 from ui.widgets.signal_bars import SignalBars, dbm_to_percent, signal_color, signal_quality
 from ui.widgets.wifi_signal import WiFiSignal
 from workers import OneshotWorker
@@ -24,6 +25,7 @@ from workers import OneshotWorker
 class WiFiInfoPage(BasePage):
     PAGE_TITLE = "WiFi Information"
     PAGE_SUBTITLE = "Wireless connection details and signal quality"
+    AI_QUESTION = "How good is my Wi-Fi connection, and how can I improve it?"
 
     def __init__(self, core, parent=None):
         super().__init__(core, parent)
@@ -44,7 +46,14 @@ class WiFiInfoPage(BasePage):
         self._scan_label_timer.timeout.connect(self._update_last_scan_label)
 
         self._build_headline_row()
+        from ui.widgets.ui_kit import InsightRow
+        self.findings = InsightRow(self.ask_ai)
+        self.body_layout.addWidget(self.findings)
         self._build_detail_row()
+        self.analyzer = ChannelAnalyzer()
+        self.analyzer.rescan_requested.connect(self._scan_networks)
+        self.body_layout.addWidget(self.analyzer)
+        self._auto_scanned = False
 
         self.body_layout.addStretch(1)
 
@@ -275,9 +284,10 @@ class WiFiInfoPage(BasePage):
                        Theme.TEXT_PRIMARY, Theme.SUCCESS)
         channel = d.get("channel", "")
         band = d.get("band", "")
-        band_short = "5 GHz" if "5 GHz" in band else ("2.4 GHz" if "2.4" in band else band)
+        band_short = next((b for b in ("2.4 GHz", "5 GHz", "6 GHz") if b in band), band)
+        ch_text = "" if channel in ("", "\u2014") else channel
         self._set_stat(self.card_band,
-                       f"{band_short}" + (f"  ch {channel}" if channel else ""),
+                       f"{band_short}" + (f"  ch {ch_text}" if ch_text else ""),
                        d.get("radio", ""), Theme.ACCENT)
         auth = d.get("auth", "\u2014")
         self._set_stat(self.card_security, auth,
@@ -294,15 +304,42 @@ class WiFiInfoPage(BasePage):
         self._set_detail("Authentication", auth)
         self._set_detail("Cipher", d.get("cipher"))
         self._set_detail("Link Speed", d.get("link_speed"))
+        self._update_findings(dbm, pct, band_short, auth)
+
+        # Channel Analyzer: knows which access point is yours and scans once automatically
+        self.analyzer.set_connection(d.get("bssid", ""), channel, band_short)
+        if not self._auto_scanned and self._last_scan_time is None:
+            self._auto_scanned = True
+            QTimer.singleShot(500, self._scan_networks)
+
+    def _update_findings(self, dbm, pct, band, auth):
+        items = []
+        if pct is not None:
+            weak = (dbm is not None and dbm < -70) or pct < 45
+            items.append({"severity": "warning" if weak else "success",
+                          "text": "Weak signal" if weak else "Good signal", "detail": f"{pct}%",
+                          "question": f"My Wi-Fi signal is {pct}%" + (f" ({dbm} dBm)" if dbm is not None else "")
+                                      + ". Is that good enough, and how can I improve it?"})
+        if band.startswith("2.4"):
+            items.append({"severity": "info", "text": "2.4 GHz band", "detail": "",
+                          "question": "I'm on the 2.4 GHz Wi-Fi band. Would 5 GHz be faster for me?"})
+        a = (auth or "").upper()
+        if a and ("OPEN" in a or "WEP" in a or a == "WPA-PERSONAL"):
+            items.append({"severity": "danger", "text": "Weak Wi-Fi security", "detail": auth,
+                          "question": f"My Wi-Fi uses {auth}. Is that safe, and what should I switch to?"})
+        self.findings.set_items(items)
 
     def _set_disconnected(self):
         self._connected = False
+        self.analyzer.set_connection("", None, "")
         self.signal_glyph.set_disconnected()
         self.signal_verdict.setText("No WiFi")
         self.signal_verdict.setStyleSheet(
             f"color: {Theme.TEXT_MUTED}; font-family: {Theme.FONT_DATA};"
             f"font-size: 19px; font-weight: 600; background: transparent;")
         self.signal_detail.setText("Adapter off or wired connection")
+        self.findings.set_items([{"severity": "info", "text": "Not on Wi-Fi", "detail": "wired or adapter off",
+                                  "question": "My PC is not on Wi-Fi right now. Is a wired connection better, and when should I use Wi-Fi?"}])
 
         for card in (self.card_network, self.card_band, self.card_security):
             self._set_stat(card, "\u2014", "", Theme.TEXT_MUTED)
@@ -341,6 +378,7 @@ class WiFiInfoPage(BasePage):
         if self._scan_worker is not None and self._scan_worker.isRunning():
             return
         self.btn_scan.setEnabled(False)
+        self.analyzer.set_scanning(True)
         self._clear_networks()
         self._net_placeholder.setText("Scanning for networks…")
         self._net_placeholder.show()
@@ -348,7 +386,7 @@ class WiFiInfoPage(BasePage):
         w = OneshotWorker(self.core.scan_wifi_networks)
         w.result.connect(self._on_networks)
         w.error.connect(lambda e: self._net_placeholder.setText(f"Scan failed: {e}"))
-        w.done.connect(lambda: self.btn_scan.setEnabled(True))
+        w.done.connect(lambda: (self.btn_scan.setEnabled(True), self.analyzer.set_scanning(False)))
         self.register_worker(w)
         self._scan_worker = w
         w.start()
@@ -367,6 +405,7 @@ class WiFiInfoPage(BasePage):
         self._last_scan_time = time.time()
         self._update_last_scan_label()
 
+        self.analyzer.set_scan(data.get("aps", []))
         networks = data.get("networks", [])
         if not networks:
             self._net_placeholder.setText("No networks found")

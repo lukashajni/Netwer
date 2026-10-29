@@ -3,10 +3,14 @@ import sys
 from PyQt6.QtGui import QFont
 from PyQt6.QtWidgets import QApplication
 
+from app.combo_arrow import ComboArrowFilter, arrow_url
+from app.win_console import hide_subprocess_windows
+from core import ai_client
 from app.theme import Theme
 from core import netwer_core
 from ui.main_window import MainWindow
 from ui.pages.about_page import AboutPage
+from ui.pages.capture_page import CapturePage
 from ui.pages.dashboard_page import DashboardPage
 from ui.pages.dns_tools_page import DnsToolsPage
 from ui.pages.health_page import HealthPage
@@ -20,6 +24,7 @@ from ui.pages.system_info_page import SystemInfoPage
 from ui.pages.wifi_info_page import WiFiInfoPage
 
 def build_global_qss():
+    arrow = arrow_url()
     app_gradient = (
         f"qlineargradient(x1:0, y1:0, x2:1, y2:1, "
         f"stop:0 {Theme.BG_SIDEBAR}, stop:0.5 {Theme.BG_APP}, "
@@ -40,6 +45,16 @@ QWidget {{
 QScrollArea, QScrollArea > QWidget, QScrollArea > QWidget > QWidget {{
     background: transparent;
     border: none;
+}}
+QComboBox::drop-down {{
+    subcontrol-origin: padding;
+    subcontrol-position: center right;
+    border: none;
+}}
+QComboBox::down-arrow {{
+    image: url({arrow});
+    width: 12px;
+    height: 12px;
 }}
 QScrollBar:vertical {{
     background: transparent;
@@ -93,6 +108,10 @@ def _register_pages(window: MainWindow) -> None:
         subtitle="Diagnose problems"
     )
     window.register_page(
+        "capture", "capture", CapturePage(netwer_core),
+        subtitle="Live packets, filters, AI explanations", badge="NEW"
+    )
+    window.register_page(
         "ping", "ping", PingPage(netwer_core), subtitle="Test Connectivity"
     )
     window.register_page(
@@ -124,6 +143,7 @@ def _register_pages(window: MainWindow) -> None:
 
 
 def main() -> int:
+    hide_subprocess_windows()
     app = QApplication(sys.argv)
     app.setApplicationName("NETWER")
     app.setOrganizationName("Lukas Hajneman")
@@ -147,6 +167,8 @@ def main() -> int:
     apply_ui_scale(display_res.profile_for(res_w))
 
     app.setStyleSheet(build_global_qss())
+    app.installEventFilter(ComboArrowFilter(app))
+    ai_client.purge_saved()
 
     try:
         import psutil  # noqa: F401
@@ -164,7 +186,7 @@ def main() -> int:
         box.exec()
 
     QFont.insertSubstitutions(Theme.FONT_FAMILY_PRIMARY, [
-        "Segoe UI Variable", "Segoe UI", "Inter", "Helvetica Neue",
+        "Segoe UI Variable Text", "Segoe UI", "Inter", "Helvetica Neue",
         "Arial", "sans-serif",
     ])
     QFont.insertSubstitutions(Theme.FONT_MONO_PRIMARY, [
@@ -172,7 +194,8 @@ def main() -> int:
         "DejaVu Sans Mono", "monospace",
     ])
     font = QFont(Theme.FONT_FAMILY_PRIMARY, 10)
-    font.setStyleStrategy(QFont.StyleStrategy.PreferAntialias)
+    font.setStyleStrategy(QFont.StyleStrategy.PreferAntialias | QFont.StyleStrategy.PreferQuality)
+    font.setHintingPreference(QFont.HintingPreference.PreferFullHinting)   # crisper glyphs on Windows
     app.setFont(font)
 
     window = MainWindow(netwer_core)

@@ -12,6 +12,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from app.adapter_state import adapter_state
 from app.resources import Icons
 from app.theme import Theme
 from ui.pages.base_page import BasePage
@@ -23,6 +24,7 @@ from workers import OneshotWorker
 class NetworkInfoPage(BasePage):
     PAGE_TITLE = "Network Information"
     PAGE_SUBTITLE = "Detailed configuration for each network adapter"
+    AI_QUESTION = "Explain my network adapter settings. Is anything misconfigured?"
 
     def __init__(self, core, parent=None):
         super().__init__(core, parent)
@@ -35,17 +37,14 @@ class NetworkInfoPage(BasePage):
         toolbar = QHBoxLayout()
         toolbar.setSpacing(10)
 
-        adapter_lbl = QLabel("Adapter:")
-        adapter_lbl.setStyleSheet(
-            f"color: {Theme.TEXT_SECONDARY}; font-size: {Theme.FONT_SIZE_SMALL}px;"
-        )
-        toolbar.addWidget(adapter_lbl)
-
-        self.adapter_combo = QComboBox()
-        self.adapter_combo.setMinimumWidth(280)
-        self.adapter_combo.setStyleSheet(self._combo_style())
-        self.adapter_combo.currentIndexChanged.connect(self._on_adapter_selected)
-        toolbar.addWidget(self.adapter_combo)
+        self.adapter_label = QLabel("Adapter: \u2026")
+        self.adapter_label.setStyleSheet(
+            f"color: {Theme.TEXT_BODY}; font-size: {Theme.FONT_SIZE_SMALL}px; font-weight: 600;")
+        toolbar.addWidget(self.adapter_label)
+        hint = QLabel("change it in Settings")
+        hint.setStyleSheet(f"color: {Theme.TEXT_MUTED}; font-size: {Theme.FONT_SIZE_TINY}px;")
+        toolbar.addWidget(hint)
+        adapter_state.changed.connect(lambda _n: self._load_adapters())
 
         toolbar.addStretch()
 
@@ -54,6 +53,10 @@ class NetworkInfoPage(BasePage):
         toolbar.addWidget(self.btn_refresh)
 
         self.body_layout.addLayout(toolbar)
+        from ui.widgets.ui_kit import InsightRow
+        self.findings = InsightRow(self.ask_ai)
+        self.body_layout.addWidget(self.findings)
+        self._last = None
 
         # -- Details card with the table --
         self.details_card = Card("Adapter Details", "network")
@@ -119,35 +122,35 @@ class NetworkInfoPage(BasePage):
             self._load_public_ip()
 
     # -- Data loading --
+    def _resolve_adapter(self):
+        # The adapter chosen in Settings, or the active one when set to Auto
+        name = adapter_state.get()
+        if not name:
+            name = self.core.get_network_config().get("adapter", "")
+        if not name:
+            adapters = self.core.list_adapters()
+            adapters = adapters.get("items", adapters) if isinstance(adapters, dict) else adapters
+            up = [a for a in adapters or [] if a.get("status") == "Up"]
+            name = (up or adapters or [{}])[0].get("name", "")
+        return {"name": name}
+
     def _load_adapters(self):
         self._status.setText("Loading adapters…")
-        w = OneshotWorker(self.core.list_adapters)
+        w = OneshotWorker(self._resolve_adapter)
         w.result.connect(self._on_adapters)
         w.error.connect(lambda e: self._status.setText(self.core.friendly_error(e)))
         self.register_worker(w)
         w.start()
 
     def _on_adapters(self, data):
-        adapters = data.get("items", data) if isinstance(data, dict) else data
-        if not isinstance(adapters, list):
-            self._status.setText("Could not list adapters")
+        name = data.get("name", "") if isinstance(data, dict) else ""
+        if not name:
+            self._status.setText("No adapter found")
             return
-        self.adapter_combo.blockSignals(True)
-        self.adapter_combo.clear()
-        # Sort - Up adapters first, then by name
-        adapters.sort(key=lambda a: (a.get("status") != "Up", a.get("name", "")))
-        for a in adapters:
-            name = a.get("name", "")
-            status = a.get("status", "")
-            if not name:
-                continue
-            label = name if status == "Up" else f"{name}  ({status})"
-            self.adapter_combo.addItem(label, name)
-        self.adapter_combo.blockSignals(False)
         self._status.setText("")
-        # Load details for the first (active) adapter
-        if self.adapter_combo.count() > 0:
-            self._on_adapter_selected(0)
+        self._current_adapter = name
+        self.adapter_label.setText(f"Adapter: {name}")
+        self._load_details(name)
 
     def _load_public_ip(self):
         w = OneshotWorker(self.core.get_public_ip)
@@ -164,13 +167,6 @@ class NetworkInfoPage(BasePage):
         # If a table is already shown, refresh it to include the public IP
         if self._current_adapter:
             self._refresh_current()
-
-    def _on_adapter_selected(self, index):
-        name = self.adapter_combo.itemData(index)
-        if not name:
-            return
-        self._current_adapter = name
-        self._load_details(name)
 
     def _load_details(self, name):
         self.info_table.clear()
@@ -211,6 +207,39 @@ class NetworkInfoPage(BasePage):
         self.info_table.add_row("MTU", str(d.get("mtu", "")))
 
         self._status.setText("")
+        self._last = {k: v for k, v in d.items() if k != "mac"}
+        self._update_findings(d)
+
+    def _update_findings(self, d):
+        items = []
+        ip, gw, dns = d.get("ipv4", "") or "", d.get("gateway", "") or "", d.get("dns", "") or ""
+        if d.get("status") and d.get("status") != "Up":
+            items.append({"severity": "danger", "text": "Adapter is down", "detail": d.get("status"),
+                          "question": "My network adapter shows as down. How do I bring it back up?"})
+        if ip.startswith("169.254."):
+            items.append({"severity": "danger", "text": "No address from the router", "detail": ip,
+                          "question": f"My adapter has the address {ip}. Why didn't the router give me an address?"})
+        if str(d.get("dhcp", "")).lower() in ("disabled", "no", "false"):
+            items.append({"severity": "info", "text": "Static IP", "detail": ip,
+                          "question": "My adapter uses a static IP instead of DHCP. Is that set up correctly?"})
+        if dns and gw and gw in dns:
+            items.append({"severity": "info", "text": "DNS through the router", "detail": dns,
+                          "question": "My DNS server is my router. Should I switch to a public DNS like 1.1.1.1?"})
+        speed = str(d.get("link_speed", ""))
+        if speed in ("10 Mbps", "100 Mbps"):
+            items.append({"severity": "warning", "text": f"Link only {speed}", "detail": "",
+                          "question": f"My wired link runs at only {speed}. Could the cable or port be the problem?"})
+        elif speed:
+            items.append({"severity": "success", "text": f"Link {speed}", "detail": "",
+                          "question": f"My adapter links at {speed}. Is that the limit of my internet speed?"})
+        mtu = str(d.get("mtu", ""))
+        if mtu and mtu != "1500":
+            items.append({"severity": "info", "text": f"MTU {mtu}", "detail": "",
+                          "question": f"My adapter MTU is {mtu}, not 1500. What does that mean?"})
+        self.findings.set_items(items)
+
+    def ai_context(self):
+        return {"adapter": self._last} if self._last else {}
 
     def _show_error(self, msg):
         self.info_table.clear()

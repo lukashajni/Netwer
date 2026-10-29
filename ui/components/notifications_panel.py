@@ -85,7 +85,7 @@ class NotificationsPanel(QWidget):
         act_row.addStretch()
         self._mark_btn = QPushButton("Mark all read")
         self._mark_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._mark_btn.clicked.connect(notifications.mark_all_read)
+        self._mark_btn.clicked.connect(self._mark_all_read)
         act_row.addWidget(self._mark_btn)
         outer.addLayout(act_row)
 
@@ -100,6 +100,11 @@ class NotificationsPanel(QWidget):
         scroll.setWidget(self._list_host)
         outer.addWidget(scroll, 1)
 
+    def _mark_all_read(self):
+        # Reading everything dismisses it: mark read (updates the badge), then clear.
+        notifications.mark_all_read()
+        notifications.clear()
+
     def refresh_list(self):
         # Clear the list
         while self._list.count():
@@ -110,12 +115,10 @@ class NotificationsPanel(QWidget):
 
         items = notifications.items()
         if not items:
-            empty = QLabel("No notifications yet.")
-            empty.setStyleSheet(
-                f"color: {Theme.TEXT_MUTED}; font-size: {Theme.FONT_SIZE_SMALL}px;"
-                f"background: transparent; padding: 20px 8px;")
-            empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            self._list.addWidget(empty)
+            from ui.widgets.ui_kit import empty_state
+            self._list.addWidget(empty_state(
+                "bell", "All quiet",
+                "New devices, hosts going down and finished scans show up here.", width=220))
         else:
             for n in items:
                 self._list.addWidget(self._row(n))

@@ -86,12 +86,12 @@ class TraceroutePage(BasePage):
         self.body_layout.addLayout(row)
 
     def _style_button(self, running):
-        bg = Theme.DANGER if running else Theme.GRAD_ACCENT
+        bg = Theme.DANGER if running else Theme.ACCENT
         self.btn.setStyleSheet(
             f"QPushButton {{ background: {bg}; color: white; border: none;"
             f"border-radius: {Theme.RADIUS_CONTROL}px; padding: 10px 22px;"
             f"font-weight: 600; font-size: {Theme.FONT_SIZE_SMALL}px; }}"
-            f"QPushButton:hover {{ background: {bg}; }}")
+            f"QPushButton:hover {{ background: {Theme.DANGER_HOVER if running else Theme.ACCENT_HOVER}; }}")
 
     def _build_status(self):
         card = Card("")
@@ -110,6 +110,9 @@ class TraceroutePage(BasePage):
         row.addWidget(self.status_right)
         card.content_layout.addLayout(row)
         self.body_layout.addWidget(card)
+        from ui.widgets.ui_kit import InsightRow
+        self.findings = InsightRow(self.ask_ai)
+        self.body_layout.addWidget(self.findings)
 
     def _build_split(self):
         # Map left, hop list right - both on screen at the same time.
@@ -255,6 +258,7 @@ class TraceroutePage(BasePage):
             return
 
         self._ensure_home()
+        self.findings.set_items([])
         self._running = True
         self._resolved = None
         self._reached = False
@@ -404,12 +408,42 @@ class TraceroutePage(BasePage):
                     f"Stopped after {self._hop_count} hops")
             if self._hop_count == 0:
                 self._show_empty("No hops returned.")
+            self._update_findings()
             activity.add("Traceroute",
                          f"{self.input.text().strip()} \u00b7 "
                          f"{self._hop_count} hops", kind="success")
             self._finalize_map()
         self._worker = None
         self._stop()
+
+    def _update_findings(self):
+        target = self.input.text().strip()
+        hops = sorted(self._hops, key=lambda h: h["n"])
+        if not hops:
+            return
+        items = []
+        if self._reached:
+            items.append({"severity": "success", "text": f"Reached in {self._hop_count} hops", "detail": target,
+                          "question": f"Explain my traceroute to {target}. Is the path normal?"})
+        else:
+            items.append({"severity": "warning", "text": "Destination not reached", "detail": target,
+                          "question": f"My traceroute to {target} never reached it. Is that a problem?"})
+        first = hops[0]
+        if first["n"] == 1 and first["ms"] and first["ms"] > 10:
+            items.append({"severity": "warning", "text": "Slow first hop", "detail": f"{first['ms']} ms to router",
+                          "question": f"The first hop (my router) answers in {first['ms']} ms. Is my local network slow?"})
+        jumps = [(b["ms"] - a["ms"], b) for a, b in zip(hops, hops[1:]) if a["ms"] and b["ms"]]
+        if jumps:
+            jump, hop = max(jumps, key=lambda j: j[0])
+            if jump > 40:
+                where = hop.get("city") or hop["ip"]
+                items.append({"severity": "info", "text": f"+{jump:.0f} ms at hop {hop['n']}", "detail": where,
+                              "question": f"Latency jumps by {jump:.0f} ms at hop {hop['n']} ({where}). Why, and is it a problem?"})
+        hidden = self._hop_count - len(hops)
+        if hidden > 0:
+            items.append({"severity": "info", "text": f"{hidden} silent hop{'s' if hidden != 1 else ''}", "detail": "",
+                          "question": "Some traceroute hops show 'Request timed out'. Does that mean packets are lost?"})
+        self.findings.set_items(items)
 
     # -- Map --
     def _is_local(self, ip):
@@ -481,3 +515,8 @@ class TraceroutePage(BasePage):
     def on_leave(self):
         self._stop()
         super().on_leave()
+
+    def ai_context(self):
+        keys = ("n", "ip", "ms", "kind", "city")
+        return {"target": self.input.text().strip(), "resolved": self._resolved, "reached": self._reached,
+                "hops": [{k: h.get(k) for k in keys} for h in self._hops]}

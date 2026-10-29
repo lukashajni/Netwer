@@ -1,5 +1,8 @@
 """Ping a host and display live connectivity and latency results."""
 
+import re
+from collections import deque
+
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
     QComboBox,
@@ -14,6 +17,7 @@ from app.resources import Icons
 from app.theme import Theme
 from ui.pages.base_page import BasePage
 from ui.widgets.card import Card
+from ui.widgets.ui_kit import InsightRow, empty_state
 from ui.widgets.host_input import HostInput
 from ui.widgets.latency_chart import LatencyChart
 from ui.widgets.terminal_output import TerminalOutput
@@ -31,15 +35,19 @@ COUNT_OPTIONS = [
 class PingPage(BasePage):
     PAGE_TITLE = "Ping"
     PAGE_SUBTITLE = "Test connectivity and latency to any host"
+    AI_QUESTION = "Explain my ping results. Is this connection good?"
 
     def __init__(self, core, parent=None):
         super().__init__(core, parent)
+        self._recent = deque(maxlen=40)
 
         self._worker = None
         self._running = False
 
         self._build_toolbar()
         self._build_stats()
+        self.findings = InsightRow(self.ask_ai)
+        self.body_layout.addWidget(self.findings)
         self._build_results()
         self.body_layout.addStretch(1)
 
@@ -79,7 +87,7 @@ class PingPage(BasePage):
 
     def _style_run_button(self, running: bool):
         color = Theme.DANGER if running else Theme.ACCENT
-        hover = Theme.DANGER_HOVER if running else Theme.ACCENT_PURPLE
+        hover = Theme.DANGER_HOVER if running else Theme.ACCENT_HOVER
         self.btn_run.setStyleSheet(
             f"QPushButton {{ background: {color}; color: white; border: none;"
             f"border-radius: 8px; padding: 9px 20px;"
@@ -139,6 +147,10 @@ class PingPage(BasePage):
         out_card.header_layout.addWidget(self.sent_label)
 
         self.terminal = TerminalOutput()
+        self.terminal.hide()
+        self._replies_empty = empty_state("ping", "No replies yet",
+                                          "Enter a host and press Start to see every reply here.")
+        out_card.content_layout.addWidget(self._replies_empty)
         out_card.content_layout.addWidget(self.terminal)
         row.addWidget(out_card, 10)
 
@@ -158,6 +170,9 @@ class PingPage(BasePage):
 
     def _start(self):
         target = self.target_input.text().strip()
+        self._replies_empty.hide()
+        self.terminal.show()
+        self.findings.set_items([])
         if not target:
             self.terminal.append("Enter a target first", kind="error")
             return
@@ -218,6 +233,7 @@ class PingPage(BasePage):
         target = self.target_input.text().strip()
         ms = d.get("ms")
         is_up = d.get("status") == "ok"
+        self._recent.append(ms if is_up else None)
 
         # Notify only when watch mode detects a connectivity transition.
         prev = getattr(self, "_link_up", None)
@@ -257,6 +273,42 @@ class PingPage(BasePage):
         self._set_stat(self.stat_loss, f"{loss}", "%", loss_color)
 
         self.sent_label.setText(f"{d.get('sent', 0)} packets sent")
+        self._update_findings(target, d)
+
+    def _update_findings(self, target, d):
+        got = [x for x in self._recent if x is not None]
+        if len(self._recent) < 3:
+            return
+        items = []
+        if not got:
+            items.append({"severity": "danger", "text": "Host not responding", "detail": target,
+                          "question": f"Why does {target} not answer my ping?"})
+            self.findings.set_items(items)
+            return
+        avg, jitter, loss = d.get("avg") or 0, d.get("jitter", 0) or 0, d.get("loss", 0) or 0
+        if avg < 30:
+            sev, text = "success", "Latency excellent"
+        elif avg < 80:
+            sev, text = "info", "Latency good"
+        elif avg < 150:
+            sev, text = "warning", "Latency high"
+        else:
+            sev, text = "danger", "Very high latency"
+        items.append({"severity": sev, "text": text, "detail": f"{avg} ms avg",
+                      "question": f"My ping to {target} averages {avg} ms. Is that good, and what affects it?"})
+        if jitter > 30:
+            items.append({"severity": "warning", "text": "Unstable latency", "detail": f"jitter {jitter} ms",
+                          "question": f"My ping to {target} has {jitter} ms jitter. What causes that and how do I fix it?"})
+        else:
+            items.append({"severity": "success", "text": "Stable", "detail": f"jitter {jitter} ms",
+                          "question": "What is jitter and why does it matter for calls and games?"})
+        if loss > 0:
+            items.append({"severity": "danger" if loss >= 5 else "warning", "text": "Packet loss", "detail": f"{loss}%",
+                          "question": f"I lose {loss}% of packets when pinging {target}. Where could they be lost?"})
+        else:
+            items.append({"severity": "success", "text": "No packet loss", "detail": "",
+                          "question": "Explain my ping results. Is this connection good?"})
+        self.findings.set_items(items)
 
     @staticmethod
     def _latency_color(ms):
@@ -287,3 +339,11 @@ class PingPage(BasePage):
                 f"color: {Theme.TEXT_MUTED}; font-family: {Theme.FONT_DATA};"
                 f"font-size: 20px; font-weight: 600; background: transparent;")
         self.sent_label.setText("")
+
+    def ai_context(self):
+        def v(stat):
+            return re.sub(r"<[^>]+>", "", stat["value"].text()).strip()
+        return {"target": self.target_input.text().strip(), "running": self._running,
+                "current_ms": v(self.stat_current), "avg_ms": v(self.stat_avg),
+                "jitter_ms": v(self.stat_jitter), "loss_pct": v(self.stat_loss),
+                "sent": self.sent_label.text(), "recent_ms": list(self._recent)}

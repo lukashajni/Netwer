@@ -12,6 +12,7 @@ import unittest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import core.netwer_core as core
+import core.network as net
 
 
 class TestParsePortSpec(unittest.TestCase):
@@ -274,7 +275,7 @@ class TestTracerouteStopsAtDest(unittest.TestCase):
     def test_stops_at_destination(self):
         import subprocess as _sp
         real_popen = _sp.Popen
-        real_ghn = core.socket.gethostbyname
+        real_ghn = net.socket.gethostbyname
 
         class FakeProc:
             def __init__(self, lines):
@@ -286,13 +287,13 @@ class TestTracerouteStopsAtDest(unittest.TestCase):
                  " 2  203.0.113.9  10 ms",
                  " 3  8.8.8.8  20 ms",
                  " 4  1.2.3.4  30 ms"]     # must NOT be reported
-        core.socket.gethostbyname = lambda t: "8.8.8.8"
+        net.socket.gethostbyname = lambda t: "8.8.8.8"
         _sp.Popen = lambda *a, **k: FakeProc(lines)
         try:
             evs = list(core.traceroute_stream("8.8.8.8", max_hops=30))
         finally:
             _sp.Popen = real_popen
-            core.socket.gethostbyname = real_ghn
+            net.socket.gethostbyname = real_ghn
 
         hop_ips = [e.get("ip") for e in evs if "ip" in e]
         self.assertIn("8.8.8.8", hop_ips)
@@ -304,7 +305,7 @@ class TestTracerouteStopsAtDest(unittest.TestCase):
 class TestTracerouteAuto(unittest.TestCase):
     def _run(self, lines, dest, auto):
         import subprocess as _sp
-        real_popen, real_ghn = _sp.Popen, core.socket.gethostbyname
+        real_popen, real_ghn = _sp.Popen, net.socket.gethostbyname
 
         class FP:
             def __init__(self, l):
@@ -314,12 +315,12 @@ class TestTracerouteAuto(unittest.TestCase):
             def kill(self):
                 pass
 
-        core.socket.gethostbyname = lambda t: dest
+        net.socket.gethostbyname = lambda t: dest
         _sp.Popen = lambda *a, **k: FP(lines)
         try:
             return list(core.traceroute_stream("x", max_hops=30, auto=auto))
         finally:
-            _sp.Popen, core.socket.gethostbyname = real_popen, real_ghn
+            _sp.Popen, net.socket.gethostbyname = real_popen, real_ghn
 
     def test_auto_stops_on_consecutive_timeouts(self):
         lines = ["  1  1 ms  10.0.0.1"] + \
@@ -358,10 +359,12 @@ class TestMapClusterFit(unittest.TestCase):
             {"n": 2, "ip": "b", "city": "Vienna", "lat": 48.2, "lon": 16.4,
              "ms": 9, "kind": "transit"},
         ])
-        mw._fit(len(mw._hops))
-        # Tight cluster must stay at a comfortable regional span, not zoom in.
-        self.assertFalse(mw._world_mode)
-        self.assertGreaterEqual(mw._span, 30)
+        mw._fit()
+        # a tight cluster frames both cities instead of showing the whole world
+        c_lon, c_lat, span = mw._target
+        self.assertTrue(45.8 <= c_lat <= 48.2)
+        self.assertTrue(16.0 <= c_lon <= 16.4)
+        self.assertTrue(1.5 <= span < 60)
 
 
 class TestHopHostname(unittest.TestCase):
@@ -411,43 +414,25 @@ class TestNetworkHelpers(unittest.TestCase):
                       core.friendly_error("Access is denied").lower())
 
 
-class TestIpconfigParser(unittest.TestCase):
-    SAMPLE = """
-Windows IP Configuration
+class TestWindowsAdapterConfig(unittest.TestCase):
+    # ipconfig parsing was replaced by the IP Helper API in core/windows_network.py
 
-Wireless LAN adapter Wi-Fi:
-
-   Description . . . . . . . . . . . : Intel Wi-Fi 6 AX201
-   Physical Address. . . . . . . . . : 98-AF-65-C0-C8-B2
-   IPv4 Address. . . . . . . . . . . : 192.168.0.238(Preferred)
-   Subnet Mask . . . . . . . . . . . : 255.255.255.0
-   Default Gateway . . . . . . . . . : 192.168.0.1
-   DNS Servers . . . . . . . . . . . : 192.168.0.1
-"""
-
-    def test_parses_wifi_block(self):
-        import subprocess
-        orig = subprocess.run
-
-        class R:
-            def __init__(self, o):
-                self.stdout = o
-
-        def fake(*a, **k):
-            if a and a[0] == ["ipconfig", "/all"]:
-                return R(TestIpconfigParser.SAMPLE)
-            return orig(*a, **k)
-
-        subprocess.run = fake
+    def test_config_comes_from_windows_api(self):
+        from core import windows_network
+        orig = windows_network.active_network_config
+        windows_network.active_network_config = lambda: {"adapter": "Wi-Fi", "ip": "192.168.0.238"}
         try:
             cfg = core._windows_ipconfig_config()
         finally:
-            subprocess.run = orig
+            windows_network.active_network_config = orig
         self.assertEqual(cfg["ip"], "192.168.0.238")
-        self.assertEqual(cfg["gateway"], "192.168.0.1")
-        self.assertEqual(cfg["mac"], "98:AF:65:C0:C8:B2")
-        self.assertEqual(cfg["prefix"], 24)
         self.assertEqual(cfg["adapter"], "Wi-Fi")
+
+    def test_link_speed_format(self):
+        from core.windows_network import _format_link_speed
+        self.assertEqual(_format_link_speed(1_000_000_000), "1 Gbps")
+        self.assertEqual(_format_link_speed(866_700_000, 433_300_000), "866.7 Mbps")
+        self.assertEqual(_format_link_speed(0), "")
 
 
 class TestNetworkRadar(unittest.TestCase):
@@ -702,16 +687,15 @@ class TestStaticMapClicks(unittest.TestCase):
         self.assertEqual(seen.get("ip"), "192.168.0.45")
 
     def test_map_labels_devices_by_name(self):
-        from PyQt6.QtWidgets import QLabel
         from ui.widgets.network_map import NetworkMap
         nm = NetworkMap()
         nm.set_topology("192.168.0.1", [
             {"ip": "192.168.0.45", "hostname": "Lukas-iPhone",
              "vendor": "Apple (private address)", "kind": "dev_phone"}],
             "TP-Link", True)
-        texts = [l.text() for l in nm.findChildren(QLabel) if l.text().strip()]
-        self.assertIn("Lukas-iPhone", texts)
-        self.assertIn("192.168.0.45", texts)
+        nm.resize(500, 300)
+        titles = nm.node_titles()
+        self.assertIn(("Lukas-iPhone", "192.168.0.45"), titles)
 
 
 class TestPolishFixes(unittest.TestCase):
@@ -741,53 +725,15 @@ class TestPolishFixes(unittest.TestCase):
         got = ch._plot.backgroundBrush().color().name().lower().lstrip("#")
         self.assertEqual(got, want)
 
-    def test_native_adapter_details_full_addressing(self):
-        import subprocess, core.netwer_core as core
-        sample = ("\nWireless LAN adapter Wi-Fi:\n\n"
-                  "   Description . . . . . . . . . . . : Intel(R) Wireless-AC 9560\n"
-                  "   Physical Address. . . . . . . . . : 98-AF-65-C0-C8-B2\n"
-                  "   DHCP Enabled. . . . . . . . . . . : Yes\n"
-                  "   IPv4 Address. . . . . . . . . . . : 192.168.0.238(Preferred)\n"
-                  "   Subnet Mask . . . . . . . . . . . : 255.255.255.0\n"
-                  "   Default Gateway . . . . . . . . . : 192.168.0.1\n"
-                  "   DNS Servers . . . . . . . . . . . : 192.168.0.1\n"
-                  "                                       8.8.8.8\n")
-
-        class R:
-            def __init__(self, o):
-                self.stdout = o
-
-        orig = subprocess.run
-        subprocess.run = lambda a, **k: R(sample) if a[:2] == ["ipconfig", "/all"] else R("")
+    def test_native_adapter_details_use_windows_api(self):
+        from core import windows_network
+        orig = windows_network.adapter_details
+        windows_network.adapter_details = lambda name: {"name": name, "ipv4": "192.168.0.238", "dhcp": "Enabled"}
         try:
             d = core._windows_adapter_details_native("Wi-Fi")
         finally:
-            subprocess.run = orig
+            windows_network.adapter_details = orig
         self.assertEqual(d["ipv4"], "192.168.0.238")
-        self.assertEqual(d["subnet_mask"], "255.255.255.0")
-        self.assertEqual(d["prefix"], 24)
-        self.assertEqual(d["gateway"], "192.168.0.1")
-        self.assertEqual(d["dns"], "192.168.0.1, 8.8.8.8")
-        self.assertEqual(d["status"], "Up")
-
-    def test_native_adapter_details_parse(self):
-        import subprocess, core.netwer_core as core
-        sample = ("\nWireless LAN adapter Wi-Fi:\n\n"
-                  "   Description . . . . . . . . . . . : Intel(R) Wi-Fi 6 AX201\n"
-                  "   Physical Address. . . . . . . . . : 98-AF-65-C0-C8-B2\n"
-                  "   DHCP Enabled. . . . . . . . . . . : Yes\n")
-
-        class R:
-            def __init__(self, o):
-                self.stdout = o
-
-        orig = subprocess.run
-        subprocess.run = lambda a, **k: R(sample) if a[:2] == ["ipconfig", "/all"] else R("")
-        try:
-            d = core._windows_adapter_details_native("Wi-Fi")
-        finally:
-            subprocess.run = orig
-        self.assertEqual(d["description"], "Intel(R) Wi-Fi 6 AX201")
         self.assertEqual(d["dhcp"], "Enabled")
 
 

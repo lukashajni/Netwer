@@ -22,6 +22,7 @@ from app.resources import Icons
 from app.theme import Theme
 from ui.pages.base_page import BasePage
 from ui.widgets.card import Card
+from ui.widgets.ui_kit import InsightRow
 from ui.widgets.progress_bar import ProgressBar
 from workers import StreamWorker
 
@@ -42,6 +43,7 @@ def _device_display_name(dev: dict) -> str:
 class PingSweepPage(BasePage):
     PAGE_TITLE = "Ping Sweep"
     PAGE_SUBTITLE = "Discover every device on your local network"
+    AI_QUESTION = "Who are the devices found by the ping sweep, and is anything unexpected?"
 
     # Table column widths (px), Hostname flexes.
     COL_DOT = 30
@@ -65,6 +67,8 @@ class PingSweepPage(BasePage):
 
         self._build_toolbar()
         self._build_progress()
+        self.findings = InsightRow(self.ask_ai)
+        self.body_layout.addWidget(self.findings)
         self._build_table()
         self.body_layout.addStretch(1)
 
@@ -129,7 +133,7 @@ class PingSweepPage(BasePage):
 
     def _style_scan_button(self, running: bool):
         color = Theme.DANGER if running else Theme.ACCENT
-        hover = Theme.DANGER_HOVER if running else Theme.ACCENT_PURPLE
+        hover = Theme.DANGER_HOVER if running else Theme.ACCENT_HOVER
         self.btn_scan.setStyleSheet(
             f"QPushButton {{ background: {color}; color: white; border: none;"
             f"border-radius: 8px; padding: 9px 20px;"
@@ -419,6 +423,7 @@ class PingSweepPage(BasePage):
             self._start()
 
     def _start(self):
+        self.findings.set_items([])
         self._running = True
         self._failed = False
         self._cancel_requested = False
@@ -482,7 +487,7 @@ class PingSweepPage(BasePage):
             notifications.notify_scan_done(
                 "Network scan complete",
                 f"{found} device{'s' if found != 1 else ''} found")
-            self._check_new_devices()
+            self._update_findings(self._check_new_devices())
         self._worker = None
         self._stop()
 
@@ -509,6 +514,26 @@ class PingSweepPage(BasePage):
         # Update the baseline with everything seen so far.
         store.set_setting("known_device_macs",
                           sorted(known | current))
+        return new_devices if known else []
+
+    def _update_findings(self, new_devices):
+        n = len(self._devices)
+        items = [{"severity": "info", "text": f"{n} device{'s' if n != 1 else ''} online", "detail": "",
+                  "question": "Who are the devices found by the ping sweep, and is anything unexpected?"}]
+        if new_devices:
+            names = ", ".join(_device_display_name(d) for d in new_devices[:3])
+            items.append({"severity": "warning", "text": f"{len(new_devices)} new", "detail": names,
+                          "question": f"These devices are new on my network: {names}. What could they be and are they safe?"})
+        vendors = [(d.get("vendor") or "").lower() for d in self._devices]
+        unknown = sum(1 for v in vendors if not v or v in ("unknown", "?"))
+        private = sum(1 for v in vendors if "private" in v or "random" in v)
+        if unknown:
+            items.append({"severity": "warning", "text": f"{unknown} unknown maker", "detail": "",
+                          "question": "Some devices from my ping sweep have no known manufacturer. How can I find out what they are?"})
+        if private:
+            items.append({"severity": "info", "text": f"{private} private MAC", "detail": "",
+                          "question": "What does a private (randomized) MAC address mean on my network?"})
+        self.findings.set_items(items if n else [])
 
     # -- Stream events --
     def _on_event(self, d: dict):
@@ -645,3 +670,8 @@ class PingSweepPage(BasePage):
                          kind="success")
         except Exception as e:
             self.progress_label.setText(f"Export failed: {e}")
+
+    def ai_context(self):
+        keys = ("ip", "hostname", "vendor", "kind")
+        return {"devices_found": len(self._devices),
+                "devices": [{k: d.get(k) for k in keys if d.get(k)} for d in self._devices[:60]]}

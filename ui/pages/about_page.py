@@ -12,45 +12,50 @@ from PyQt6.QtWidgets import (
     QMessageBox,
     QPushButton,
     QVBoxLayout,
-    QWidget,
 )
 
 from app.resources import Icons
-from app.theme import Theme
+from app.theme import Theme, card_bg, card_border, input_bg
 from ui.pages.base_page import BasePage
-from ui.widgets.globe_3d import Globe3D
 
-APP_VERSION = "v4.0"
-AUTHOR = "Lukas Hajneman"
-GITHUB_URL = "https://github.com/RomFishy/Netwer"
+APP_VERSION = "v5.0"
+AUTHOR = "Netwer Team"
+TEAM = "Lukas Hajneman, Jan Sven Bukovski and Erik Celjak"
+GITHUB_URL = "https://github.com/lukashajni/Netwer"
 
 DESCRIPTION = (
-    "NETWER is an all-in-one network toolkit for diagnostics, monitoring "
-    "and analysis. It brings live traffic monitoring, device discovery, "
-    "connectivity testing and professional reporting into a single desktop "
-    "application."
+    "NETWER is a free network toolkit for Windows and Linux. It monitors your traffic, finds the "
+    "devices on your network, captures and decodes packets like Wireshark, and explains what it "
+    "finds in plain language with Netwer AI, so you don't have to be a network engineer to fix it."
 )
 
 TECH_STACK = [
     ("Python 3.13", Theme.ACCENT),
     ("PyQt6", Theme.SUCCESS),
     ("PyQtGraph", Theme.ACCENT_PURPLE),
+    ("scapy", Theme.WARNING),
     ("ReportLab", Theme.WARNING),
     ("psutil", Theme.ACCENT),
     ("qtawesome", Theme.SUCCESS),
 ]
 
 FEATURES = [
-    ("monitor", "Live monitoring"),
-    ("ping_sweep", "Device discovery"),
-    ("speedtest", "Speed testing"),
-    ("report", "PDF reports"),
+    ("monitor", "Live monitoring", "Speed, latency and packet loss, recorded while Netwer runs."),
+    ("capture", "Packet capture", "Live capture, display filters, streams and .pcap files."),
+    ("ai", "Netwer AI", "Reads your results and explains them in your language."),
+    ("ping_sweep", "Device discovery", "Every device on your network, with maker and open ports."),
+    ("resources", "Network health", "Finds what is wrong: adapter, router, internet or DNS."),
+    ("report", "PDF reports", "One click report of your network for school or work."),
 ]
 
-LICENSES = """NETWER uses the following open-source components:
+LICENSES = """NETWER is free software under the GNU GPL v3.
+
+It uses these open-source components:
 
 • PyQt6 — Riverbank Computing (GPL v3 / Commercial)
 • PyQtGraph — MIT License
+• scapy — GPL v2
+• Npcap — Npcap License (installed separately on Windows)
 • ReportLab — BSD License
 • psutil — BSD License
 • qtawesome — MIT License
@@ -62,228 +67,91 @@ Full license texts are available from each project's website."""
 
 class AboutPage(BasePage):
     PAGE_TITLE = "About"
-    PAGE_SUBTITLE = "About NETWER"
+    PAGE_SUBTITLE = "Version, features and the people behind NETWER"
 
     def __init__(self, core, parent=None):
         super().__init__(core, parent)
+        self.body_layout.addWidget(self._build_hero())
+        self.body_layout.addLayout(self._build_stats())
+        self.body_layout.addLayout(self._build_features())
+        self.body_layout.addWidget(self._build_footer())
+        self.body_layout.addStretch(1)
 
-        shell = QFrame()
-        shell.setObjectName("AboutShell")
-        shell.setStyleSheet(
-            f"#AboutShell {{ background: {Theme.BG_CARD};"
-            f"border: 1px solid {Theme.BORDER};"
-            f"border-radius: {Theme.RADIUS_CARD}px; }}"
-        )
-        shell_lay = QVBoxLayout(shell)
-        shell_lay.setContentsMargins(0, 0, 0, 0)
-        shell_lay.setSpacing(0)
+    def _build_hero(self):
+        hero = QFrame()
+        hero.setObjectName("AboutHero")
+        hero.setStyleSheet(
+            f"#AboutHero {{ background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 {Theme.BG_ELEVATED},"
+            f"stop:1 {Theme.GLASS_CARD}); border: 1px solid {Theme.GLASS_BORDER_HI};"
+            f"border-radius: {Theme.RADIUS_CARD}px; }} #AboutHero QLabel {{ background: transparent; }}")
+        lay = QHBoxLayout(hero)
+        lay.setContentsMargins(26, 22, 26, 22)
+        lay.setSpacing(26)
 
-        shell_lay.addWidget(self._build_main_row(), 1)
-        shell_lay.addWidget(self._divider())
-        shell_lay.addWidget(self._build_features())
-        shell_lay.addWidget(self._divider())
-        shell_lay.addWidget(self._build_footer())
-
-        self.body_layout.addWidget(shell)
-
-    def _divider(self):
-        line = QFrame()
-        line.setFixedHeight(1)
-        line.setStyleSheet(f"background: {Theme.BORDER}; border: none;")
-        return line
-
-    def _build_main_row(self):
-        row = QWidget()
-        row.setStyleSheet("background: transparent;")
-        lay = QHBoxLayout(row)
-        lay.setContentsMargins(0, 0, 0, 0)
-        lay.setSpacing(0)
-
-        lay.addWidget(self._build_brand_panel(), 10)
-        lay.addWidget(self._build_info_panel(), 12)
-        return row
-
-    def _build_brand_panel(self):
-        panel = QFrame()
-        panel.setObjectName("BrandPanel")
-        panel.setStyleSheet(
-            f"#BrandPanel {{ background: {Theme.BG_CARD};"
-            f"border: none; border-top-left-radius: {Theme.RADIUS_CARD}px; }}"
-            f"#BrandPanel QLabel {{ background: transparent; }}"
-        )
-        lay = QVBoxLayout(panel)
-        lay.setContentsMargins(20, 24, 20, 24)
-        lay.setSpacing(0)
-        lay.setAlignment(Qt.AlignmentFlag.AlignCenter)
-
-        self.globe = Globe3D(250)
-        lay.addWidget(self.globe, alignment=Qt.AlignmentFlag.AlignCenter)
-
+        brand = QVBoxLayout()
+        brand.setSpacing(6)
+        logo = QLabel()
+        logo.setFixedSize(84, 84)
+        logo.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        logo.setPixmap(Icons.pixmap("globe", 42, "#ffffff"))
+        logo.setStyleSheet(f"background: {Theme.GRAD_ACCENT}; border-radius: 22px;")
+        brand.addWidget(logo, 0, Qt.AlignmentFlag.AlignHCenter)
         name = QLabel("NETWER")
-        name.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        name.setStyleSheet(
-            f"color: {Theme.TEXT_PRIMARY}; font-family: {Theme.FONT_FAMILY};"
-            f"font-size: 25px; font-weight: 600; letter-spacing: 8px;"
-            f"padding-top: 6px;")
-        lay.addWidget(name)
+        name.setStyleSheet(f"color: {Theme.TEXT_PRIMARY}; font-size: 22px; font-weight: 700; letter-spacing: 6px;")
+        brand.addWidget(name, 0, Qt.AlignmentFlag.AlignHCenter)
+        ver = QLabel(f"{APP_VERSION}  ·  Network Diagnostic Suite")
+        ver.setStyleSheet(f"color: {Theme.TEXT_MUTED}; font-size: {Theme.FONT_SIZE_TINY}px;")
+        brand.addWidget(ver, 0, Qt.AlignmentFlag.AlignHCenter)
+        lay.addLayout(brand)
 
-        ver = QLabel(APP_VERSION)
-        ver.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        ver.setStyleSheet(
-            f"color: {Theme.ACCENT}; font-family: {Theme.FONT_DATA};"
-            f"font-size: {Theme.FONT_SIZE_SMALL}px; letter-spacing: 2px;")
-        lay.addWidget(ver)
-
-        tagline = QLabel("Network Diagnostic Suite")
-        tagline.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        tagline.setStyleSheet(
-            f"color: {Theme.TEXT_FAINT}; font-size: {Theme.FONT_SIZE_TINY}px;"
-            f"padding-top: 8px;")
-        lay.addWidget(tagline)
-
-        status = QLabel("\u25CF  NETWER is running")
-        status.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        status.setStyleSheet(
-            f"color: {Theme.SUCCESS}; font-size: {Theme.FONT_SIZE_TINY}px;"
-            f"background: rgba(62, 201, 138, 0.08);"
-            f"border: 1px solid rgba(62, 201, 138, 0.25);"
-            f"border-radius: 12px; padding: 4px 12px; margin-top: 12px;")
-        wrap = QHBoxLayout()
-        wrap.addStretch()
-        wrap.addWidget(status)
-        wrap.addStretch()
-        lay.addLayout(wrap)
-
-        return panel
-
-    def _build_info_panel(self):
-        panel = QWidget()
-        panel.setStyleSheet("background: transparent;")
-        lay = QVBoxLayout(panel)
-        lay.setContentsMargins(26, 24, 26, 24)
-        lay.setSpacing(0)
-
-        lay.addWidget(self._section_label("About"))
-
+        info = QVBoxLayout()
+        info.setSpacing(10)
         desc = QLabel(DESCRIPTION)
         desc.setWordWrap(True)
-        desc.setStyleSheet(
-            f"color: {Theme.TEXT_SECONDARY}; font-family: {Theme.FONT_FAMILY};"
-            f"font-size: {Theme.FONT_SIZE_SMALL}px; line-height: 170%;"
-            f"background: transparent; padding-bottom: 16px;")
-        lay.addWidget(desc)
-
-        lay.addWidget(self._section_label("Built with"))
-
+        desc.setStyleSheet(f"color: {Theme.TEXT_BODY}; font-size: {Theme.FONT_SIZE_BODY}px; line-height: 160%;")
+        info.addWidget(desc)
         stack = QHBoxLayout()
         stack.setSpacing(6)
-        for name, color in TECH_STACK:
-            stack.addWidget(self._badge(name, color))
+        for tech, color in TECH_STACK:
+            stack.addWidget(self._badge(tech, color))
         stack.addStretch()
-        stack_holder = QWidget()
-        stack_holder.setStyleSheet("background: transparent;")
-        stack_holder.setLayout(stack)
-        lay.addWidget(stack_holder)
-        lay.addSpacing(16)
+        info.addLayout(stack)
+        info.addStretch()
+        lay.addLayout(info, 1)
+        return hero
 
-        stats = QGridLayout()
-        stats.setSpacing(10)
-        stat_items = [
-            ("Modules", self._count_modules()),
-            ("Lines of code", self._count_lines()),
-            ("Vendor database", self._count_vendors()),
-            ("Pages", str(self._count_pages())),
-        ]
-        for i, (label, value) in enumerate(stat_items):
-            stats.addWidget(self._stat_tile(label, value), i // 2, i % 2)
-        stats_holder = QWidget()
-        stats_holder.setStyleSheet("background: transparent;")
-        stats_holder.setLayout(stats)
-        lay.addWidget(stats_holder)
-
-        lay.addStretch()
-        return panel
-
-    def _section_label(self, text):
-        lbl = QLabel(text)
-        lbl.setStyleSheet(
-            f"color: {Theme.TEXT_BODY}; font-family: {Theme.FONT_FAMILY};"
-            f"font-size: {Theme.FONT_SIZE_BODY}px; font-weight: 500;"
-            f"background: transparent; padding-bottom: 8px;")
-        return lbl
-
-    def _badge(self, text, color):
-        lbl = QLabel(text)
-        lbl.setStyleSheet(
-            f"color: {color}; font-family: {Theme.FONT_FAMILY};"
-            f"font-size: {Theme.FONT_SIZE_TINY}px;"
-            f"background: {Theme.BG_ELEVATED};"
-            f"border: 1px solid {Theme.BORDER}; border-radius: 6px;"
-            f"padding: 4px 10px;")
-        return lbl
-
-    def _stat_tile(self, label, value):
-        tile = QFrame()
-        tile.setObjectName("StatTile")
-        tile.setStyleSheet(
-            f"#StatTile {{ background: {Theme.BG_ELEVATED};"
-            f"border: 1px solid {Theme.BORDER}; border-radius: 8px; }}"
-            f"#StatTile QLabel {{ background: transparent; border: none; }}")
-        lay = QVBoxLayout(tile)
-        lay.setContentsMargins(12, 9, 12, 9)
-        lay.setSpacing(1)
-
-        label_widget = QLabel(label)
-        label_widget.setStyleSheet(
-            f"color: {Theme.TEXT_MUTED}; font-size: {Theme.FONT_SIZE_TINY}px;")
-        lay.addWidget(label_widget)
-
-        v = QLabel(str(value))
-        v.setStyleSheet(
-            f"color: {Theme.TEXT_PRIMARY}; font-family: {Theme.FONT_DATA};"
-            f"font-size: 15px; font-weight: 600;")
-        lay.addWidget(v)
-        return tile
+    def _build_stats(self):
+        row = QHBoxLayout()
+        row.setSpacing(Theme.GAP)
+        for label, value in (("Modules", self._count_modules()), ("Lines of code", self._count_lines()),
+                             ("Vendor database", self._count_vendors()), ("Pages", str(self._count_pages()))):
+            row.addWidget(self._stat_tile(label, value))
+        return row
 
     def _build_features(self):
-        holder = QWidget()
-        holder.setStyleSheet("background: transparent;")
-        lay = QHBoxLayout(holder)
-        lay.setContentsMargins(26, 16, 26, 16)
-        lay.setSpacing(10)
-
-        for icon_name, text in FEATURES:
-            item = QWidget()
-            item.setStyleSheet("background: transparent;")
-            h = QHBoxLayout(item)
-            h.setContentsMargins(0, 0, 0, 0)
-            h.setSpacing(8)
-            icon = QLabel()
-            icon.setPixmap(Icons.pixmap(icon_name, 15, Theme.ACCENT))
-            icon.setStyleSheet("background: transparent;")
-            h.addWidget(icon)
-            lbl = QLabel(text)
-            lbl.setStyleSheet(
-                f"color: {Theme.TEXT_SECONDARY};"
-                f"font-size: {Theme.FONT_SIZE_TINY}px; background: transparent;")
-            h.addWidget(lbl)
-            h.addStretch()
-            lay.addWidget(item, 1)
-
-        return holder
+        grid = QGridLayout()
+        grid.setSpacing(Theme.GAP)
+        for i, (icon, title, text) in enumerate(FEATURES):
+            grid.addWidget(self._feature(icon, title, text), i // 3, i % 3)
+        return grid
 
     def _build_footer(self):
-        holder = QWidget()
-        holder.setStyleSheet("background: transparent;")
-        lay = QHBoxLayout(holder)
-        lay.setContentsMargins(26, 14, 26, 14)
+        card = QFrame()
+        card.setObjectName("AboutFooter")
+        card.setStyleSheet(f"#AboutFooter {{ background: {card_bg()}; border: 1px solid {card_border()};"
+                           f"border-radius: {Theme.RADIUS_CARD}px; }} #AboutFooter QLabel {{ background: transparent; }}")
+        lay = QHBoxLayout(card)
+        lay.setContentsMargins(20, 14, 20, 14)
         lay.setSpacing(8)
-
-        copyright_lbl = QLabel(f"\u00A9 2026 {AUTHOR}  \u00B7  All rights reserved")
-        copyright_lbl.setStyleSheet(
-            f"color: {Theme.TEXT_FAINT}; font-size: {Theme.FONT_SIZE_TINY}px;"
-            f"background: transparent;")
-        lay.addWidget(copyright_lbl)
+        col = QVBoxLayout()
+        col.setSpacing(2)
+        team = QLabel(f"Made by {TEAM}")
+        team.setStyleSheet(f"color: {Theme.TEXT_BODY}; font-size: {Theme.FONT_SIZE_SMALL}px;")
+        col.addWidget(team)
+        lic = QLabel(f"© 2026 {AUTHOR}  ·  Free software under the GNU GPL v3")
+        lic.setStyleSheet(f"color: {Theme.TEXT_FAINT}; font-size: {Theme.FONT_SIZE_TINY}px;")
+        col.addWidget(lic)
+        lay.addLayout(col)
         lay.addStretch()
 
         btn_github = self._footer_button("github", "GitHub")
@@ -297,8 +165,58 @@ class AboutPage(BasePage):
         btn_updates = self._footer_button("refresh", "Check for updates")
         btn_updates.clicked.connect(self._check_updates)
         lay.addWidget(btn_updates)
+        return card
 
-        return holder
+    def _badge(self, text, color):
+        lbl = QLabel(text)
+        lbl.setFixedHeight(26)
+        lbl.setStyleSheet(
+            f"color: {color}; font-size: {Theme.FONT_SIZE_TINY}px; background: {input_bg()};"
+            f"border: 1px solid {Theme.GLASS_BORDER}; border-radius: 6px; padding: 4px 10px;")
+        return lbl
+
+    def _stat_tile(self, label, value):
+        tile = QFrame()
+        tile.setObjectName("StatTile")
+        tile.setStyleSheet(
+            f"#StatTile {{ background: {card_bg()}; border: 1px solid {card_border()};"
+            f"border-radius: {Theme.RADIUS_CARD}px; }} #StatTile QLabel {{ background: transparent; border: none; }}")
+        lay = QVBoxLayout(tile)
+        lay.setContentsMargins(16, 12, 16, 12)
+        lay.setSpacing(2)
+        label_widget = QLabel(label)
+        label_widget.setStyleSheet(f"color: {Theme.TEXT_MUTED}; font-size: {Theme.FONT_SIZE_SMALL}px;")
+        lay.addWidget(label_widget)
+        v = QLabel(str(value))
+        v.setStyleSheet(f"color: {Theme.TEXT_PRIMARY}; font-family: {Theme.FONT_MONO}; font-size: 20px; font-weight: 600;")
+        lay.addWidget(v)
+        return tile
+
+    def _feature(self, icon, title, text):
+        card = QFrame()
+        card.setObjectName("Feature")
+        card.setStyleSheet(f"#Feature {{ background: {card_bg()}; border: 1px solid {card_border()};"
+                           f"border-radius: {Theme.RADIUS_CARD}px; }} #Feature QLabel {{ background: transparent; }}")
+        lay = QHBoxLayout(card)
+        lay.setContentsMargins(16, 14, 16, 14)
+        lay.setSpacing(14)
+        ic = QLabel()
+        ic.setFixedSize(38, 38)
+        ic.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        ic.setPixmap(Icons.pixmap(icon, 17, Theme.ACCENT))
+        ic.setStyleSheet(f"background: {input_bg()}; border: 1px solid {Theme.GLASS_BORDER}; border-radius: 10px;")
+        lay.addWidget(ic, 0, Qt.AlignmentFlag.AlignTop)
+        col = QVBoxLayout()
+        col.setSpacing(3)
+        t = QLabel(title)
+        t.setStyleSheet(f"color: {Theme.TEXT_PRIMARY}; font-size: {Theme.FONT_SIZE_BODY}px; font-weight: 600;")
+        col.addWidget(t)
+        d = QLabel(text)
+        d.setWordWrap(True)
+        d.setStyleSheet(f"color: {Theme.TEXT_MUTED}; font-size: {Theme.FONT_SIZE_SMALL}px;")
+        col.addWidget(d)
+        lay.addLayout(col, 1)
+        return card
 
     def _footer_button(self, icon_name, text):
         btn = QPushButton(f"  {text}")
@@ -364,7 +282,7 @@ class AboutPage(BasePage):
                              if f.endswith(".py") and f != "__init__.py")
             return str(count)
         except Exception:
-            return "\u2014"
+            return "—"
 
     def _count_lines(self):
         try:
@@ -382,15 +300,15 @@ class AboutPage(BasePage):
                             total += sum(1 for _ in fh)
                     except OSError:
                         continue
-            return f"~{total:,}".replace(",", ",")
+            return f"~{total:,}"
         except Exception:
-            return "\u2014"
+            return "—"
 
     def _count_vendors(self):
         try:
             return f"{len(self.core.OUI_TABLE)} vendors"
         except Exception:
-            return "\u2014"
+            return "—"
 
     def _count_pages(self):
         try:
@@ -398,4 +316,4 @@ class AboutPage(BasePage):
             return sum(1 for f in os.listdir(root)
                        if f.endswith("_page.py") and f != "base_page.py")
         except Exception:
-            return "\u2014"
+            return "—"

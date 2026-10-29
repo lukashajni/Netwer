@@ -1,8 +1,12 @@
 """NETWER — NetworkMap widget"""
 
-from PyQt6.QtCore import Qt, pyqtSignal, QPoint, QPointF
-from PyQt6.QtGui import QPainter, QColor, QPen
-from PyQt6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel
+import math
+import random
+import time
+
+from PyQt6.QtCore import QPointF, QRectF, Qt, QTimer, pyqtSignal
+from PyQt6.QtGui import QColor, QFont, QPainter, QPen
+from PyQt6.QtWidgets import QWidget
 
 from app.theme import Theme
 from app.resources import Icons
@@ -49,246 +53,237 @@ def device_display_name(dev: dict) -> str:
     return label or "Unknown device"
 
 
-class _LabeledIcon(QWidget):
-    """Icon with title (+ optional subtitle) to its right."""
-
-    TEXT_WIDTH = 120   # room for "MikroTik" + an IP address
-
-    def __init__(self, icon_name, icon_color, title, subtitle="",
-                 subtitle_mono=False, title_color=None, icon_size=32, parent=None):
-        super().__init__(parent)
-        self.setStyleSheet("background: transparent;")
-
-        lay = QHBoxLayout(self)
-        lay.setContentsMargins(0, 0, 0, 0)
-        lay.setSpacing(9)
-
-        # Mirror spacer: same width as the text block, on the left.
-        left_spacer = QWidget()
-        left_spacer.setFixedWidth(self.TEXT_WIDTH)
-        left_spacer.setStyleSheet("background: transparent;")
-        lay.addWidget(left_spacer)
-
-        self.icon_label = QLabel()
-        self.icon_label.setFixedSize(icon_size, icon_size)
-        self.icon_label.setStyleSheet("background: transparent;")
-        lay.addWidget(self.icon_label)
-
-        text_holder = QWidget()
-        text_holder.setFixedWidth(self.TEXT_WIDTH)
-        text_holder.setStyleSheet("background: transparent;")
-        text_box = QVBoxLayout(text_holder)
-        text_box.setSpacing(0)
-        text_box.setContentsMargins(0, 0, 0, 0)
-        text_box.setAlignment(Qt.AlignmentFlag.AlignVCenter)
-
-        self.title_label = QLabel(title)
-        self.title_label.setStyleSheet("background: transparent;")
-        text_box.addWidget(self.title_label)
-
-        self.subtitle_label = None
-        if subtitle:
-            self.subtitle_label = QLabel(subtitle)
-            self.subtitle_label.setStyleSheet("background: transparent;")
-            text_box.addWidget(self.subtitle_label)
-
-        lay.addWidget(text_holder)
-
-        self._icon_name = icon_name
-        self._subtitle_mono = subtitle_mono
-        self.set_colors(icon_color, title_color or Theme.TEXT_BODY)
-
-    def set_colors(self, icon_color, title_color):
-        self.icon_label.setPixmap(Icons.pixmap(self._icon_name,
-                                               self.icon_label.width(), icon_color))
-        self.title_label.setStyleSheet(
-            f"color: {title_color}; font-family: {Theme.FONT_FAMILY};"
-            f"font-size: 12px; font-weight: 600; background: transparent;"
-        )
-        if self.subtitle_label:
-            font = Theme.FONT_MONO if self._subtitle_mono else Theme.FONT_FAMILY
-            self.subtitle_label.setStyleSheet(
-                f"color: {Theme.TEXT_MUTED}; font-family: '{font}';"
-                f"font-size: 11px; background: transparent;"
-            )
-
-    def set_title(self, text):
-        self.title_label.setText(text)
-
-    def set_subtitle(self, text):
-        if self.subtitle_label:
-            self.subtitle_label.setText(text)
-
-
-class _DeviceNode(QWidget):
-    """Icon centered above a name + IP, stacked below - used for devices."""
-
-    def __init__(self, icon_name, icon_color, name, ip, icon_size=28,
-                 device=None, on_click=None, parent=None):
-        super().__init__(parent)
-        self.setStyleSheet("background: transparent;")
-        self._device = device
-        self._on_click = on_click
-        if on_click is not None:
-            self.setCursor(Qt.CursorShape.PointingHandCursor)
-        lay = QVBoxLayout(self)
-        lay.setContentsMargins(4, 0, 4, 0)
-        lay.setSpacing(4)
-        lay.setAlignment(Qt.AlignmentFlag.AlignHCenter)
-
-        self.icon_label = QLabel()
-        self.icon_label.setFixedSize(icon_size, icon_size)
-        self.icon_label.setPixmap(Icons.pixmap(icon_name, icon_size, icon_color))
-        self.icon_label.setStyleSheet("background: transparent;")
-        lay.addWidget(self.icon_label, alignment=Qt.AlignmentFlag.AlignHCenter)
-
-        name_lbl = QLabel(name)
-        name_lbl.setAlignment(Qt.AlignmentFlag.AlignHCenter)
-        name_lbl.setStyleSheet(
-            f"color: {Theme.TEXT_BODY}; font-family: {Theme.FONT_FAMILY};"
-            f"font-size: 11px; font-weight: 600; background: transparent;"
-        )
-        lay.addWidget(name_lbl)
-
-        ip_lbl = QLabel(ip)
-        ip_lbl.setAlignment(Qt.AlignmentFlag.AlignHCenter)
-        ip_lbl.setStyleSheet(
-            f"color: {Theme.TEXT_MUTED}; font-family: {Theme.FONT_MONO};"
-            f"font-size: 10px; background: transparent;"
-        )
-        lay.addWidget(ip_lbl)
-
-
-    def mousePressEvent(self, event):
-        if (event.button() == Qt.MouseButton.LeftButton
-                and self._on_click and self._device):
-            self._on_click(self._device)
-
-
 class NetworkMap(QWidget):
+    """Internet, router and devices drawn as one picture, with traffic dots on the links."""
     # Emitted with the device dict when a device node is clicked.
     node_clicked = pyqtSignal(dict)
 
+    R = 22
+
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setStyleSheet("background: transparent;")
-        self.setMinimumHeight(180)
+        self.setMinimumHeight(220)
+        self.setMouseTracking(True)
         self._online = True
-        self._gateway = "—"
+        self._gateway = ""
         self._router_vendor = ""
+        self._gw_dev = None
         self._devices = []
+        self._new_ips = set()
+        self._wan = ""
+        self._link_label = ""
+        self._hover = None
+        self._dots = []
+        self._pulse = 0.0
+        self._anim = QTimer(self)
+        self._anim.setInterval(30)
+        self._anim.timeout.connect(self._step)
+        self._anim.start()
 
-        root = QVBoxLayout(self)
-        root.setContentsMargins(6, 10, 6, 8)
-        root.setSpacing(0)
-
-        self._internet_node = _LabeledIcon(
-            "internet", Theme.SUCCESS, "Internet", icon_size=32)
-        root.addWidget(self._internet_node, alignment=Qt.AlignmentFlag.AlignHCenter)
-
-        root.addStretch(1)
-
-        self._router_node = _LabeledIcon(
-            "dev_router", Theme.ACCENT, "Router", "—",
-            subtitle_mono=True, icon_size=32)
-        root.addWidget(self._router_node, alignment=Qt.AlignmentFlag.AlignHCenter)
-
-        root.addStretch(1)
-
-        self._devices_container = QWidget()
-        self._devices_container.setStyleSheet("background: transparent;")
-        self._devices_layout = QHBoxLayout(self._devices_container)
-        self._devices_layout.setContentsMargins(0, 0, 0, 0)
-        self._devices_layout.setSpacing(2)
-        root.addWidget(self._devices_container)
-
+    # -- data --
     def set_topology(self, gateway, devices, router_vendor="", online=True):
-        self._gateway = gateway or "—"
+        self._gateway = gateway or ""
         self._router_vendor = router_vendor
         self._online = online
-        self._devices = [d for d in devices if d.get("ip") != gateway][:5]
+        gw = next((d for d in devices if d.get("ip") == gateway), None)
+        self._gw_dev = dict(gw or {"ip": gateway, "hostname": "", "vendor": router_vendor})
+        self._gw_dev["is_gateway"] = True
+        others = [d for d in devices if d.get("ip") != gateway]
+        others.sort(key=lambda d: (not d.get("is_self"), d.get("ip", "")))
+        self._devices = others[:6]
+        self.update()
 
-        # Internet node reflects connection state
-        icol = Theme.SUCCESS if online else Theme.TEXT_MUTED
-        self._internet_node.set_colors(icol, icol)
+    def set_wan(self, text):
+        self._wan = text
+        self.update()
 
-        # Router node: name above IP, to the right of the icon
+    def set_link_label(self, text):
+        # label on the link from the router to this computer, e.g. "Ethernet 4 · 1 Gbps"
+        self._link_label = text
+        self.update()
+
+    def set_new(self, ips):
+        self._new_ips = set(ips)
+        self.update()
+
+    def node_titles(self):
+        return [(t, s) for _k, _c, t, s, _d in self._nodes()]
+
+    # -- geometry --
+    def _nodes(self):
+        w, h = self.width(), self.height()
+        cx = w / 2
         rv = (self._router_vendor or "").strip()
         if not rv or rv.lower() in ("unknown", "private (randomized)"):
             rv = "Router"
-        self._router_node.set_title(rv)
-        self._router_node.set_subtitle(self._gateway)
+        top, bottom = 30, h - 64
+        nodes = [("net", QPointF(cx, top), "Internet", "via ISP · public IP hidden", None),
+                 ("gw", QPointF(cx, (top + bottom) / 2), rv, f"{self._gateway or '—'} · gateway", self._gw_dev)]
+        n = len(self._devices)
+        for i, d in enumerate(self._devices):
+            x = w * (i + 1) / (n + 1)
+            if n == 2:
+                x = cx + (-1 if i == 0 else 1) * min(w * 0.22, 120)
+            name = device_display_name(d)
+            if d.get("is_self"):
+                name = "PC (you)" if guess_device_icon(d) in ("dev_pc", "dev_computer", "dev_generic") else f"{name} (you)"
+            nodes.append((f"d{i}", QPointF(x, bottom), name[:18], d.get("ip", ""), d))
+        return nodes
 
-        # Rebuild the device row
-        while self._devices_layout.count():
-            item = self._devices_layout.takeAt(0)
-            w = item.widget()
-            if w:
-                w.deleteLater()
+    def _route(self, to_key):
+        pts = {k: c for k, c, _t, _s, _d in self._nodes()}
+        return [pts["net"], pts["gw"]] + ([pts[to_key]] if to_key in pts else [])
 
-        if self._devices:
-            self._devices_layout.addStretch(1)
-            for dev in self._devices:
-                ip = dev.get("ip", "")
-                name = device_display_name(dev)
-                """ If the only thing we have is the IP, show a friendly generic
-                name instead (so the title isn't identical to the subtitle
-                IP below it). "Private (randomized)" MACs are usually phones. """
-                if name == ip or not name or name == "?":
-                    vendor = (dev.get("vendor") or "").lower()
-                    if "private" in vendor or "random" in vendor:
-                        name = "Device (private)"
-                    else:
-                        name = "Device"
-                name = name[:16]
-                icon_name = guess_device_icon(dev)
-                node = _DeviceNode(icon_name, Theme.TEXT_SECONDARY, name, ip,
-                                   device=dev,
-                                   on_click=self.node_clicked.emit)
-                self._devices_layout.addWidget(node)
-                self._devices_layout.addStretch(1)
+    # -- traffic --
+    def set_traffic(self, dl_mbps, ul_mbps, lan_ips=()):
+        """Spawn dots for one second of traffic: blue in, purple out, grey for LAN multicast."""
+        if not self._online or not self.isVisible():
+            return
+        me = next((f"d{i}" for i, d in enumerate(self._devices) if d.get("is_self")), None)
+        now = time.monotonic()
+        for mbps, down in ((dl_mbps, True), (ul_mbps, False)):
+            kbps = max(0.0, mbps) * 1000
+            n = min(8, int(round(math.log2(1 + kbps / 20)))) if kbps > 1 else 0
+            for _ in range(n):
+                self._dots.append({"t0": now + random.random(), "dur": 1.1 + random.random() * 0.3,
+                                   "key": me, "down": down, "color": Theme.ACCENT if down else Theme.ACCENT_PURPLE})
+        for i, d in enumerate(self._devices):
+            if d.get("ip") in lan_ips and not d.get("is_self"):
+                self._dots.append({"t0": now + random.random(), "dur": 1.0, "key": f"d{i}", "down": False,
+                                   "lan": True, "color": "#7d86a0"})
 
-        self.update()
+    def _step(self):
+        now = time.monotonic()
+        self._dots = [d for d in self._dots if now < d["t0"] + d["dur"]]
+        self._pulse = (self._pulse + 0.012) % 1.0
+        if self.isVisible():
+            self.update()
 
-    def paintEvent(self, event):
-        """Lines are painted here, in the parent's paintEvent"""
+    # -- input --
+    def _hit(self, pos):
+        for key, c, _t, _s, dev in self._nodes():
+            if (pos.x() - c.x()) ** 2 + (pos.y() - c.y()) ** 2 <= (self.R + 4) ** 2:
+                return key, dev
+        return None, None
+
+    def mouseMoveEvent(self, e):
+        key, dev = self._hit(e.position())
+        self._hover = key if dev else None
+        self.setCursor(Qt.CursorShape.PointingHandCursor if dev else Qt.CursorShape.ArrowCursor)
+
+    def mousePressEvent(self, e):
+        _key, dev = self._hit(e.position())
+        if dev:
+            self.node_clicked.emit(dev)
+
+    # -- drawing --
+    def paintEvent(self, _):
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        nodes = self._nodes()
+        pts = {k: c for k, c, _t, _s, _d in nodes}
+        link = QColor(Theme.BORDER_STRONG)
+        mono = QFont(Theme.FONT_MONO_PRIMARY)
+        mono.setPixelSize(11)
 
-        link_color = QColor(Theme.SUCCESS) if self._online else QColor(Theme.TEXT_FAINT)
-        pen = QPen(link_color, 2.0)
-        pen.setCapStyle(Qt.PenCapStyle.RoundCap)
-        p.setPen(pen)
+        # links
+        p.setPen(QPen(link, 2))
+        p.drawLine(pts["net"], pts["gw"])
+        for i, d in enumerate(self._devices):
+            pen = QPen(link, 2)
+            if not d.get("is_self"):
+                pen.setStyle(Qt.PenStyle.DashLine)
+            p.setPen(pen)
+            p.drawLine(pts["gw"], pts[f"d{i}"])
 
-        def top_of(widget: QLabel) -> QPointF:
-            return QPointF(widget.mapTo(self, QPoint(widget.width() // 2, 0)))
+        # link labels
+        p.setFont(mono)
+        p.setPen(QColor(Theme.TEXT_MUTED))
+        if self._wan:
+            mid = (pts["net"] + pts["gw"]) / 2
+            p.drawText(QRectF(mid.x() + 8, mid.y() - 8, 160, 16), Qt.AlignmentFlag.AlignVCenter, f"WAN · {self._wan}")
+        for i, d in enumerate(self._devices):
+            if d.get("is_self") and self._link_label:
+                a, b = pts["gw"], pts[f"d{i}"]
+                mid = (a + b) / 2
+                right = b.x() > a.x()
+                r = QRectF(mid.x() + 10, mid.y() - 18, 170, 16) if right else QRectF(mid.x() - 180, mid.y() - 18, 170, 16)
+                p.drawText(r, (Qt.AlignmentFlag.AlignLeft if right else Qt.AlignmentFlag.AlignRight)
+                           | Qt.AlignmentFlag.AlignVCenter, self._link_label)
 
-        def bottom_of(widget: QLabel) -> QPointF:
-            return QPointF(widget.mapTo(self, QPoint(widget.width() // 2, widget.height())))
+        # traffic dots
+        now = time.monotonic()
+        p.setPen(Qt.PenStyle.NoPen)
+        for d in self._dots:
+            f = (now - d["t0"]) / d["dur"]
+            if not 0 <= f <= 1:
+                continue
+            route = [pts[d["key"]], pts["gw"]] if d.get("lan") else self._route(d["key"])
+            if len(route) < 2:
+                continue
+            pt = _along(route if d["down"] else route[::-1], f)
+            c = QColor(d["color"])
+            c.setAlphaF(min(1.0, f * 6, (1 - f) * 6))
+            p.setBrush(c)
+            p.drawEllipse(pt, 3.2, 3.2)
 
-        internet_bottom = bottom_of(self._internet_node.icon_label)
-        router_top = top_of(self._router_node.icon_label)
-        router_bottom = bottom_of(self._router_node.icon_label)
+        # router pulse
+        gwp = pts["gw"]
+        halo = QColor(Theme.SUCCESS if self._online else Theme.TEXT_MUTED)
+        halo.setAlphaF(0.55 * (1 - self._pulse))
+        p.setPen(QPen(halo, 1.5))
+        p.setBrush(Qt.BrushStyle.NoBrush)
+        rr = self.R + 2 + 10 * self._pulse
+        p.drawEllipse(gwp, rr, rr)
 
-        # Internet -> Router
-        p.drawLine(internet_bottom, router_top)
+        title = QFont(Theme.FONT_FAMILY_PRIMARY)
+        title.setPixelSize(12)
+        title.setBold(True)
+        for key, c, t, sub, dev in nodes:
+            is_new = dev is not None and dev.get("ip") in self._new_ips
+            stroke = QColor(Theme.ACCENT if (dev and dev.get("is_self")) or key == self._hover
+                            else Theme.ACCENT_GLOW if is_new else Theme.BORDER_STRONG)
+            pen = QPen(stroke, 1.5)
+            if is_new:
+                pen.setStyle(Qt.PenStyle.DashLine)
+            p.setPen(pen)
+            p.setBrush(QColor(Theme.BG_ELEVATED))
+            p.drawEllipse(c, self.R, self.R)
+            if key == "net":
+                icon, color = "globe", Theme.SUCCESS if self._online else Theme.TEXT_MUTED
+            elif key == "gw":
+                icon, color = "dev_router", Theme.TEXT_SECONDARY
+            else:
+                icon = guess_device_icon(dev)
+                color = Theme.ACCENT_HOVER if dev.get("is_self") else "#c9bdff" if is_new else Theme.TEXT_SECONDARY
+            pm = Icons.pixmap(icon if icon.startswith("dev_") or icon == "globe" else "dev_generic", 20, color)
+            p.drawPixmap(QPointF(c.x() - 10, c.y() - 10), pm)
 
-        # Router -> bus -> devices
-        device_tops = []
-        for i in range(self._devices_layout.count()):
-            item = self._devices_layout.itemAt(i)
-            w = item.widget()
-            if isinstance(w, _DeviceNode):
-                device_tops.append(top_of(w.icon_label))
-
-        if device_tops:
-            bus_y = (router_bottom.y() + device_tops[0].y()) / 2
-            cx = router_bottom.x()
-            p.drawLine(QPointF(cx, router_bottom.y()), QPointF(cx, bus_y))
-            xs = [pt.x() for pt in device_tops]
-            if len(xs) > 1:
-                p.drawLine(QPointF(min(xs), bus_y), QPointF(max(xs), bus_y))
-            for pt in device_tops:
-                p.drawLine(QPointF(pt.x(), bus_y), pt)
-
+            if key in ("net", "gw"):
+                p.setFont(title)
+                p.setPen(QColor(Theme.TEXT_PRIMARY))
+                p.drawText(QPointF(c.x() + self.R + 10, c.y() - 2), t)
+                p.setFont(mono)
+                p.setPen(QColor(Theme.TEXT_MUTED))
+                p.drawText(QPointF(c.x() + self.R + 10, c.y() + 13), sub)
+            else:
+                p.setFont(title)
+                p.setPen(QColor(Theme.TEXT_PRIMARY))
+                label = t + ("  NEW" if is_new else "")
+                p.drawText(QRectF(c.x() - 90, c.y() + self.R + 6, 180, 16), Qt.AlignmentFlag.AlignCenter, label)
+                p.setFont(mono)
+                p.setPen(QColor(Theme.TEXT_MUTED))
+                p.drawText(QRectF(c.x() - 90, c.y() + self.R + 22, 180, 16), Qt.AlignmentFlag.AlignCenter, sub)
         p.end()
+
+
+def _along(route, f):
+    segs = [(route[i], route[i + 1]) for i in range(len(route) - 1)]
+    lens = [math.hypot(b.x() - a.x(), b.y() - a.y()) for a, b in segs]
+    x = f * (sum(lens) or 1)
+    for i, ((a, b), ln) in enumerate(zip(segs, lens)):
+        if x <= ln or i == len(segs) - 1:
+            k = x / ln if ln else 0
+            return QPointF(a.x() + (b.x() - a.x()) * k, a.y() + (b.y() - a.y()) * k)
+        x -= ln
+    return route[-1]

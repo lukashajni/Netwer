@@ -116,13 +116,10 @@ class ReportPage(BasePage):
         self._preview_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._preview_layout.setSpacing(10)
 
-        self._preview_placeholder = QLabel(
-            "Choose sections and click Generate Preview")
-        self._preview_placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._preview_placeholder.setStyleSheet(
-            f"color: {Theme.TEXT_MUTED}; font-size: {Theme.FONT_SIZE_BODY}px;"
-            f"background: transparent; padding: 40px;"
-        )
+        from ui.widgets.ui_kit import empty_state
+        self._preview_placeholder = empty_state(
+            "report", "No preview yet",
+            "Pick the sections on the left and press Generate Preview. The PDF looks exactly like the preview.")
         self._preview_layout.addWidget(self._preview_placeholder)
         self._preview_scroll.setWidget(self._preview_holder)
         preview_card.content_layout.addWidget(self._preview_scroll)

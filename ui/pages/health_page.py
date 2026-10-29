@@ -36,7 +36,7 @@ def _severity_colour(sev):
 class _FindingRow(QFrame):
     # One issue - coloured bar, title, explanation and what to do.
 
-    def __init__(self, finding, parent=None):
+    def __init__(self, finding, on_ask=None, parent=None):
         super().__init__(parent)
         colour, glyph = _SEVERITY_STYLE.get(
             finding["severity"], (Theme.TEXT_SECONDARY, "\u2022"))
@@ -82,6 +82,17 @@ class _FindingRow(QFrame):
             box.addWidget(act)
         lay.addLayout(box, 1)
 
+        if on_ask is not None and finding["severity"] != diag.GOOD:
+            ask = QPushButton("Ask AI")
+            ask.setCursor(Qt.CursorShape.PointingHandCursor)
+            ask.setStyleSheet(
+                f"QPushButton {{ background: transparent; color: {Theme.ACCENT};"
+                f"border: 1px solid {Theme.GLASS_BORDER}; border-radius: 8px; padding: 4px 10px;"
+                f"font-size: 11.5px; }}"
+                f"QPushButton:hover {{ border-color: {Theme.ACCENT}; }}")
+            ask.clicked.connect(lambda: on_ask(finding))
+            lay.addWidget(ask, 0, Qt.AlignmentFlag.AlignTop)
+
 
 class HealthPage(BasePage):
     PAGE_TITLE = "Network Health"
@@ -117,6 +128,18 @@ class HealthPage(BasePage):
             f"QProgressBar::chunk {{ background: {Theme.GRAD_ACCENT};"
             f"border-radius: 4px; }}")
         bar.addWidget(self.progress, 1)
+
+        # Netwer AI opens only when asked for.
+        self.btn_ai = QPushButton("  Ask AI")
+        self.btn_ai.setIcon(Icons.get("ai", Theme.ACCENT))
+        self.btn_ai.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_ai.setStyleSheet(
+            f"QPushButton {{ background: {Theme.GLASS_INPUT}; color: {Theme.TEXT_PRIMARY};"
+            f"border: 1px solid {Theme.GLASS_BORDER_HI}; border-radius: {Theme.RADIUS_CONTROL}px;"
+            f"padding: 11px 20px; font-size: 13.5px; font-weight: 600; }}"
+            f"QPushButton:hover {{ border-color: {Theme.ACCENT}; }}")
+        self.btn_ai.clicked.connect(self._open_ai)
+        bar.addWidget(self.btn_ai)
         self.body_layout.addLayout(bar)
 
         self.status = QLabel("Runs a few quick checks — takes about 15 seconds.")
@@ -155,17 +178,20 @@ class HealthPage(BasePage):
         self._findings_layout = QVBoxLayout(inner)
         self._findings_layout.setContentsMargins(0, 0, 6, 0)
         self._findings_layout.setSpacing(9)
-        self._findings_placeholder = QLabel(
-            "Press \u201cDiagnose my network\u201d and NETWER will work out "
-            "where the problem is.")
-        self._findings_placeholder.setWordWrap(True)
-        self._findings_placeholder.setStyleSheet(
-            f"color: {Theme.TEXT_MUTED}; font-size: 12.5px;")
+        from ui.widgets.ui_kit import empty_state
+        self._findings_placeholder = empty_state(
+            "resources", "No diagnosis yet",
+            "Press \u201cDiagnose my network\u201d and NETWER checks your adapter, router, "
+            "internet and DNS, then explains what is wrong in plain language.")
         self._findings_layout.addWidget(self._findings_placeholder)
         self._findings_layout.addStretch()
         self._findings_area.setWidget(inner)
         self.findings_card.content_layout.addWidget(self._findings_area)
-        self.body_layout.addWidget(self.findings_card, 1)
+        columns = QHBoxLayout()
+        columns.setSpacing(0)
+        left = QVBoxLayout()
+        left.setSpacing(Theme.GAP)
+        left.addWidget(self.findings_card, 1)
 
         # -- Measurements strip --
         self.metrics_card = Card("Measurements", "monitor")
@@ -174,7 +200,23 @@ class HealthPage(BasePage):
         self._metrics.setVerticalSpacing(8)
         self.metrics_card.content_layout.addLayout(self._metrics)
         self.metrics_card.hide()
-        self.body_layout.addWidget(self.metrics_card)
+        left.addWidget(self.metrics_card)
+        columns.addLayout(left, 1)
+        self.body_layout.addLayout(columns, 1)
+
+    def _dock(self):
+        win = self._window or self.window()
+        return getattr(win, "ai_dock", None)
+
+    def _open_ai(self):
+        if self._report:
+            self.ask_ai("Explain my network diagnosis and tell me what to fix first.")
+        elif self._dock() is not None:
+            self._dock().open()
+
+    def _ask_about(self, finding):
+        if self._dock() is not None:
+            self._dock().ask_about(finding)
 
     # -- Run --
     def _run(self):
@@ -240,9 +282,11 @@ class HealthPage(BasePage):
         self._clear_findings()
         for f in report["findings"]:
             self._findings_layout.insertWidget(
-                self._findings_layout.count() - 1, _FindingRow(f))
+                self._findings_layout.count() - 1, _FindingRow(f, self._ask_about))
 
         self._show_metrics(report.get("measurements", {}))
+        if self._dock() is not None:
+            self._dock().set_report(report)
         self.status.setText("Done.")
         activity.add("Network diagnosis", report["headline"],
                      kind=("error" if report["severity"] == diag.CRITICAL
