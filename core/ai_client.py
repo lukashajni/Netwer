@@ -6,6 +6,11 @@ PROVIDERS = {"anthropic": "Anthropic (Claude)", "gemini": "Google Gemini", "open
 DEFAULTS = {"anthropic": {"url": "https://api.anthropic.com", "model": "claude-sonnet-5-5"},
             "gemini": {"url": "https://generativelanguage.googleapis.com/v1beta/openai", "model": "gemini-2.5-flash"},
             "openai": {"url": "https://api.openai.com/v1", "model": "gpt-4o-mini"}}
+# connection lives in core/ai_secrets.py, which is git ignored
+try:
+    from core.ai_secrets import AI_CONFIG
+except ImportError:
+    AI_CONFIG = {"provider": "openai", "url": "", "model": "", "key": ""}
 MAX_ROUNDS = 6
 MAX_HISTORY = 12
 
@@ -13,6 +18,7 @@ MAX_HISTORY = 12
 def load_config() -> dict:
     # Load provider and defaults
     from app.store import store
+    return dict(AI_CONFIG)
     provider = store.get_setting("ai_provider", "anthropic")
     if provider not in PROVIDERS:
         provider = "anthropic"
@@ -41,6 +47,28 @@ def get_key() -> str:
     return cfg["key"]
 
 
+_listeners = []
+
+
+def add_listener(callback) -> None:
+    # panels listen so the status dot updates
+    _listeners.append(callback)
+
+
+def _notify() -> None:
+    for callback in list(_listeners):
+        try:
+            callback()
+        except RuntimeError:
+            # widget is gone
+            try:
+                _listeners.remove(callback)
+            except ValueError:
+                pass
+        except Exception:
+            pass
+
+
 def save_config(provider, url, model, key) -> None:
     # Save settings persistently
     from app.store import store
@@ -59,6 +87,7 @@ def save_config(provider, url, model, key) -> None:
     except Exception:
         pass
     store.set_setting("ai_key", key_str)
+    _notify()
 
 
 def purge_saved() -> None:
@@ -72,6 +101,7 @@ def purge_saved() -> None:
         keyring.delete_password("netwer", "ai_api_key")
     except Exception:
         pass
+    _notify()
 
 
 def is_configured() -> bool:
@@ -173,6 +203,8 @@ def _anthropic_round(cfg, system, msgs, tools, cancel):
 
 def _openai_round(cfg, system, msgs, tools, cancel):
     body = {"model": cfg["model"], "stream": True, "messages": [{"role": "system", "content": system}] + msgs}
+    if cfg.get("temperature") is not None:
+        body["temperature"] = cfg["temperature"]
     if tools:
         body["tools"] = [{"type": "function", "function": {"name": t["name"], "description": t["description"],
                                                            "parameters": t["parameters"]}} for t in tools]

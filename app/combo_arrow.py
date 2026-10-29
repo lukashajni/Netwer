@@ -3,7 +3,7 @@ import re
 import tempfile
 
 from PyQt6.QtCore import QEvent, QObject
-from PyQt6.QtWidgets import QApplication, QComboBox
+from PyQt6.QtWidgets import QAbstractSpinBox, QApplication, QComboBox
 
 from app.resources import Icons
 from app.theme import Theme
@@ -31,9 +31,16 @@ def arrow_rules() -> str:
 
 
 class ComboArrowFilter(QObject):
-    """Gives every drop-down a visible arrow, whatever style it already has."""
+    """Arrow on every drop-down and no wheel changes."""
 
     def eventFilter(self, obj, event):
+        # wheel only scrolls the page, never changes a value
+        if (event.type() == QEvent.Type.Wheel
+                and isinstance(obj, (QComboBox, QAbstractSpinBox))):
+            parent = obj.parentWidget()
+            if parent is not None:
+                QApplication.sendEvent(parent, event)
+            return True
         if (event.type() == QEvent.Type.Show and isinstance(obj, QComboBox)
                 and not obj.property("netwer_arrow")):
             obj.setProperty("netwer_arrow", True)

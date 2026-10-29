@@ -31,7 +31,7 @@ _EXCLUDED_INTERFACE_WORDS = (
     "virtual adapter", "vpn", "wireguard", "tap-windows", "tun", "docker",
     "container", "bluetooth",
 )
-_VALID_NEIGHBOR_STATES = {4, 5, 6}  # stale, reachable, permanent
+_VALID_NEIGHBOR_STATES = {5, 6}  # no stale, those are old devices
 
 def _icmp_checksum(data: bytes) -> int:
     if len(data) % 2:

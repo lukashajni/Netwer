@@ -32,3 +32,13 @@ reports_output/
 # Runtime data and generated icon cache
 netwer_data.json
 netwer_icons/
+
+# AI connection
+core/ai_secrets.py
+core/ai_prompts.py
+.env
+.env.*
+*.key
+*.pem
+*.secret
+*secrets*.json

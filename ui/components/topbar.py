@@ -60,11 +60,13 @@ class TopBar(QWidget):
     theme_selected = pyqtSignal(str)
     search_submitted = pyqtSignal(str)
     suggestion_chosen = pyqtSignal(dict)
+    toggle_ai = pyqtSignal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setFixedHeight(Theme.TOPBAR_HEIGHT)
         self._unread = 0
+        self._capturing = False
         self._build()
         self.refresh_theme()
 
@@ -108,6 +110,13 @@ class TopBar(QWidget):
         self._status_text = QLabel("NETWER is running")
         sp.addWidget(self._status_text)
         lay.addWidget(self._status_pill)
+
+        # Opens the Netwer AI dock on the right
+        self._ai_btn = QPushButton("  Netwer AI")
+        self._ai_btn.setCheckable(True)
+        self._ai_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._ai_btn.clicked.connect(self.toggle_ai.emit)
+        lay.addWidget(self._ai_btn)
 
         # Theme switcher
         self._theme_btn = QPushButton()
@@ -234,10 +243,13 @@ class TopBar(QWidget):
             f"#StatusPill {{ background: {Theme.GLASS_INPUT};"
             f"border: 1px solid {card_border()};"
             f"border-radius: {Theme.RADIUS_CONTROL}px; }}")
-        self._status_text.setStyleSheet(
-            f"color: {Theme.SUCCESS}; background: transparent;"
-            f"font-size: {Theme.FONT_SIZE_SMALL}px; font-weight: 500;")
-        self._status_dot.set_color(Theme.SUCCESS)
+        self._render_status()
+        self._ai_btn.setIcon(Icons.get("ai", Theme.ACCENT_GLOW))
+        self._ai_btn.setStyleSheet(
+            f"QPushButton {{ background: {Theme.GLASS_INPUT}; color: {Theme.TEXT_PRIMARY};"
+            f"border: 1px solid {Theme.ACCENT_PURPLE}; border-radius: {Theme.RADIUS_CONTROL}px;"
+            f"padding: 7px 13px; font-size: {Theme.FONT_SIZE_SMALL}px; font-weight: 500; }}"
+            f"QPushButton:hover, QPushButton:checked {{ background: {Theme.BG_ELEVATED}; }}")
 
         icon = "moon" if is_dark() else "sun"
         accent = Theme.ACCENT_PURPLE if is_dark() else Theme.WARNING
@@ -252,6 +264,21 @@ class TopBar(QWidget):
 
         self._icon_btn_style(self._gear, "settings")
         self._render_bell()
+
+    def set_ai_open(self, on: bool):
+        self._ai_btn.setChecked(on)
+
+    def set_capturing(self, on: bool):
+        self._capturing = on
+        self._render_status()
+
+    def _render_status(self):
+        color = Theme.DANGER if self._capturing else Theme.SUCCESS
+        self._status_text.setText("Capturing packets" if self._capturing else "NETWER is running")
+        self._status_text.setStyleSheet(
+            f"color: {color}; background: transparent;"
+            f"font-size: {Theme.FONT_SIZE_SMALL}px; font-weight: 500;")
+        self._status_dot.set_color(color)
 
     def _icon_btn_style(self, btn, icon_name):
         btn.setIcon(Icons.get(icon_name, Theme.TEXT_SECONDARY))

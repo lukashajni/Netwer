@@ -4,10 +4,13 @@ from PyQt6.QtGui import QFont
 from PyQt6.QtWidgets import QApplication
 
 from app.combo_arrow import ComboArrowFilter, arrow_url
+from app.win_console import hide_subprocess_windows
+from core import ai_client
 from app.theme import Theme
 from core import netwer_core
 from ui.main_window import MainWindow
 from ui.pages.about_page import AboutPage
+from ui.pages.capture_page import CapturePage
 from ui.pages.dashboard_page import DashboardPage
 from ui.pages.dns_tools_page import DnsToolsPage
 from ui.pages.health_page import HealthPage
@@ -20,7 +23,7 @@ from ui.pages.speedtest_page import SpeedTestPage
 from ui.pages.system_info_page import SystemInfoPage
 from ui.pages.wifi_info_page import WiFiInfoPage
 
-def build_global_qss(): 
+def build_global_qss():
     arrow = arrow_url()
     app_gradient = (
         f"qlineargradient(x1:0, y1:0, x2:1, y2:1, "
@@ -105,6 +108,10 @@ def _register_pages(window: MainWindow) -> None:
         subtitle="Diagnose problems"
     )
     window.register_page(
+        "capture", "capture", CapturePage(netwer_core),
+        subtitle="Live packets, filters, AI explanations", badge="NEW"
+    )
+    window.register_page(
         "ping", "ping", PingPage(netwer_core), subtitle="Test Connectivity"
     )
     window.register_page(
@@ -136,6 +143,7 @@ def _register_pages(window: MainWindow) -> None:
 
 
 def main() -> int:
+    hide_subprocess_windows()
     app = QApplication(sys.argv)
     app.setApplicationName("NETWER")
     app.setOrganizationName("Lukas Hajneman")
@@ -160,6 +168,7 @@ def main() -> int:
 
     app.setStyleSheet(build_global_qss())
     app.installEventFilter(ComboArrowFilter(app))
+    ai_client.purge_saved()
 
     try:
         import psutil  # noqa: F401

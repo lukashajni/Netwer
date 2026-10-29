@@ -28,6 +28,7 @@ It explains network issues in plain English instead of showing only latency numb
 - Local subnet scanning, device identification, and customizable device names.
 - Network health diagnostics for the adapter, Wi-Fi, router, internet access, and DNS.
 - Ping, traceroute, reverse DNS, port scanning, and Wake-on-LAN utilities.
+- Packet Capture: a Wireshark-style live capture with colour-coded packets, Wireshark display filters, layer details with highlighted bytes, .pcap open/save, and Netwer AI explaining packets and findings. Live capture needs [Npcap](https://npcap.com) on Windows (or root/libpcap on Linux) and scapy.
 - PDF network health reports and CSV device exports.
 - Configurable themes and UI scaling.
 

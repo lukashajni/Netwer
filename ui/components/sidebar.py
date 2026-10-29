@@ -1,8 +1,11 @@
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import QEasingCurve, QPropertyAnimation, Qt, QTimer, pyqtProperty, pyqtSignal
 from PyQt6.QtWidgets import QFrame, QHBoxLayout, QLabel, QVBoxLayout, QWidget
 
 from app.resources import Icons
 from app.theme import Theme, card_bg, card_border
+
+#: Width of the icon rail; the sidebar opens to Theme.SIDEBAR_WIDTH on hover.
+RAIL_WIDTH = 64
 
 
 class NavItem(QFrame):
@@ -10,39 +13,47 @@ class NavItem(QFrame):
     clicked = pyqtSignal(str)
 
     def __init__(self, key: str, icon_name: str, title: str,
-                 subtitle: str = "", parent=None):
+                 subtitle: str = "", badge: str = "", parent=None):
         super().__init__(parent)
         self.key = key
         self._icon_name = icon_name
         self._active = False
         self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setFixedHeight(46 if subtitle else 40)
+        self.setFixedHeight(40)
+        self.setToolTip(subtitle)
 
         lay = QHBoxLayout(self)
         lay.setContentsMargins(12, 4, 12, 4)
-        lay.setSpacing(11)
+        lay.setSpacing(13)
 
         self._icon = QLabel()
         self._icon.setFixedWidth(20)
         self._icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
         lay.addWidget(self._icon)
 
-        text_box = QVBoxLayout()
-        text_box.setSpacing(0)
         self._title = QLabel(title)
-        text_box.addWidget(self._title)
-        self._subtitle = None
-        if subtitle:
-            self._subtitle = QLabel(subtitle)
-            self._subtitle.setStyleSheet(
-                f"color: {Theme.TEXT_FAINT}; font-size: {Theme.FONT_SIZE_TINY}px;"
-                f"background: transparent;"
-            )
-            text_box.addWidget(self._subtitle)
-        lay.addLayout(text_box)
+        lay.addWidget(self._title)
         lay.addStretch()
+        self._badge = None
+        self._dot = None
+        if badge:
+            self._badge = QLabel(badge)
+            self._badge.setFixedHeight(16)
+            self._badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            lay.addWidget(self._badge, 0, Qt.AlignmentFlag.AlignVCenter)
+            # small dot on the icon while the rail is collapsed
+            self._dot = QLabel(self)
+            self._dot.setFixedSize(7, 7)
+            self._dot.setStyleSheet(f"background: {Theme.ACCENT_GLOW}; border-radius: 3px;")
+            self._dot.move(31, 9)
 
         self._refresh_style()
+
+    def set_compact(self, compact: bool) -> None:
+        self._title.setVisible(not compact)
+        if self._badge is not None:
+            self._badge.setVisible(not compact)
+            self._dot.setVisible(compact)
 
     def set_active(self, active: bool) -> None:
         self._active = active
@@ -65,7 +76,7 @@ class NavItem(QFrame):
             self.setStyleSheet(
                 f"QFrame {{ background: transparent; border: none;"
                 f"border-radius: {Theme.RADIUS_CONTROL}px; }}"
-                f"QFrame:hover {{ background: {Theme.GLASS_CARD}; }}"
+                f"QFrame:hover {{ background: {Theme.BG_ELEVATED}; }}"
                 f"QLabel {{ background: transparent; border: none; }}"
             )
             self._icon.setPixmap(Icons.pixmap(self._icon_name, 17, Theme.TEXT_SECONDARY))
@@ -73,29 +84,66 @@ class NavItem(QFrame):
                 f"color: {Theme.TEXT_SECONDARY}; font-size: {Theme.FONT_SIZE_BODY}px;"
                 f"font-weight: 500; background: transparent; border: none;"
             )
+        if self._badge is not None:
+            self._badge.setStyleSheet(
+                f"QLabel {{ background: {Theme.ACCENT_GLOW}; color: {Theme.BG_APP}; border-radius: 4px;"
+                f"padding: 0 5px; font-size: 9px; font-weight: 700; }}")
 
     def mousePressEvent(self, event):
         self.clicked.emit(self.key)
         super().mousePressEvent(event)
 
 
+class _SectionHeader(QWidget):
+    """Section title when open, a short divider line when collapsed."""
+
+    def __init__(self, label: str, parent=None):
+        super().__init__(parent)
+        self.setFixedHeight(34)
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(0, 12, 0, 4)
+        self._text = QLabel(label.upper())
+        self._text.setStyleSheet(
+            f"color: {Theme.TEXT_FAINT}; font-size: 10px; font-weight: 600;"
+            f"letter-spacing: 1.5px; background: transparent; padding-left: 14px;")
+        lay.addWidget(self._text)
+        self._line = QFrame()
+        self._line.setFixedSize(24, 1)
+        self._line.setStyleSheet(f"background: {Theme.BORDER_STRONG};")
+        lay.addWidget(self._line, 0, Qt.AlignmentFlag.AlignHCenter)
+
+    def set_compact(self, compact: bool) -> None:
+        self._text.setVisible(not compact)
+        self._line.setVisible(compact)
+
+
 class Sidebar(QWidget):
-    # The whole left navigation bar. Emits 'navigate(key)'
+    """Left navigation. Rests as an icon rail and slides open over the page on hover."""
     navigate = pyqtSignal(str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setFixedWidth(Theme.SIDEBAR_WIDTH)
         self.setObjectName("Sidebar")
-        self.setStyleSheet(
-            f"#Sidebar {{ background: {card_bg()};"
-            f"border: 1px solid {card_border()};"
-            f"border-radius: {Theme.RADIUS_CARD}px; }}")
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self._items: dict[str, NavItem] = {}
+        self._sections: list[_SectionHeader] = []
         self._status_row = None
+        self._compact = True
+        self._width = RAIL_WIDTH
+        self.resize(RAIL_WIDTH, self.height())
+        self._apply_style()
+
+        self._anim = QPropertyAnimation(self, b"railWidth", self)
+        self._anim.setDuration(170)
+        self._anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+        # a short delay stops the rail from flicking open when the mouse only crosses it
+        self._open_timer = QTimer(self)
+        self._open_timer.setSingleShot(True)
+        self._open_timer.setInterval(120)
+        self._open_timer.timeout.connect(lambda: self._animate_to(Theme.SIDEBAR_WIDTH))
 
         lay = QVBoxLayout(self)
-        lay.setContentsMargins(14, 18, 14, 14)
+        lay.setContentsMargins(10, 16, 10, 14)
         lay.setSpacing(2)
 
         # Brand block: gradient logo tile + wordmark.
@@ -107,11 +155,55 @@ class Sidebar(QWidget):
         self._top_spacer.setStyleSheet("background: transparent;")
         lay.addWidget(self._top_spacer)
 
+    def _apply_style(self):
+        self.setStyleSheet(
+            f"#Sidebar {{ background: {card_bg()};"
+            f"border: 1px solid {card_border()};"
+            f"border-radius: {Theme.RADIUS_CARD}px; }}")
+
+    # -- open / close --
+    def _get_width(self):
+        return self._width
+
+    def _set_width(self, w):
+        self._width = int(w)
+        self.resize(self._width, self.height())
+        compact = self._width < Theme.SIDEBAR_WIDTH - 40
+        if compact != self._compact:
+            self._set_compact(compact)
+
+    railWidth = pyqtProperty(int, _get_width, _set_width)
+
+    def _animate_to(self, target):
+        self._anim.stop()
+        self._anim.setStartValue(self._width)
+        self._anim.setEndValue(target)
+        self._anim.start()
+        if target > RAIL_WIDTH:
+            self.raise_()
+
+    def enterEvent(self, event):
+        self._open_timer.start()
+        super().enterEvent(event)
+
+    def leaveEvent(self, event):
+        self._open_timer.stop()
+        self._animate_to(RAIL_WIDTH)
+        super().leaveEvent(event)
+
+    def _set_compact(self, compact: bool):
+        self._compact = compact
+        self._wordmark.setVisible(not compact)
+        for item in self._items.values():
+            item.set_compact(compact)
+        for s in self._sections:
+            s.set_compact(compact)
+
     def _build_brand(self) -> QWidget:
         brand = QFrame()
         brand.setStyleSheet("background: transparent; border: none;")
         b = QHBoxLayout(brand)
-        b.setContentsMargins(6, 2, 6, 14)
+        b.setContentsMargins(5, 2, 0, 14)
         b.setSpacing(11)
         # Gradient logo tile with a globe glyph.
         logo = QLabel()
@@ -129,7 +221,8 @@ class Sidebar(QWidget):
         lg.addWidget(gl)
         b.addWidget(logo)
         # Wordmark + sublabel.
-        txtbox = QVBoxLayout()
+        self._wordmark = QWidget()
+        txtbox = QVBoxLayout(self._wordmark)
         txtbox.setContentsMargins(0, 0, 0, 0)
         txtbox.setSpacing(0)
         name = QLabel("NETWER")
@@ -142,8 +235,9 @@ class Sidebar(QWidget):
             f"letter-spacing: 1.5px; background: transparent;")
         txtbox.addWidget(name)
         txtbox.addWidget(sub)
-        b.addLayout(txtbox)
+        b.addWidget(self._wordmark)
         b.addStretch()
+        self._wordmark.setVisible(not self._compact)
         return brand
 
     def add_section(self, label: str) -> None:
@@ -153,20 +247,17 @@ class Sidebar(QWidget):
             spacer.setStyleSheet("background: transparent;")
             self.layout().addWidget(spacer)
             return
-        header = QLabel(label.upper())
-        header.setStyleSheet(
-            f"color: {Theme.TEXT_FAINT}; font-size: 10px; font-weight: 600;"
-            f"letter-spacing: 1.5px; background: transparent;"
-            f"padding: 14px 0 4px 16px;"
-        )
+        header = _SectionHeader(label)
+        header.set_compact(self._compact)
+        self._sections.append(header)
         self.layout().addWidget(header)
 
     def add_item(self, key: str, icon_name: str, title: str,
-                 subtitle: str = "") -> None:
-        item = NavItem(key, icon_name, title, subtitle)
+                 subtitle: str = "", badge: str = "") -> None:
+        item = NavItem(key, icon_name, title, subtitle, badge)
+        item.set_compact(self._compact)
         item.clicked.connect(self._on_item_clicked)
         self._items[key] = item
-        # Add before the final stretch (if it exists, it means that it hasn't been added yet)
         self.layout().addWidget(item)
 
     def add_stretch_and_status(self) -> None:
@@ -193,14 +284,11 @@ class Sidebar(QWidget):
                 w.setParent(None)   # detach immediately (not just deleteLater)
                 w.deleteLater()
         self._items.clear()
+        self._sections.clear()
         self._status_row = None
 
     def refresh_theme(self) -> None:
-        self.setFixedWidth(Theme.SIDEBAR_WIDTH)
-        self.setStyleSheet(
-            f"#Sidebar {{ background: {card_bg()};"
-            f"border: 1px solid {card_border()};"
-            f"border-radius: {Theme.RADIUS_CARD}px; }}")
+        self._apply_style()
         # Rebuild the brand block so the logo gradient + wordmark follow the
         # new theme's accent colours.
         lay = self.layout()

@@ -2,7 +2,7 @@ import json
 
 from core.ai_knowledge import APP_GUIDE
 
-PAGES = ["dashboard", "network", "wifi", "system", "health", "ping", "ping_sweep", "port_scanner",
+PAGES = ["dashboard", "network", "wifi", "system", "health", "capture", "ping", "ping_sweep", "port_scanner",
          "dns_tools", "speedtest", "report"]
 
 
@@ -23,8 +23,13 @@ TOOLS = [
     _tool("get_recent_activity", "Recent Netwer notifications such as new devices or hosts going down."),
     _tool("get_app_guide", "Describe a Netwer page or feature and how to use it.",
           {"topic": {"type": "string", "description": "Page or feature name, e.g. Port Scanner. Leave empty for all."}}),
+    _tool("get_capture", "Packet Capture summary: packets, protocol mix, top remote hosts, TCP retransmissions, "
+          "unencrypted traffic, DNS and ping timing, LAN devices seen, TLS server names, current filter and the selected packet."),
+    _tool("get_packet", "Full layer-by-layer details of one captured packet (frame number as shown in the packet list).",
+          {"number": {"type": "integer", "description": "Frame number, e.g. 212."}}, ["number"]),
     _tool("suggest_action", "Show the user a button. target is a page key (" + ", ".join(PAGES) +
-          "), 'diagnose' to run the diagnosis, or 'scan:<ip>' to port-scan a device.",
+          "), 'diagnose' to run the diagnosis, 'scan:<ip>' to port-scan a device, or 'filter:<display filter>' "
+          "to apply a Wireshark display filter on the Packet Capture page.",
           {"label": {"type": "string"}, "target": {"type": "string"}}, ["label", "target"]),
 ]
 
@@ -120,11 +125,31 @@ class AppTools:
         rows = [{"title": t, "description": d} for t, d in APP_GUIDE if not topic or topic in t.lower() or topic in d.lower()]
         return {"topics": rows or [{"title": t, "description": d} for t, d in APP_GUIDE]}
 
+    def _t_get_capture(self, a):
+        c = self.snap.get("capture")
+        return c or {"available": False, "hint": "Nothing captured yet. Packet Capture > Start records packets."}
+
+    def _t_get_packet(self, a):
+        from core.capture import get_capture_service, packet_detail
+        try:
+            no = int(a.get("number"))
+        except (TypeError, ValueError):
+            return {"error": "number must be a frame number"}
+        p = get_capture_service().packet(no)
+        return packet_detail(p) if p is not None else {"error": f"There is no packet #{no} in the capture."}
+
     def _t_suggest_action(self, a):
         label, target = str(a.get("label", ""))[:40], str(a.get("target", ""))
         if target == "diagnose":
             target = "health_run"
-        ok = target in PAGES or target == "health_run" or (target.startswith("scan:") and len(target) > 5)
+        if target.startswith("filter:"):
+            from core.display_filter import FilterError, compile_filter
+            try:
+                compile_filter(target[7:])
+            except FilterError as exc:
+                return {"error": f"invalid display filter: {exc}"}
+        ok = (target in PAGES or target == "health_run" or (target.startswith("scan:") and len(target) > 5)
+              or (target.startswith("filter:") and len(target) > 7))
         if not ok or not label:
             return {"error": "invalid target"}
         self.actions.append({"label": label, "target": target})

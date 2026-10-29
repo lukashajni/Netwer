@@ -1,6 +1,10 @@
 """NETWER — NetworkMap widget"""
 
-from PyQt6.QtCore import Qt, pyqtSignal, QPoint, QPointF
+import math
+import random
+import time
+
+from PyQt6.QtCore import Qt, pyqtSignal, QPoint, QPointF, QTimer
 from PyQt6.QtGui import QPainter, QColor, QPen
 from PyQt6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel
 
@@ -186,6 +190,12 @@ class NetworkMap(QWidget):
         self._gateway = "—"
         self._router_vendor = ""
         self._devices = []
+        self._self_node = None
+        # moving dots that show live traffic on the links
+        self._dots = []
+        self._anim = QTimer(self)
+        self._anim.setInterval(30)
+        self._anim.timeout.connect(self._step_dots)
 
         root = QVBoxLayout(self)
         root.setContentsMargins(6, 10, 6, 8)
@@ -236,6 +246,7 @@ class NetworkMap(QWidget):
         self._router_node.set_click((lambda: self.node_clicked.emit(gw_dev)) if has_gw else None)
 
         # Rebuild the device row
+        self._self_node = None
         while self._devices_layout.count():
             item = self._devices_layout.takeAt(0)
             w = item.widget()
@@ -263,6 +274,8 @@ class NetworkMap(QWidget):
                                    on_click=self.node_clicked.emit)
                 self._devices_layout.addWidget(node)
                 self._devices_layout.addStretch(1)
+                if dev.get("is_self"):
+                    self._self_node = node
 
         self.update()
 
@@ -305,6 +318,7 @@ class NetworkMap(QWidget):
                     pt.setX(cx)
                 device_tops.append(pt)
 
+        route = [internet_bottom, router_top]
         if device_tops:
             bus_y = (router_bottom.y() + device_tops[0].y()) / 2
             p.drawLine(QPointF(cx, router_bottom.y()), QPointF(cx, bus_y))
@@ -313,5 +327,54 @@ class NetworkMap(QWidget):
                 p.drawLine(QPointF(min(xs), bus_y), QPointF(max(xs), bus_y))
             for pt in device_tops:
                 p.drawLine(QPointF(pt.x(), bus_y), pt)
+            if self._self_node is not None:
+                me = top_of(self._self_node.icon_label)
+                route += [QPointF(cx, router_bottom.y()), QPointF(cx, bus_y), QPointF(me.x(), bus_y), me]
 
+        self._paint_dots(p, route)
         p.end()
+
+    # -- live traffic dots --
+    def set_traffic(self, dl_mbps: float, ul_mbps: float) -> None:
+        """Spawn dots for one second of traffic: blue flows in, purple flows out."""
+        if not self._online or not self.isVisible():
+            return
+        now = time.monotonic()
+        for mbps, down in ((dl_mbps, True), (ul_mbps, False)):
+            kbps = max(0.0, mbps) * 1000
+            n = min(8, int(round(math.log2(1 + kbps / 20)))) if kbps > 1 else 0
+            for _ in range(n):
+                self._dots.append((now + random.random(), 1.1 + random.random() * 0.3, down))
+        if self._dots and not self._anim.isActive():
+            self._anim.start()
+
+    def _step_dots(self):
+        now = time.monotonic()
+        self._dots = [d for d in self._dots if now < d[0] + d[1]]
+        if not self._dots:
+            self._anim.stop()
+        self.update()
+
+    def _paint_dots(self, p, route):
+        if not self._dots or len(route) < 2:
+            return
+        segs = [(route[i], route[i + 1]) for i in range(len(route) - 1)]
+        lens = [math.hypot(b.x() - a.x(), b.y() - a.y()) for a, b in segs]
+        total = sum(lens) or 1
+        now = time.monotonic()
+        p.setPen(Qt.PenStyle.NoPen)
+        for start, dur, down in self._dots:
+            f = (now - start) / dur
+            if not 0 <= f <= 1:
+                continue
+            x = (f if down else 1 - f) * total
+            for i, ((a, b), ln) in enumerate(zip(segs, lens)):
+                if x <= ln or i == len(segs) - 1:
+                    k = x / ln if ln else 0
+                    pt = QPointF(a.x() + (b.x() - a.x()) * k, a.y() + (b.y() - a.y()) * k)
+                    break
+                x -= ln
+            color = QColor(Theme.ACCENT if down else Theme.ACCENT_PURPLE)
+            color.setAlphaF(min(1.0, f * 6, (1 - f) * 6))
+            p.setBrush(color)
+            p.drawEllipse(pt, 3.2, 3.2)

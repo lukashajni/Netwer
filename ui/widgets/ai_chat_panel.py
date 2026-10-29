@@ -22,13 +22,15 @@ from app.resources import Icons
 from app.store import store
 from app.theme import Theme
 from app.traffic_history import traffic_history
-from core import ai_client, ai_knowledge, ai_tools, network
+from core import ai_client, ai_knowledge, ai_session, ai_tools, network
 from core.discovery import get_discovery_service
 from ui.widgets.network_map import device_display_name, guess_device_icon
 from workers import StreamWorker
 
 WIDTH = 420
 BUBBLE_MAX = 318
+BUBBLE_WIDE = 720      # answer width in full screen
+CHAT_WIDE = 860        # width of the centred conversation in full screen
 SUGGESTIONS = ("Explain these results", "What should I fix first?", "How can I improve my network?",
                "Is my network secure?", "Who is on my network?")
 
@@ -145,11 +147,11 @@ class _Typing(QFrame):
 
 
 class _AIBubble(QFrame):
-    def __init__(self, on_action):
+    def __init__(self, on_action, width=BUBBLE_MAX):
         super().__init__()
         self._on_action = on_action
         self.setObjectName("AIBubble")
-        self.setFixedWidth(BUBBLE_MAX)
+        self.setFixedWidth(width)
         self.setStyleSheet(
             f"#AIBubble {{ background: {Theme.GLASS_INPUT}; border: 1px solid {Theme.GLASS_BORDER};"
             f"border-radius: 14px; border-bottom-left-radius: 4px; }}")
@@ -222,19 +224,25 @@ class _AIBubble(QFrame):
 class AIChatPanel(QWidget):
     navigate = pyqtSignal(str)       # page key, "health_run" or "scan:<ip>"
     toggled = pyqtSignal(bool)
+    expanded = pyqtSignal(bool)      # full screen on / off
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, window_mode=False):
         super().__init__(parent)
+        # window mode: lives in its own window, no sliding and no full screen button
+        self._window_mode = window_mode
         self._report = None
-        self._open = False
+        self._open = window_mode
         self._busy = False
         self._worker = None
         self._history = []
+        self._seen_version = ai_session.version
         self._typing = self._typing_row = self._bubble = self._chips = None
         self._answer = ""
         self._actions = []
-        self.setMaximumWidth(0)
-        self.setMinimumWidth(0)
+        self._expanded = False
+        if not window_mode:
+            self.setMaximumWidth(0)
+            self.setMinimumWidth(0)
         self._anim = QPropertyAnimation(self, b"maximumWidth", self)
         self._anim.setDuration(240)
         self._anim.setEasingCurve(QEasingCurve.Type.OutCubic)
@@ -245,11 +253,15 @@ class AIChatPanel(QWidget):
         self._render_timer.timeout.connect(self._render)
 
         shell = QHBoxLayout(self)
-        shell.setContentsMargins(Theme.GAP, 0, 0, 0)
+        shell.setContentsMargins(0 if window_mode else Theme.GAP, 0, 0, 0)
         shell.setSpacing(0)
         card = QFrame()
         card.setObjectName("AIPanel")
-        card.setFixedWidth(WIDTH)
+        self._card = card
+        if window_mode:
+            card.setMinimumWidth(WIDTH)
+        else:
+            card.setFixedWidth(WIDTH)
         card.setStyleSheet(f"#AIPanel {{ background: {Theme.GLASS_CARD}; border: 1px solid {Theme.GLASS_BORDER};"
                            f"border-radius: {Theme.RADIUS_CARD}px; }}")
         shell.addWidget(card)
@@ -264,6 +276,9 @@ class AIChatPanel(QWidget):
         outer.addWidget(self._build_chat(), 1)
         outer.addWidget(self._build_input())
         self._refresh_status()
+        ai_client.add_listener(self._refresh_status)
+        if window_mode:
+            self.btn_expand.hide()
 
     # -- construction --
     def _build_header(self):
@@ -281,13 +296,13 @@ class AIChatPanel(QWidget):
         self._status.setStyleSheet(f"color: {Theme.TEXT_MUTED}; font-size: 11px; background: transparent;")
         col.addWidget(self._status)
         lay.addLayout(col, 1)
-        btn_set = _icon_button("settings", "AI settings")
-        btn_set.clicked.connect(self._open_setup)
         btn_clear = _icon_button("clear_chat", "Clear conversation")
         btn_clear.clicked.connect(self.clear)
+        self.btn_expand = _icon_button("expand", "Full screen")
+        self.btn_expand.clicked.connect(lambda: self.set_expanded(not self._expanded))
         btn_close = _icon_button("close", "Close")
         btn_close.clicked.connect(self.close_panel)
-        for b in (btn_set, btn_clear, btn_close):
+        for b in (btn_clear, self.btn_expand, btn_close):
             lay.addWidget(b)
         return w
 
@@ -325,18 +340,9 @@ class AIChatPanel(QWidget):
                      "in plain language.", Theme.TEXT_MUTED, 13)
         sub.setAlignment(Qt.AlignmentFlag.AlignHCenter)
         lay.addWidget(sub)
-        self._setup_btn = QPushButton("Connect an AI to get started")
-        self._setup_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._setup_btn.setStyleSheet(
-            f"QPushButton {{ background: {Theme.ACCENT}; color: white; border: none; border-radius: 10px;"
-            f"padding: 10px 14px; font-size: 13px; font-weight: 600; }}"
-            f"QPushButton:hover {{ background: {Theme.ACCENT_HOVER}; }}")
-        self._setup_btn.clicked.connect(self._open_setup)
-        lay.addWidget(self._setup_btn)
         lay.addSpacing(2)
         for q in SUGGESTIONS:
             lay.addWidget(self._suggestion_button(q))
-        self._setup_btn.setVisible(not ai_client.is_configured())
         return w
 
     def _suggestion_button(self, q: str, compact: bool = False) -> QPushButton:
@@ -391,16 +397,63 @@ class AIChatPanel(QWidget):
         return self._open
 
     def open(self):
+        if self._window_mode:
+            return
         if not self._open:
             self._open = True
             self._animate(WIDTH + Theme.GAP)
             self.toggled.emit(True)
 
     def close_panel(self):
+        if self._window_mode:
+            self.toggled.emit(False)
+            return
+        if self._expanded:
+            self.set_expanded(False)
         if self._open:
             self._open = False
             self._animate(0)
             self.toggled.emit(False)
+
+    def set_expanded(self, on: bool):
+        if on == self._expanded:
+            return
+        self._expanded = on
+        if on:
+            self.open()
+            self._anim.stop()
+            self.setMaximumWidth(16777215)
+            self._card.setMinimumWidth(WIDTH)
+            self._card.setMaximumWidth(16777215)
+        else:
+            self._card.setFixedWidth(WIDTH)
+            self.setMaximumWidth(WIDTH + Theme.GAP if self._open else 0)
+        self.btn_expand.setIcon(Icons.get("compress" if on else "expand", Theme.TEXT_SECONDARY))
+        self.btn_expand.setToolTip("Exit full screen (Esc)" if on else "Full screen")
+        width = BUBBLE_WIDE if on else BUBBLE_MAX
+        for b in self._scroll.widget().findChildren(_AIBubble):
+            b.setFixedWidth(width)
+        self._center_chat()
+        self.expanded.emit(on)
+        self._scroll_down()
+
+    def _center_chat(self):
+        # keep the conversation readable on a wide window
+        side = 16
+        if self._expanded:
+            side = max(16, (self._scroll.viewport().width() - CHAT_WIDE) // 2)
+        self._chat.setContentsMargins(side, 16, side, 12)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        if self._expanded:
+            self._center_chat()
+
+    def keyPressEvent(self, event):
+        if event.key() == Qt.Key.Key_Escape and self._expanded:
+            self.set_expanded(False)
+            return
+        super().keyPressEvent(event)
 
     def toggle(self):
         self.close_panel() if self._open else self.open()
@@ -412,28 +465,45 @@ class AIChatPanel(QWidget):
         self._anim.start()
 
     # -- setup --
-    def _open_setup(self):
-        from ui.components.ai_settings_dialog import AISettingsDialog
-        if AISettingsDialog(self).exec():
-            self._refresh_status()
-
     def _refresh_status(self):
-        cfg = ai_client.load_config()
         ok = ai_client.is_configured()
         self._status.setText(
             f"<span style='color:{Theme.SUCCESS if ok else Theme.WARNING};'>\u25CF</span>&nbsp; "
-            + (f"Connected \u00b7 {html.escape(cfg['model'])}" if ok else "Not connected"))
-        if hasattr(self, "_setup_btn"):
-            try:
-                self._setup_btn.setVisible(not ok)
-            except RuntimeError:
-                pass
+            + ("Connected" if ok else "Not connected"))
 
     # -- conversation --
     def set_report(self, report):
         self._report = report
 
     def clear(self):
+        # the clear button wipes the shared conversation for every panel
+        ai_session.clear()
+        self._reset_ui()
+        self._seen_version = ai_session.version
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        self._sync()
+
+    def _sync(self):
+        # pick up messages written in another panel
+        if self._busy or self._seen_version == ai_session.version:
+            return
+        self._reset_ui()
+        if ai_session.entries:
+            self._welcome.hide()
+        for e in ai_session.entries:
+            self._add_user(e["q"])
+            bubble = _AIBubble(self._on_action, BUBBLE_WIDE if self._expanded else BUBBLE_MAX)
+            blocks = markdown_blocks(e["a"])
+            if e["actions"]:
+                blocks.append({"type": "actions", "items": e["actions"]})
+            bubble.set_blocks(blocks)
+            self._add_ai_row(bubble)
+        self._history = ai_session.history()
+        self._seen_version = ai_session.version
+
+    def _reset_ui(self):
         self.stop()
         self._history.clear()
         self._typing = self._typing_row = self._bubble = self._chips = None
@@ -460,11 +530,8 @@ class AIChatPanel(QWidget):
         question = (question or "").strip()
         if not question or self._busy:
             return
+        self._sync()
         self.open()
-        if not ai_client.is_configured():
-            self._open_setup()
-            if not ai_client.is_configured():
-                return
         self._welcome.hide()
         self._remove_chips()
         self._add_user(question)
@@ -540,6 +607,13 @@ class AIChatPanel(QWidget):
         except Exception:
             pass
         snap["activity"] = [{"title": n.title, "detail": n.detail, "kind": n.kind} for n in notifications.items()[:10]]
+        try:
+            from core.capture import get_capture_service
+            cap = get_capture_service()
+            if cap.count():
+                snap["capture"] = cap.summary()
+        except Exception:
+            pass
         return snap
 
     # -- streaming --
@@ -570,6 +644,8 @@ class AIChatPanel(QWidget):
         if self._answer and not getattr(self, "_failed", False):
             self._history += [{"role": "user", "content": self._question},
                               {"role": "assistant", "content": self._answer}]
+            ai_session.add(self._question, self._answer, self._actions)
+            self._seen_version = ai_session.version
         self._failed = False
         self._worker = None
         self._typing = None
@@ -582,7 +658,7 @@ class AIChatPanel(QWidget):
             self._drop_layout(self._typing_row)
             self._typing_row = None
         self._typing = None
-        self._bubble = _AIBubble(self._on_action)
+        self._bubble = _AIBubble(self._on_action, BUBBLE_WIDE if self._expanded else BUBBLE_MAX)
         self._add_ai_row(self._bubble)
 
     def _render(self, final: bool = False):
@@ -622,7 +698,7 @@ class AIChatPanel(QWidget):
         probe = QLabel(text)
         probe.setStyleSheet("font-size: 13px;")
         probe.ensurePolished()
-        label.setFixedWidth(min(250, probe.sizeHint().width() + 2))
+        label.setFixedWidth(min(560 if self._expanded else 250, probe.sizeHint().width() + 2))
         lay.addWidget(label)
         row = QHBoxLayout()
         row.addStretch(1)

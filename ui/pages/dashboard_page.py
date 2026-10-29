@@ -2,8 +2,10 @@
 
 import time
 
-from PyQt6.QtCore import Qt, QTimer
+from PyQt6.QtCore import QRectF, Qt, QTimer
+from PyQt6.QtGui import QColor, QFont, QPainter, QPen
 from PyQt6.QtWidgets import (
+    QFrame,
     QHBoxLayout,
     QLabel,
     QProgressBar,
@@ -25,6 +27,41 @@ from ui.widgets.gauge import Gauge
 from ui.widgets.live_chart import LiveChart
 from ui.widgets.stat_card import StatCard
 from workers import OneshotWorker, StreamWorker
+
+
+class _ScoreRing(QWidget):
+    """Round 0-100 score, green when healthy."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setFixedSize(96, 96)
+        self._score = None
+
+    def set_score(self, score):
+        self._score = score
+        self.update()
+
+    def paintEvent(self, _):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        r = QRectF(8, 8, 80, 80)
+        p.setPen(QPen(QColor(Theme.BORDER), 8))
+        p.drawEllipse(r)
+        s = self._score
+        color = QColor(Theme.TEXT_MUTED if s is None else Theme.SUCCESS if s >= 85
+                       else Theme.WARNING if s >= 65 else Theme.DANGER)
+        if s is not None:
+            pen = QPen(color, 8)
+            pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+            p.setPen(pen)
+            p.drawArc(r, 90 * 16, -int(360 * 16 * s / 100))
+        f = QFont(Theme.FONT_MONO_PRIMARY)
+        f.setPixelSize(22)
+        f.setBold(True)
+        p.setFont(f)
+        p.setPen(color)
+        p.drawText(r, Qt.AlignmentFlag.AlignCenter, "\u2014" if s is None else str(s))
+        p.end()
 
 
 class DashboardPage(BasePage):
@@ -86,11 +123,139 @@ class DashboardPage(BasePage):
         scroll.setWidget(inner)
         self.body_layout.addWidget(scroll)
 
+        self._build_hero_row()
         self._build_stat_cards()
         self._build_middle_row()
         self._build_bottom_row()
+        self._build_info_row()
 
-    # -- UI CONSTRUCTION -- 
+        self._hero_state = {"online": None, "ping": None, "loss": None}
+        self._capture_timer = QTimer(self)
+        self._capture_timer.setInterval(1000)
+        self._capture_timer.timeout.connect(self._refresh_capture_card)
+
+    # -- UI CONSTRUCTION --
+    def _build_hero_row(self):
+        from ui.widgets.ui_kit import button
+        row = QHBoxLayout()
+        row.setSpacing(Theme.GAP)
+
+        hero = QFrame()
+        hero.setObjectName("DashHero")
+        hero.setStyleSheet(
+            f"#DashHero {{ background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 {Theme.BG_ELEVATED},"
+            f"stop:1 {Theme.GLASS_CARD}); border: 1px solid {Theme.GLASS_BORDER_HI};"
+            f"border-radius: {Theme.RADIUS_CARD}px; }} #DashHero QLabel {{ background: transparent; }}")
+        hero.setFixedHeight(150)
+        lay = QHBoxLayout(hero)
+        lay.setContentsMargins(20, 16, 20, 16)
+        lay.setSpacing(18)
+        self.score_ring = _ScoreRing()
+        lay.addWidget(self.score_ring)
+        col = QVBoxLayout()
+        col.setSpacing(4)
+        eyebrow = QLabel("AT A GLANCE")
+        eyebrow.setStyleSheet(f"color: {Theme.ACCENT_GLOW}; font-size: 10px; font-weight: 700; letter-spacing: 1.3px;")
+        col.addWidget(eyebrow)
+        self.hero_title = QLabel("Checking your network\u2026")
+        self.hero_title.setStyleSheet(f"color: {Theme.TEXT_PRIMARY}; font-size: 18px; font-weight: 600;")
+        col.addWidget(self.hero_title)
+        self.hero_text = QLabel("")
+        self.hero_text.setWordWrap(True)
+        self.hero_text.setTextFormat(Qt.TextFormat.RichText)
+        self.hero_text.setStyleSheet(f"color: {Theme.TEXT_SECONDARY}; font-size: {Theme.FONT_SIZE_SMALL}px;")
+        col.addWidget(self.hero_text)
+        btns = QHBoxLayout()
+        self.btn_hero_ai = button("Ask Netwer AI what to improve", "ai", "ai")
+        self.btn_hero_ai.clicked.connect(lambda: self._ask_ai(
+            "Look at my network status, devices and traffic. Is anything wrong, and what should I improve?"))
+        btns.addWidget(self.btn_hero_ai)
+        btns.addStretch()
+        col.addLayout(btns)
+        lay.addLayout(col, 1)
+        row.addWidget(hero, 5)
+
+        self.capture_card = Card("Packet Capture", "capture")
+        self.capture_card.setFixedHeight(150)
+        self.btn_open_capture = button("Open", "capture")
+        self.btn_open_capture.clicked.connect(lambda: self._window and self._window.goto("capture"))
+        self.capture_card.header_layout.addWidget(self.btn_open_capture)
+        self.capture_status = QLabel("Not capturing. Open Packet Capture and press Start.")
+        self.capture_status.setWordWrap(True)
+        self.capture_status.setStyleSheet(f"color: {Theme.TEXT_SECONDARY}; font-size: {Theme.FONT_SIZE_SMALL}px;")
+        self.capture_card.content_layout.addWidget(self.capture_status)
+        from ui.pages.capture_page import MixBar
+        self.capture_mix = MixBar()
+        self.capture_card.content_layout.addWidget(self.capture_mix)
+        self.capture_hosts = QLabel("")
+        self.capture_hosts.setTextFormat(Qt.TextFormat.RichText)
+        self.capture_hosts.setStyleSheet(f"color: {Theme.TEXT_MUTED}; font-size: {Theme.FONT_SIZE_TINY}px;")
+        self.capture_card.content_layout.addWidget(self.capture_hosts)
+        self.capture_card.content_layout.addStretch()
+        row.addWidget(self.capture_card, 3)
+        self._grid.addLayout(row, 0)
+
+    def _ask_ai(self, question):
+        win = self._window or self.window()
+        if hasattr(win, "ask_ai"):
+            win.ask_ai(question)
+
+    def _update_hero(self):
+        """Rule-based one-line verdict from the latest ping and the capture."""
+        st = self._hero_state
+        online, ping, loss = st["online"], st["ping"], st["loss"]
+        if online is None:
+            return
+        devices = len(getattr(self, "_all_devices", None) or [])
+        from core.capture import get_capture_service
+        cap = get_capture_service()
+        if not online:
+            score, title = 5, "You are offline"
+            text = "Netwer gets no answer from the internet. Run Network Health to find where it stops."
+        else:
+            score = 100
+            score -= 25 if loss >= 5 else 10 if loss >= 1 else 0
+            score -= 15 if ping > 120 else 6 if ping > 60 else 0
+            tcp = sum(c["tcp"] for c in cap.conv.values())
+            rpct = cap.retrans / tcp * 100 if tcp else 0
+            score -= 10 if rpct > 3 else 3 if rpct > 1 else 0
+            score -= 3 if cap.plaintext else 0
+            title = ("Your network is healthy" if score >= 85 else
+                     "Your network works, with a few issues" if score >= 65 else "Your connection has problems")
+            text = f"Internet answers in <b>{ping} ms</b> with <b>{loss}%</b> packet loss"
+            text += f", {devices} device{'s' if devices != 1 else ''} online." if devices else "."
+            if cap.count():
+                if cap.retrans:
+                    worst = max(cap.conv.items(), key=lambda kv: kv[1]["retrans"])
+                    text += f" The capture shows {cap.retrans} TCP retransmissions, mostly to {cap.host(worst[0])}."
+                if cap.plaintext:
+                    proto, host = next(iter(cap.plaintext))
+                    text += f" One connection to {host} uses unencrypted {proto}."
+        self.score_ring.set_score(max(0, min(100, score)))
+        self.hero_title.setText(title)
+        self.hero_text.setText(text)
+
+    def _refresh_capture_card(self):
+        from core.capture import get_capture_service
+        cap = get_capture_service()
+        n = cap.count()
+        if not n:
+            self.capture_status.setText("Capturing\u2026 waiting for packets." if cap.running
+                                        else "Not capturing. Open Packet Capture and press Start.")
+            self.capture_mix.set_parts([])
+            self.capture_hosts.setText("")
+            return
+        size = cap.total_bytes
+        size_s = f"{size / 1048576:.1f} MB" if size >= 1048576 else f"{size / 1024:.0f} KB"
+        state = "Capturing" if cap.running else "Stopped"
+        self.capture_status.setText(f"{state} on {cap.iface}  \u00b7  {n:,} packets  \u00b7  {size_s}")
+        self.capture_mix.set_parts(cap.proto_mix.most_common(8))
+        top = sorted(cap.conv.items(), key=lambda kv: -kv[1]["bytes"])[:2]
+        self.capture_hosts.setText("<br>".join(
+            f"<span style='color:{Theme.TEXT_BODY}'>{cap.host(ip)}</span> \u00b7 {c['bytes'] / 1024:.0f} KB"
+            for ip, c in top))
+        self._update_hero()
+
     def _build_stat_cards(self):
         row = QHBoxLayout()
         row.setSpacing(Theme.GAP)
@@ -156,8 +321,36 @@ class DashboardPage(BasePage):
 
         row.addWidget(monitor_card, 3)
 
-        right_col = QVBoxLayout()
-        right_col.setSpacing(Theme.GAP)
+        from ui.widgets.network_map import NetworkMap
+        self.map_card = Card("Network Map", "network")
+        self.map_card.setMinimumHeight(MIDDLE_HEIGHT)
+        self.btn_expand_map = QPushButton("  Expand")
+        self.btn_expand_map.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_expand_map.setIcon(Icons.get("network", Theme.ACCENT))
+        self.btn_expand_map.setStyleSheet(
+            f"QPushButton {{ background: {Theme.GLASS_INPUT};"
+            f"color: {Theme.TEXT_SECONDARY};"
+            f"border: 1px solid {Theme.GLASS_BORDER};"
+            f"border-radius: {Theme.RADIUS_CONTROL}px;"
+            f"padding: 5px 12px; font-size: 12px; }}"
+            f"QPushButton:hover {{ border-color: {Theme.GLASS_BORDER_HI};"
+            f"color: {Theme.TEXT_PRIMARY}; }}")
+        self.btn_expand_map.clicked.connect(self._open_topology)
+        legend_map = QHBoxLayout()
+        legend_map.setSpacing(12)
+        legend_map.addWidget(self._legend_item("in", Theme.ACCENT))
+        legend_map.addWidget(self._legend_item("out", Theme.ACCENT_PURPLE))
+        self.map_card.header_layout.addLayout(legend_map)
+        self.map_card.header_layout.addWidget(self.btn_expand_map)
+        self.network_map = NetworkMap()
+        self.network_map.node_clicked.connect(self._open_device_details)
+        self.map_card.content_layout.addWidget(self.network_map, 1)
+        row.addWidget(self.map_card, 2)
+        self._grid.addLayout(row, 0)
+
+    def _build_info_row(self):
+        row = QHBoxLayout()
+        row.setSpacing(Theme.GAP)
 
         self.summary_card = Card("Network Summary", "summary")
         self._summary_values = {}
@@ -165,7 +358,6 @@ class DashboardPage(BasePage):
             container, val_lbl = kv_row(key, "\u2014", mono=True)
             self._summary_values[key] = val_lbl
             self.summary_card.content_layout.addWidget(container)
-        right_col.addWidget(self.summary_card)
 
         self.wifi_card = Card("WiFi", "wifi")
         wifi_body = QHBoxLayout()
@@ -191,9 +383,8 @@ class DashboardPage(BasePage):
         wifi_body.addWidget(self.wifi_signal, 0,
                             Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignHCenter)
         self.wifi_card.content_layout.addLayout(wifi_body)
-        right_col.addWidget(self.wifi_card)
-
-        row.addLayout(right_col, 2)
+        row.addWidget(self.summary_card, 1)
+        row.addWidget(self.wifi_card, 1)
         self._grid.addLayout(row, 0)
 
     def _legend_item(self, text, color):
@@ -220,27 +411,6 @@ class DashboardPage(BasePage):
         row.setSpacing(Theme.GAP)
 
         BOTTOM_HEIGHT = 300
-
-        from ui.widgets.network_map import NetworkMap
-        self.map_card = Card("Network Map", "network")
-        self.map_card.setFixedHeight(BOTTOM_HEIGHT)
-        self.btn_expand_map = QPushButton("  Expand")
-        self.btn_expand_map.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.btn_expand_map.setIcon(Icons.get("network", Theme.ACCENT))
-        self.btn_expand_map.setStyleSheet(
-            f"QPushButton {{ background: {Theme.GLASS_INPUT};"
-            f"color: {Theme.TEXT_SECONDARY};"
-            f"border: 1px solid {Theme.GLASS_BORDER};"
-            f"border-radius: {Theme.RADIUS_CONTROL}px;"
-            f"padding: 5px 12px; font-size: 12px; }}"
-            f"QPushButton:hover {{ border-color: {Theme.GLASS_BORDER_HI};"
-            f"color: {Theme.TEXT_PRIMARY}; }}")
-        self.btn_expand_map.clicked.connect(self._open_topology)
-        self.map_card.header_layout.addWidget(self.btn_expand_map)
-        self.network_map = NetworkMap()
-        self.network_map.node_clicked.connect(self._open_device_details)
-        self.map_card.content_layout.addWidget(self.network_map)
-        row.addWidget(self.map_card, 2)
 
         self.devices_card = Card("Top Devices", "devices")
         self.devices_card.setFixedHeight(BOTTOM_HEIGHT)
@@ -301,13 +471,9 @@ class DashboardPage(BasePage):
         self.devices_card.content_layout.addWidget(dev_scroll)
         row.addWidget(self.devices_card, 2)
 
-        # Third column - Recent Activity stacked above "System Resources"
-        right_col = QVBoxLayout()
-        right_col.setSpacing(Theme.GAP)
-
         from ui.widgets.recent_activity import RecentActivity
         self.activity_card = Card("Recent Activity", "check")
-        self.activity_card.setFixedHeight(130)
+        self.activity_card.setFixedHeight(BOTTOM_HEIGHT)
 
         self.btn_view_all = QPushButton("View All")
         self.btn_view_all.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -321,10 +487,10 @@ class DashboardPage(BasePage):
 
         self.recent_activity = RecentActivity(limit=5)
         self.activity_card.content_layout.addWidget(self.recent_activity)
-        right_col.addWidget(self.activity_card)
+        row.addWidget(self.activity_card, 2)
 
         self.resources_card = Card("System Resources", "resources")
-        self.resources_card.setFixedHeight(BOTTOM_HEIGHT - 130 - Theme.GAP)
+        self.resources_card.setFixedHeight(BOTTOM_HEIGHT)
         gauges = QHBoxLayout()
         gauges.setSpacing(0)
         gauges.setContentsMargins(8, 0, 8, 0)
@@ -336,9 +502,7 @@ class DashboardPage(BasePage):
             gauges.addWidget(g)
             gauges.addStretch(1)
         self.resources_card.content_layout.addLayout(gauges)
-        right_col.addWidget(self.resources_card)
-
-        row.addLayout(right_col, 2)
+        row.addWidget(self.resources_card, 2)
 
         self._grid.addLayout(row, 0)
 
@@ -357,8 +521,11 @@ class DashboardPage(BasePage):
             self._refresh_info()
             self._sync_discovery_snapshot()
         self._discovery_timer.start()
+        self._capture_timer.start()
+        self._refresh_capture_card()
 
     def on_leave(self):
+        self._capture_timer.stop()
         self._resource_timer.stop()
         self._info_timer.stop()
         self._discovery_timer.stop()
@@ -451,6 +618,8 @@ class DashboardPage(BasePage):
         reachable = [r for r in items if not r.get("unreachable")]
         self._internet_online = bool(reachable)
         if not reachable:
+            self._hero_state.update(online=False)
+            self._update_hero()
             self.card_internet.set_value("Offline", color=Theme.DANGER)
             self.card_loss.set_tile_tint("#351a24", "#ff6b8a")
             self.card_loss.set_value("100", "%", color=Theme.DANGER, subtitle="No response")
@@ -460,6 +629,8 @@ class DashboardPage(BasePage):
         avg_ping = round(sum(r["avg"] for r in reachable) / len(reachable))
         avg_loss = round(sum(r["loss"] for r in reachable) / len(reachable), 1)
         traffic_history.add_connectivity(avg_ping, avg_loss)
+        self._hero_state.update(online=True, ping=avg_ping, loss=avg_loss)
+        self._update_hero()
         self.card_internet.set_value("Connected", color=Theme.SUCCESS,
                                      subtitle=f"Ping: {avg_ping} ms")
         if avg_loss < 1:
@@ -673,7 +844,7 @@ class DashboardPage(BasePage):
                 count = int(event.get("found", 0))
                 self._devices_placeholder.setText(
                     f"Scan complete · {count} device(s) found." if count else
-                    "No devices responded or were present in the neighbor cache.")
+                    "No devices responded.")
             self._devices_placeholder.show()
             self._sync_discovery_snapshot()
 
@@ -694,7 +865,7 @@ class DashboardPage(BasePage):
             count = len(snapshot["devices"])
             self._devices_placeholder.setText(
                 f"Scan complete · {count} device(s) found." if count else
-                "No devices responded or were present in the neighbor cache.")
+                "No devices responded.")
             self._devices_placeholder.show()
             from app.activity import activity
             activity.add("Network scan completed", f"{count} devices found", kind="success")
@@ -739,13 +910,12 @@ class DashboardPage(BasePage):
             if snapshot.get("status") in ("idle", "complete"):
                 self._devices_placeholder.setText(
                     "Press Rescan to discover devices." if snapshot.get("status") == "idle"
-                    else "No devices responded or were present in the neighbor cache.")
+                    else "No devices responded.")
                 self._devices_placeholder.show()
             return
         responding = sum(1 for d in devices if d.get("reachability") == "reachable")
-        cached = len(devices) - responding
         self.card_devices.set_value(str(len(devices)), color=Theme.WARNING,
-                                    subtitle=f"{responding} responding · {cached} cached")
+                                    subtitle=f"{responding} responding")
         self._devices_placeholder.hide()
         for dev in devices[:100]:
             idx = max(0, self._devices_container.count() - 2)
@@ -832,7 +1002,6 @@ class DashboardPage(BasePage):
         reachability = dev.get("reachability")
         status_text, status_color = {
             "reachable": ("Responding", Theme.SUCCESS),
-            "cached": ("Neighbor cache", Theme.WARNING),
         }.get(reachability, ("Discovered", Theme.TEXT_MUTED))
         status = QLabel(status_text)
         status.setStyleSheet(f"color: {status_color}; font-size: {Theme.FONT_SIZE_TINY}px; background: transparent;")
@@ -927,6 +1096,7 @@ class DashboardPage(BasePage):
             traffic_history.set_adapter(adapter)
             traffic_history.add_bandwidth(d["dl"], d["ul"])
             self.chart.push(d["dl"], d["ul"])
+            self.network_map.set_traffic(d["dl"], d["ul"])
             # Adaptive units: Kbps / Mbps / Gbps depending on the value
             dl_val, dl_unit = format_speed(d["dl"])
             ul_val, ul_unit = format_speed(d["ul"])

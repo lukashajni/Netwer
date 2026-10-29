@@ -45,6 +45,7 @@ FEATURES = [
     ("ping_sweep", "Device discovery"),
     ("speedtest", "Speed testing"),
     ("report", "PDF reports"),
+    ("ai", "AI assistant"),
 ]
 
 LICENSES = """NETWER uses the following open-source components:

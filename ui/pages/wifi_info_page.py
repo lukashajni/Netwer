@@ -16,6 +16,7 @@ from app.resources import Icons
 from app.theme import Theme
 from ui.pages.base_page import BasePage
 from ui.widgets.card import Card, kv_row
+from ui.widgets.channel_analyzer import ChannelAnalyzer
 from ui.widgets.signal_bars import SignalBars, dbm_to_percent, signal_color, signal_quality
 from ui.widgets.wifi_signal import WiFiSignal
 from workers import OneshotWorker
@@ -45,6 +46,10 @@ class WiFiInfoPage(BasePage):
 
         self._build_headline_row()
         self._build_detail_row()
+        self.analyzer = ChannelAnalyzer()
+        self.analyzer.rescan_requested.connect(self._scan_networks)
+        self.body_layout.addWidget(self.analyzer)
+        self._auto_scanned = False
 
         self.body_layout.addStretch(1)
 
@@ -275,9 +280,10 @@ class WiFiInfoPage(BasePage):
                        Theme.TEXT_PRIMARY, Theme.SUCCESS)
         channel = d.get("channel", "")
         band = d.get("band", "")
-        band_short = "5 GHz" if "5 GHz" in band else ("2.4 GHz" if "2.4" in band else band)
+        band_short = next((b for b in ("2.4 GHz", "5 GHz", "6 GHz") if b in band), band)
+        ch_text = "" if channel in ("", "\u2014") else channel
         self._set_stat(self.card_band,
-                       f"{band_short}" + (f"  ch {channel}" if channel else ""),
+                       f"{band_short}" + (f"  ch {ch_text}" if ch_text else ""),
                        d.get("radio", ""), Theme.ACCENT)
         auth = d.get("auth", "\u2014")
         self._set_stat(self.card_security, auth,
@@ -295,8 +301,15 @@ class WiFiInfoPage(BasePage):
         self._set_detail("Cipher", d.get("cipher"))
         self._set_detail("Link Speed", d.get("link_speed"))
 
+        # Channel Analyzer: knows which access point is yours and scans once automatically
+        self.analyzer.set_connection(d.get("bssid", ""), channel, band_short)
+        if not self._auto_scanned and self._last_scan_time is None:
+            self._auto_scanned = True
+            QTimer.singleShot(500, self._scan_networks)
+
     def _set_disconnected(self):
         self._connected = False
+        self.analyzer.set_connection("", None, "")
         self.signal_glyph.set_disconnected()
         self.signal_verdict.setText("No WiFi")
         self.signal_verdict.setStyleSheet(
@@ -341,6 +354,7 @@ class WiFiInfoPage(BasePage):
         if self._scan_worker is not None and self._scan_worker.isRunning():
             return
         self.btn_scan.setEnabled(False)
+        self.analyzer.set_scanning(True)
         self._clear_networks()
         self._net_placeholder.setText("Scanning for networks…")
         self._net_placeholder.show()
@@ -348,7 +362,7 @@ class WiFiInfoPage(BasePage):
         w = OneshotWorker(self.core.scan_wifi_networks)
         w.result.connect(self._on_networks)
         w.error.connect(lambda e: self._net_placeholder.setText(f"Scan failed: {e}"))
-        w.done.connect(lambda: self.btn_scan.setEnabled(True))
+        w.done.connect(lambda: (self.btn_scan.setEnabled(True), self.analyzer.set_scanning(False)))
         self.register_worker(w)
         self._scan_worker = w
         w.start()
@@ -367,6 +381,7 @@ class WiFiInfoPage(BasePage):
         self._last_scan_time = time.time()
         self._update_last_scan_label()
 
+        self.analyzer.set_scan(data.get("aps", []))
         networks = data.get("networks", [])
         if not networks:
             self._net_placeholder.setText("No networks found")

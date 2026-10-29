@@ -208,10 +208,25 @@ class HealthPage(BasePage):
 
         self.ai_panel = AIChatPanel()
         self.ai_panel.navigate.connect(self._navigate)
+        self.ai_panel.expanded.connect(self._on_ai_expanded)
+        self._hidden_for_ai = []
         self.ai_panel.toggled.connect(self.btn_ai.setChecked)
         self.btn_ai.clicked.connect(self.ai_panel.toggle)
         columns.addWidget(self.ai_panel)
+        self._columns = columns
         self.body_layout.addLayout(columns, 1)
+
+    def _on_ai_expanded(self, on: bool):
+        self._columns.setStretch(0, 0 if on else 1)
+        self._columns.setStretch(1, 1 if on else 0)
+        if on:
+            self._hidden_for_ai = [w for w in (self.verdict, self.findings_card, self.metrics_card, self.status) if w.isVisible()]
+            for w in self._hidden_for_ai:
+                w.hide()
+        else:
+            for w in self._hidden_for_ai:
+                w.show()
+            self._hidden_for_ai = []
 
     def _ask_about(self, finding):
         self.ai_panel.ask_about(finding)

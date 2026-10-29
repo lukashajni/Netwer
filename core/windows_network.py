@@ -461,6 +461,21 @@ def _freq_info(mhz):
     return "", f"{mhz / 1000:g} GHz"
 
 
+def _width_from_ies(blob: bytes) -> int:
+    # Estimated channel width in MHz from the HT and VHT operation elements
+    width, i = 20, 0
+    while i + 2 <= len(blob):
+        eid, ln = blob[i], blob[i + 1]
+        body = blob[i + 2:i + 2 + ln]
+        i += 2 + ln
+        if eid == 61 and len(body) >= 2 and body[1] & 4 and (body[1] & 3) in (1, 3):
+            width = 40                                    # HT operation: secondary channel in use
+        elif eid == 192 and len(body) >= 3 and body[0] >= 1:
+            ccfs0, ccfs1 = body[1], body[2]               # VHT operation
+            width = 160 if body[0] >= 2 or (ccfs1 and abs(ccfs1 - ccfs0) == 8) else 80
+    return width
+
+
 def _bss_entries(wlan, handle, guid, ssid=None, bss_type=3, secure=False):
     # BSS entries the adapter knows about: (ssid, bssid, centre MHz, phy type, rssi)
     fn = wlan.WlanGetNetworkBssList
@@ -479,7 +494,9 @@ def _bss_entries(wlan, handle, guid, ssid=None, bss_type=3, secure=False):
         for i in range(header.count):
             e = _WlanBssEntry.from_address(base + i * ctypes.sizeof(_WlanBssEntry))
             name = bytes(e.ssid.value[:min(e.ssid.length, 32)]).decode("utf-8", "replace")
-            out.append((name, bytes(e.bssid), e.center_freq / 1000.0, e.phy_type, e.rssi))
+            ie_addr = ctypes.addressof(e) + e.ie_offset
+            width = _width_from_ies(ctypes.string_at(ie_addr, e.ie_size)) if e.ie_size and e.ie_offset else 20
+            out.append((name, bytes(e.bssid), e.center_freq / 1000.0, e.phy_type, e.rssi, width))
     finally:
         wlan.WlanFreeMemory(ptr)
     return out
@@ -554,7 +571,7 @@ def current_wifi():
                 # Channel and band come from the access point we are connected to
                 mhz, phy = 0.0, assoc.phy_type
                 try:
-                    for _n, mac, freq, bss_phy, _r in _bss_entries(
+                    for _n, mac, freq, bss_phy, _r, _w in _bss_entries(
                             wlan, handle, interface.guid, assoc.ssid, assoc.bss_type, bool(sec.security_enabled)):
                         if mac == bytes(assoc.bssid):
                             mhz, phy = freq, bss_phy or phy
@@ -583,6 +600,7 @@ def scan_wifi_networks():
     try:
         interfaces, wlan, handle, list_ptr = _wlan_interfaces()
         networks = {}
+        aps = {}
         failures = []
         scan = wlan.WlanScan
         scan.argtypes = [wintypes.HANDLE, ctypes.POINTER(_Guid), ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p]
@@ -609,9 +627,15 @@ def scan_wifi_networks():
                         continue
                     try:
                         bss_by_ssid = {}
-                        for name, _mac, freq, phy, rssi in _bss_entries(wlan, handle, interface.guid):
+                        for name, mac, freq, phy, rssi, width in _bss_entries(wlan, handle, interface.guid):
                             if name and (name not in bss_by_ssid or rssi > bss_by_ssid[name][2]):
                                 bss_by_ssid[name] = (freq, phy, rssi)
+                            ch, band = _freq_info(freq)
+                            key = mac.hex(":").upper()
+                            if ch and (key not in aps or rssi > aps[key]["rssi"]):
+                                aps[key] = {"ssid": name or "(hidden network)", "bssid": key, "channel": int(ch),
+                                            "band": band, "mhz": freq, "rssi": int(rssi), "width": width,
+                                            "radio": _PHY.get(phy, "")}
                     except Exception:
                         bss_by_ssid = {}
                     header = ctypes.cast(ptr, ctypes.POINTER(_WlanNetworkList)).contents
@@ -639,7 +663,9 @@ def scan_wifi_networks():
         found = sorted(networks.values(), key=lambda item: item["signal"], reverse=True)
         if not found and failures:
             return {"error": "; ".join(failures)}
-        result = {"networks": found, "count": len(found)}
+        for ap in aps.values():
+            ap["auth"] = (networks.get(ap["ssid"]) or {}).get("auth", "")
+        result = {"networks": found, "count": len(found), "aps": sorted(aps.values(), key=lambda a: -a["rssi"])}
         if failures:
             result["errors"] = failures
         return result

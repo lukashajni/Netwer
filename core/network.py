@@ -347,26 +347,69 @@ _PUBLIC_IP_CACHE = None
 _PUBLIC_IP_CACHE_AT = 0
 
 
+_BRACKET_IP_RE = re.compile(r'[\[(]\s*(\d{1,3}(?:\.\d{1,3}){3})\s*[\])]')
+
+
+def _valid_ip(text):
+    parts = text.split(".")
+    return len(parts) == 4 and all(p.isdigit() and int(p) <= 255 for p in parts)
+
+
+def _hop_address(rest):
+    # tracert prints "name [1.2.3.4]". Reverse-DNS names often hold the address backwards
+    # (206.180.250.142.bc.googleusercontent.com), so the bracketed one wins.
+    bracket = _BRACKET_IP_RE.search(rest)
+    if bracket and _valid_ip(bracket.group(1)):
+        return bracket.group(1)
+    candidates = [m for m in _IP_RE.findall(rest) if _valid_ip(m)]
+    return candidates[-1] if candidates else None
+
+
 def _parse_hop_line(line):
     match = _HOP_RE.match(line.rstrip())
     if not match:
         return None
     ttl, rest = int(match.group(1)), match.group(2)
-    ip_match = _IP_RE.search(rest)
-    if not ip_match:
+    ip = _hop_address(rest)
+    if not ip:
         return {"ttl": ttl, "timeout": True}
     times = [float(x.replace(",", ".")) for x in _MS_RE.findall(rest)]
-    ip = ip_match.group(1)
     host_match = re.search(r'([A-Za-z0-9][A-Za-z0-9.\-]*[A-Za-z0-9])\s*[\[(]\s*' + re.escape(ip), rest)
     hostname = host_match.group(1) if host_match and host_match.group(1) != ip else ip
     return {"ttl": ttl, "ip": ip, "hostname": hostname, "times": times,
             "avg": round(sum(times) / len(times)) if times else None}
 
 
+_REPLY_IP_RE = re.compile(r'(\d{1,3}(?:\.\d{1,3}){3}):')
+
+
+def _probe_ttl(resolved, ttl, tries=2):
+    # ping with a fixed ttl for hops tracert missed
+    windows = platform.system() == "Windows"
+    for _ in range(tries):
+        cmd = (["ping", "-n", "1", "-i", str(ttl), "-w", "1500", resolved]
+               if windows else ["ping", "-c", "1", "-t", str(ttl), "-W", "2", resolved])
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True, errors="replace",
+                                    timeout=8, **_no_window())
+            output = (result.stdout or "") + (result.stderr or "")
+        except Exception:
+            continue
+        # reply lines have ip then colon, works on any language
+        match = _REPLY_IP_RE.search(output) or _FROM_RE.search(output)
+        if match and _valid_ip(match.group(1)):
+            ip = match.group(1)
+            timing = _TIME_RE.search(output)
+            avg = round(float(timing.group(1).replace(",", "."))) if timing else None
+            return {"ttl": ttl, "ip": ip, "hostname": ip,
+                    "times": [avg] if avg is not None else [], "avg": avg}
+    return None
+
+
 def _system_trace(resolved, max_hops):
-    cmd = (["tracert", "-h", str(max_hops), "-w", "1000", resolved]
+    cmd = (["tracert", "-d", "-h", str(max_hops), "-w", "2000", resolved]   # -d: no name lookups
            if platform.system() == "Windows" else
-           ["traceroute", "-m", str(max_hops), "-w", "2", "-q", "1", resolved])
+           ["traceroute", "-n", "-m", str(max_hops), "-w", "2", "-q", "1", resolved])
     try:
         proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
                                 text=True, errors="replace", **_no_window())
@@ -381,6 +424,11 @@ def _system_trace(resolved, max_hops):
             if hop is None or hop["ttl"] <= seen:
                 continue
             seen = hop["ttl"]
+            if hop.get("timeout"):
+                # tracert missed it, try ping
+                retry = _probe_ttl(resolved, hop["ttl"])
+                if retry:
+                    hop = retry
             yield hop
             if hop.get("ip") == resolved:
                 break
@@ -407,7 +455,7 @@ def _ping_trace(resolved, max_hops):
         except Exception:
             yield {"ttl": ttl, "timeout": True}
             continue
-        match = _FROM_RE.search(output)
+        match = _REPLY_IP_RE.search(output) or _FROM_RE.search(output)
         if not match:
             yield {"ttl": ttl, "timeout": True}
             continue
@@ -838,7 +886,9 @@ def speedtest_stream(cancel_event=None):
             elif kind == "result":
                 yield {"type": "result", "ping": round(event["ping"]["latency"], 1),
                         "dl": round(event["download"]["bandwidth"] * 8 / 1_048_576, 2),
-                        "ul": round(event["upload"]["bandwidth"] * 8 / 1_048_576, 2)}
+                        "ul": round(event["upload"]["bandwidth"] * 8 / 1_048_576, 2),
+                        "jitter": round(event["ping"].get("jitter", 0) or 0, 1),
+                        "loss": round(event.get("packetLoss", 0) or 0, 1)}
     except Exception as exc:
         yield {"error": str(exc)}
     finally:

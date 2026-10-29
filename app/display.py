@@ -1,6 +1,8 @@
 """Screen-resolution presets and window sizing helpers."""
 from __future__ import annotations
 
+import re
+
 RESOLUTIONS = {
     "auto": "Auto (detect this screen)",
     "1280x720": "1280 × 720",
@@ -21,6 +23,25 @@ _SIZES = {
 }
 
 
+CUSTOM_LABEL = "Custom\u2026"
+CUSTOM_MIN = (1024, 600)
+CUSTOM_MAX = (7680, 4320)
+
+
+def custom_key(width: int, height: int) -> str:
+    width = max(CUSTOM_MIN[0], min(CUSTOM_MAX[0], int(width)))
+    height = max(CUSTOM_MIN[1], min(CUSTOM_MAX[1], int(height)))
+    return f"custom:{width}x{height}"
+
+
+def parse_custom(key: str):
+    """(width, height) for a "custom:WxH" key, otherwise None."""
+    m = re.fullmatch(r"custom:(\d{3,4})x(\d{3,4})", key or "")
+    if not m:
+        return None
+    return tuple(int(v) for v in custom_key(m.group(1), m.group(2))[7:].split("x"))
+
+
 def profile_for(width: int) -> str:
     """compact / standard / large UI density for a screen this wide."""
     if width <= 1366:
@@ -32,6 +53,9 @@ def profile_for(width: int) -> str:
 
 def resolve(key: str, screen_width: int, screen_height: int) -> tuple[int, int]:
     """Resolve a preset key or use the current screen dimensions."""
+    custom = parse_custom(key)
+    if custom:
+        return custom
     return _SIZES.get(key, (screen_width, screen_height))
 
 

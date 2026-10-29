@@ -16,7 +16,7 @@ from app.store import store
 from app.theme import Theme, apply_accent, apply_theme
 from ui.components.notifications_panel import NotificationsPanel
 from ui.components.settings_panel import SettingsPanel
-from ui.components.sidebar import Sidebar
+from ui.components.sidebar import RAIL_WIDTH, Sidebar
 from ui.components.topbar import TopBar
 from ui.pages.base_page import BasePage
 from ui.widgets.loading_overlay import LoadingOverlay
@@ -61,9 +61,15 @@ class MainWindow(QMainWindow):
         outer.setContentsMargins(20, 20, 20, 20)
         outer.setSpacing(18)
 
-        self.sidebar = Sidebar()
+        # The sidebar floats above the pages so it can open over them on hover;
+        # this placeholder keeps the rail's width free in the layout.
+        self._rail_slot = QWidget()
+        self._rail_slot.setFixedWidth(RAIL_WIDTH)
+        outer.addWidget(self._rail_slot)
+        self.sidebar = Sidebar(central)
         self.sidebar.navigate.connect(self._navigate)
-        outer.addWidget(self.sidebar)
+        central.installEventFilter(self)
+        self._central = central
 
         right = QWidget()
         right_col = QVBoxLayout(right)
@@ -78,16 +84,22 @@ class MainWindow(QMainWindow):
         self.topbar.search_submitted.connect(self._on_search)
         self.topbar.suggestion_chosen.connect(self.open_suggestion)
         self.topbar.suggestion_provider = self.search_suggestions
+        self.topbar.toggle_ai.connect(self._toggle_ai)
         right_col.addWidget(self.topbar)
 
         row = QWidget()
         root = QHBoxLayout(row)
+        self._row_layout = root
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
         right_col.addWidget(row, 1)
 
         self.stack = QStackedWidget()
         root.addWidget(self.stack, 1)
+
+        # Netwer AI dock; shares its conversation with the panels on other pages
+        self.ai_dock = self._build_ai_dock()
+        root.addWidget(self.ai_dock)
 
         self.settings_panel = SettingsPanel()
         self.settings_panel.closed.connect(lambda: self._show_panel(None))
@@ -128,6 +140,52 @@ class MainWindow(QMainWindow):
         self._overlay.hide()
         self._loading_active = False
 
+    # -- Sidebar rail --
+    def eventFilter(self, obj, event):
+        from PyQt6.QtCore import QEvent
+        if obj is self._central and event.type() == QEvent.Type.Resize:
+            self._place_sidebar()
+        return super().eventFilter(obj, event)
+
+    def _place_sidebar(self):
+        m = self._central.layout().contentsMargins()
+        self.sidebar.setGeometry(m.left(), m.top(), self.sidebar.railWidth,
+                                 self._central.height() - m.top() - m.bottom())
+        self.sidebar.raise_()
+
+    # -- Netwer AI dock --
+    def _build_ai_dock(self):
+        from ui.widgets.ai_chat_panel import AIChatPanel
+        dock = AIChatPanel()
+        dock.btn_expand.hide()
+        dock.navigate.connect(self._on_ai_target)
+        dock.toggled.connect(lambda on: self.topbar.set_ai_open(on))
+        return dock
+
+    def _toggle_ai(self):
+        if not self.ai_dock.is_open:
+            self._show_panel(None)
+        self.ai_dock.toggle()
+
+    def ask_ai(self, question: str) -> None:
+        """Open the dock and ask the assistant (used by pages such as Packet Capture)."""
+        self._show_panel(None)
+        self.ai_dock.ask(question)
+
+    def _on_ai_target(self, target: str) -> None:
+        if target == "health_run":
+            page = self._pages.get("health")
+            self.goto("health")
+            if page is not None and hasattr(page, "_run"):
+                page._run()
+        elif target.startswith("scan:"):
+            self.scan_ports_for(target[5:])
+        else:
+            self.goto(target)
+
+    def set_capture_state(self, on: bool) -> None:
+        self.topbar.set_capturing(on)
+
     # -- Sliding panels --
     def _toggle_settings(self):
         self._show_panel(None if self._open_panel == "settings" else "settings")
@@ -140,6 +198,8 @@ class MainWindow(QMainWindow):
 
     def _show_panel(self, which):
         """Animate the chosen panel open and the other closed."""
+        if which is not None and self.ai_dock.is_open:
+            self.ai_dock.close_panel()
         self._open_panel = which
         targets = {
             self.settings_panel: SettingsPanel.WIDTH if which == "settings" else 0,
@@ -232,6 +292,14 @@ class MainWindow(QMainWindow):
         self.settings_panel.refresh_theme()
         self.notifications_panel.refresh_theme()
         self.sidebar.refresh_theme()
+        old = self.ai_dock
+        was_open = old.is_open
+        self.ai_dock = self._build_ai_dock()
+        self._row_layout.replaceWidget(old, self.ai_dock)
+        old.setParent(None)
+        old.deleteLater()
+        if was_open:
+            self.ai_dock.open()
         self._rebuild_pages()
 
     def _rebuild_pages(self):
@@ -311,10 +379,10 @@ class MainWindow(QMainWindow):
 
     # -- Page registration --
     def register_page(self, key: str, icon_name: str, page: BasePage,
-                      subtitle: str = "") -> None:
+                      subtitle: str = "", badge: str = "") -> None:
         self._pages[key] = page
         self.stack.addWidget(page)
-        self.sidebar.add_item(key, icon_name, page.PAGE_TITLE, subtitle)
+        self.sidebar.add_item(key, icon_name, page.PAGE_TITLE, subtitle, badge)
         page.set_window(self)
 
     def register_section(self, label: str) -> None:
@@ -368,6 +436,8 @@ class MainWindow(QMainWindow):
         "dns": "dns_tools", "trace": "dns_tools", "traceroute": "dns_tools",
         "reverse": "dns_tools", "lookup": "dns_tools", "route": "dns_tools",
         "speed": "speedtest", "bandwidth": "speedtest", "speedtest": "speedtest",
+        "capture": "capture", "packet": "capture", "packets": "capture",
+        "wireshark": "capture", "pcap": "capture", "sniff": "capture",
         "report": "report", "export": "report", "pdf": "report", "save": "report",
         "about": "about", "version": "about", "info": "about",
     }
@@ -386,6 +456,7 @@ class MainWindow(QMainWindow):
         "reverse dns": "dns_tools", "dns lookup": "dns_tools",
         "traceroute": "dns_tools",
         "speed test": "speedtest",
+        "packet capture": "capture",
         "save report": "report", "report": "report",
         "about": "about",
     }
@@ -413,6 +484,9 @@ class MainWindow(QMainWindow):
         ("dns_tools", "DNS Tools", "DNS, reverse DNS, traceroute",
          ["dns", "traceroute", "tracert", "trace", "route", "lookup",
           "reverse", "resolve", "nslookup", "hops"]),
+        ("capture", "Packet Capture", "Capture and inspect packets",
+         ["capture", "packet", "packets", "wireshark", "sniff", "pcap", "traffic",
+          "filter", "tls", "protocol"]),
         ("speedtest", "Speed Test", "Measure bandwidth",
          ["speed", "speedtest", "bandwidth", "download", "upload", "mbps"]),
         ("report", "Save Report", "Export a PDF report",
@@ -598,7 +672,14 @@ class MainWindow(QMainWindow):
             self._overlay.raise_()
 
     def goto(self, key: str) -> None:
-        """Navigate to a page and update the sidebar selection."""
+        """Navigate to a page and update the sidebar selection.
+        "filter:<expr>" opens Packet Capture with that display filter applied."""
+        if key.startswith("filter:"):
+            page = self._pages.get("capture")
+            self.goto("capture")
+            if page is not None:
+                page.set_filter(key[7:])
+            return
         if key in self._pages:
             self.sidebar.set_active(key)
             self._navigate(key)
@@ -633,6 +714,8 @@ class MainWindow(QMainWindow):
         dash = self._pages.get("dashboard")
         if dash is not None and hasattr(dash, "shutdown"):
             dash.shutdown()
+        from core.capture import get_capture_service
+        get_capture_service().stop()
         if self._current_key is not None:
             self._pages[self._current_key].on_leave()
         super().closeEvent(event)
