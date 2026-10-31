@@ -1,5 +1,6 @@
 import os
 import queue
+from collections import deque
 from queue import Queue
 import time
 from datetime import datetime
@@ -8,7 +9,7 @@ import requests
 import json
 from requests import Session
 import threading
-from threading import Thread
+from threading import Thread, Barrier
 from pathlib import Path
 from core import find_server
 
@@ -219,113 +220,137 @@ def download_speed_test(url: str, speed_time: float) -> dict[str,float | int]:
 
 # This function is used just for yelding the sent bytes to the UI
 def send_chunks(random_data: bytes, worker_queue: "Queue[dict[str,float | int]]") -> bytes:
-    chunk_size: int = 65536
+    chunk_size: int = 16384
     pending_bytes: int = 0
 
     for offset in range(0, len(random_data), chunk_size):
-        chunk = random_data[offset:offset+chunk_size]
-        chunk_length = len(chunk)
+        chunk = memoryview(random_data)[offset:offset+chunk_size]
+        
+        yield chunk
 
-        pending_bytes += chunk_length 
+        pending_bytes += len(chunk) 
         # Used to reduce the amount of worker_queue items
         if pending_bytes >= 1024 * 1024:
             worker_queue.put({"type": "answer", "bytes_sent": pending_bytes})
             pending_bytes = 0
-        
-        yield chunk
+    # Just to ensure that every chunk is sent
+    if pending_bytes:
+        worker_queue.put({"type": "answer", "bytes_sent": pending_bytes})
 
 
 # This function is used as a thread that returns some data to the main upload_speed_test
-def upload_worker(worker_queue: "Queue[dict[str,float | int]]", url: str, speed_time: int, bytes_per_request: int) -> None:
-    session: Session = requests.Session()
-    # Make this generate random data every time a request is sent
-    random_data: bytes = os.urandom(bytes_per_request)
+def upload_worker(worker_queue: "Queue[dict[str,float | int]]", url: str, bytes_per_request: int, start_barrier: Barrier, measurement: dict) -> None:
     bytes_sent: int = 0
-    start_time: float = time.monotonic()    
+    session: Session = None
+    ready: bool = False
+    try:
+        session = requests.Session()
+        # Make this generate random data every time a request is sent
+        random_data: bytes = os.urandom(bytes_per_request)
+    
+        # Wait for all workers
+        start_barrier.wait(timeout=30)
+        ready = True
 
-    while time.monotonic() - start_time < speed_time:
-        with session.post(url=url, data=send_chunks(random_data, worker_queue)) as response:
-            #print(response.status_code, bytes_sent)
-            try:
+        deadline: float = measurement["deadline"]
+
+        while time.monotonic() < deadline:
+            with session.post(url=url, data=send_chunks(random_data, worker_queue), timeout=(5,10)) as response:
+                #print(response.status_code, bytes_sent)
                 response.raise_for_status()
-                bytes_sent += len(random_data) 
-            except:
-                # If a server doesn't want to receive data anymore, just end the test
-                worker_queue.put({"type": "finish", "elapsed_time": elapsed_time, "bytes_sent": bytes_sent})
+                bytes_sent += len(random_data)
+    except threading.BrokenBarrierError:
+        worker.put({"type": "error", "message": "Upload workers failed to synchronize"})
+    
+    except Exception as ex:
+        if not ready:
+            start_barrier.abort()
+        worker_queue.put({"type": "error", "message": f"{type(exc).__name__}: {exc}" })
+    
+    finally:
+        if session is not None:
+            session.close()
+        worker_queue.put({"type": "finish", "bytes_sent": bytes_sent, "finished_at": time.monotonic() })
             
-    elapsed_time: float = time.monotonic() - start_time
-    worker_queue.put({"type": "finish", "elapsed_time": elapsed_time, "bytes_sent": bytes_sent})
-
 # This function starts all workers and gets the average of all of them to calculate the upload speed
 def upload_speed_test(url: str, speed_time: int) -> dict[str,float | int]:
-    total_bytes: int = 0
-    total_elapsed_time: float = 0
-    avg_elapsed_time: float = 0 
-    
     worker_queue = queue.Queue()
     ul_workers: list[Thread] = []
     # I need to probe the the network in order to test how big request the worker can send
     bytes_per_request: int = probe_network_ul(url=url)
-    for i in range(worker_amount):
-        ul_worker: Thread = threading.Thread(target=upload_worker, args=(worker_queue, url, speed_time, bytes_per_request))
+    
+    measurement: dict = {}
+    def begin_measurement():
+        measurement["start"] = time.monotonic()
+        measurement["deadline"] = measurement["start"] + speed_time
+    # Used in order to start all workers at the same time
+    start_barrier = threading.Barrier(worker_amount+1, action=begin_measurement)
+
+    for _ in range(worker_amount):
+        ul_worker: Thread = threading.Thread(target=upload_worker, args=(worker_queue, url, bytes_per_request, start_barrier, measurement))
         ul_worker.start()
         ul_workers.append(ul_worker)
-    requests_time: float = time.monotonic()
+    
+    try:
+        start_barrier.wait(timeout=30)
+    except threading.BrokenBarrierError:
+        for ul_worker in ul_workers:
+            ul_worker.join()
+
+        raise RuntimeError("Failed to initialize upload workers")
+
+    measurement_start = measurement["start"]
     
     finished_workers: int = 0
-    """ This variable is used for tracking how many requests have been successfully sent and is used for
-    determining when to send a signal to the UI """
-    sent_request_amount: int = 0
-    # These 2 variables are basically used for calculating the value that the singla will receive
-    sent_request_bytes_sent: int = 0
+    sent_bytes: int = 0
+    progress_bytes: int = 0
+    errors = []
+    last_finish_time = measurement_start
+
+    samples = deque([(measurement_start, 0)])
+    window_seconds = 1.0
+    update_interval = 0.2
+    next_update = measurement_start + update_interval
     
-    previous_smoothed_speed: float = -1
-    smooth_responsiveness: float = 0.1
-    while True:
-        ul_worker_res =  worker_queue.get()
-        match ul_worker_res["type"]:
-            case "finish":
+    while finished_workers < worker_amount:
+        now = time.monotonic()
+        wait_time = max(0.0, next_update - now)
+
+        try:
+            event = worker_queue.get(timeout=wait_time)
+            if event["type"] == "answer":
+                progress_bytes += event["bytes_sent"]
+            elif event["type"] == "finish":
                 finished_workers += 1
-                total_elapsed_time += ul_worker_res["elapsed_time"]
-                total_bytes += ul_worker_res["bytes_sent"]
-                
-                #print(f"total_elapsed_time: {total_elapsed_time}, total_bytes: {total_bytes}")
-            case "answer":
-                # This is just converted to a format that the UI can understand
-                sent_request_bytes_sent += ul_worker_res["bytes_sent"]
-                sent_request_amount += 1
-        if sent_request_amount == 10:
-            """I need to divide the elapsed time by worker_amount, to be honest I don't know why
-            but that gives the closest calculations to the actual result (probably needs changing, but it works for now) """
-            mbps_to_send = calculate_speed_in_Mbps(sent_request_bytes_sent, time.monotonic() - requests_time) 
-            #print(f"mbps to send: {mbps_to_send}, sent_request_bytes_sent: {sent_request_bytes_sent}")
-            if previous_smoothed_speed == -1:
-                previous_smoothed_speed = mbps_to_send
+                sent_bytes += event["bytes_sent"]
+                last_finish_time = max(last_finish_time, event["finished_at"])
+            elif event["type"] == "error":
+                errors.append(event["message"])
+        except queue.Empty:
+            pass
+        
+        now = time.monotonic()
+        if now >= next_update:
+            samples.append((now, progress_bytes))
+
+            while (len(samples) > 1 and now - samples[1][0] >= window_seconds):
+                samples.popleft()
+            oldest_time, oldest_bytes = samples[0]
+            elapsed = now - oldest_time
+
+            mbps = calculate_speed_in_Mbps(progress_bytes - oldest_bytes, elapsed) if elapsed > 0 else 0.0
             
-            """ The upload tester usese the exponential moving average formula for smoothening
-            the upload speed in the UI, it's not perfect, but it will work for now """
-            smoothed_speed: float = smooth_responsiveness * mbps_to_send + (1 - smooth_responsiveness) * previous_smoothed_speed 
-            
-            previous_smoothed_speed = smoothed_speed
-            yield {"type": "upload", "mbps": round(smoothed_speed,2) } 
+            yield { "type": "upload", "mbps": round(mbps, 2) }
 
-            sent_request_amount = 0
-            sent_request_bytes_sent = 0
-            requests_time = time.monotonic()
-        # I don't know how it could be higher than worker_amount, but I just want to be safe
-        if finished_workers >= worker_amount: break
+            next_update = now + update_interval
+    for ul_worker in ul_workers:
+        ul_worker.join()
+    if errors:
+        raise RuntimeError(f"Upload test failed: {errors};")
 
+    measurement_time = last_finish_time - measurement_start
 
-    for worker in ul_workers:
-        worker.join()
-    
-    # I need to calculate the average elapsed time, because I can't guarantee that
-    # a worker is going to be exactly 15 seconds, so in order to get the most precise
-    # measurement I can, I need to get the average of them all
-    avg_elapsed_time = total_elapsed_time / worker_amount
-
-    #print(f"avg_elapsed_time: {avg_elapsed_time}, total_bytes sent: {total_bytes}" )
-    return {"type": "finish", "elapsed_time": avg_elapsed_time, "total_bytes": total_bytes}
+    return {"type": "finish", "elapsed_time": measurement_time, "total_bytes": sent_bytes}
 
 def ping_test(url: str) -> float:
     session: Session = requests.Session()
